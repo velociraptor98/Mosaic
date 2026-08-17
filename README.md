@@ -8,24 +8,36 @@ import step to lose data in.
 Implements the nine workflows in `Phaser Editor Workflows.html`, styled to the
 tokens in that document and branded per `Mosaic Logo.html`.
 
+Mosaic is a **desktop app**. It opens a project *folder*, treats the scene
+files in it as the source of truth, watches them for edits made elsewhere, and
+shows git status per file. The same renderer also builds for the browser, as a
+zero-install demo with no folder access.
+
 ## Run it
 
 ```
 npm install
-npm run dev      # editor at the printed URL
-npm run smoke    # headless pass over every workflow's logic (64 checks)
-npm run build    # static production build in dist/
+
+npm run dev:app     # the desktop app (Electron + Vite dev server)
+npm run dev         # the browser demo at the printed URL
+
+npm run smoke:all   # both test suites
+npm run smoke       # headless pass over the editor's logic (72 checks)
+npm run smoke:app   # boots the real shell against a real folder (20 checks)
+
+npm run build:app   # renderer + main/preload bundles
 npm run lint
 ```
 
 ## The nine workflows, and where they live
 
-### 1. Project & scenes — `store/project.ts`, `store/templates.ts`, `commands.ts`
-The editor opens a *project*, not a file. The Project tab lists every scene,
-prefab, asset and animation, with a modified marker per scene. New scenes come
-from templates (Empty / Platformer / Top-down) that write a runnable scene —
-camera, tile layer, a player with a body. Keys are derived and collision-free
-before write.
+### 1. Project & scenes — `project/workspace.ts`, `project/serialize.ts`, `store/project.ts`
+The editor opens a *folder*, not a file — `readProject(dir)` parses
+`phaser.editor.json`, and chokidar watches the tree and re-reads on change. The
+Project tab lists every scene, prefab, asset and animation, with an unsaved
+marker and **the git status of each**. New scenes come from templates (Empty /
+Platformer / Top-down) that write a runnable scene — camera, tile layer, a
+player with a body. Keys are derived and collision-free before write.
 
 Switching scenes keeps each scene's **selection, camera and undo stack** alive:
 `ProjectStore.views` and `ProjectStore.stacks` are keyed by scene.
@@ -140,6 +152,54 @@ Watch re-emits on every change so a running dev server stays in step.
 Export changes nothing in the scene: the editor and the generated code read the
 same `scene.json`.
 
+## Desktop vs browser
+
+One renderer, two targets, with a single seam between them: `src/editor/platform`.
+
+| | Desktop (Electron) | Browser |
+|---|---|---|
+| Project | a folder on disk | localStorage |
+| Assets | files, served over `mosaic://` | inlined data: URLs |
+| Saving | debounced write into the folder | debounced write to localStorage |
+| External edits | watched (chokidar), reloaded | n/a |
+| Git status | per file in the Project panel | n/a |
+| Export | straight into the project | File System Access API, else download |
+| Storage ceiling | none | ~5MB, warned about in the status bar |
+
+`platform.canOpenProjects` is the flag every folder-aware feature checks.
+Nothing above that seam — the store, the canvas, any panel — knows which
+target it is running on.
+
+### How the desktop build is put together
+
+```
+electron/
+  main.ts        window + app lifecycle; registers the asset protocol and IPC
+  preload.ts     the ONLY bridge: contextBridge -> window.mosaic
+  contract.ts    channel names + payload types, shared by main and renderer
+  ipc.ts         fs, native dialogs, chokidar watcher, git status
+  assets.ts      mosaic:// protocol serving files out of the project folder
+  smoke.ts       the desktop end-to-end suite
+```
+
+`contextIsolation` is on and `nodeIntegration` is off; the renderer never sees
+Node. Every path crossing IPC — and every URL the asset protocol serves — is
+resolved against the project root and refused if it escapes, which the desktop
+suite asserts with an encoded traversal.
+
+Assets are served over `mosaic://asset/<root>/<path>` rather than inlined.
+That is what removes the storage ceiling: a 4MB spritesheet stays a file and is
+streamed, where the browser build has to carry its bytes inside the project
+JSON.
+
+### Saving, watching, and not clobbering
+
+Edits persist into the folder on a 400ms debounce. Because a save fires the
+same watcher events an external edit does, the echo is filtered **by comparing
+content**, not by a time window — a window races any edit made shortly after a
+save and swallows it silently. If a file changes on disk while the scene has
+unsaved edits, Mosaic says so instead of overwriting either side.
+
 ## Design
 
 The UI follows the design tokens in `Phaser Editor Workflows.html`. `src/tokens.css`
@@ -216,6 +276,9 @@ src/
   styles.css       editor chrome built from them
 
   editor/
+    platform/       the desktop/browser seam: types.ts, electron.ts, browser.ts
+    project/        serialize.ts (folder <-> ProjectData), workspace.ts
+                    (opening, saving, watching, git)
     store/          project.ts (state + slice-based undo), undo.ts,
                     templates.ts, ids.ts
     phaser/         EditorScene.ts (tools, snapping, handles, body editing),

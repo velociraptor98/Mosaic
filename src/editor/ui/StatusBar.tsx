@@ -1,12 +1,15 @@
 import { useRef } from "react";
 import type { ProjectData } from "../../shared/types";
 import { downloadText } from "../export/write";
-import { useEditor, useStoreVersion } from "./context";
+import { platform } from "../platform";
+import { useEditor, useStoreVersion, useWorkspace } from "./context";
 
 export function StatusBar() {
-  const { store } = useEditor();
+  const { store, workspace } = useEditor();
   useStoreVersion(store);
+  useWorkspace(workspace);
   const fileRef = useRef<HTMLInputElement>(null);
+  const desktop = platform.canOpenProjects;
 
   const stack = store.stack();
   const errors = store.validate().filter((i) => i.level === "error").length;
@@ -25,18 +28,41 @@ export function StatusBar() {
         undo {stack.depth}
         {store.isDirty(store.activeSceneKey) ? " · modified" : ""}
       </span>
-      <button
-        className="mini"
-        onClick={() => downloadText(`${store.project.name.replace(/\s+/g, "-").toLowerCase()}.project.json`, JSON.stringify(store.project, null, 2))}
-      >
-        Save project
-      </button>
-      <button className="mini" onClick={() => fileRef.current?.click()}>
-        Open project
-      </button>
-      <button className="mini danger" onClick={() => store.resetProject()}>
-        Reset
-      </button>
+      {desktop ? (
+        <>
+          <span title={workspace.location?.root}>
+            {workspace.saving
+              ? "saving…"
+              : workspace.lastSavedAt
+                ? `saved ${new Date(workspace.lastSavedAt).toLocaleTimeString()}`
+                : "not saved yet"}
+          </span>
+          <button className="mini" onClick={() => void workspace.saveNow()}>
+            Save now
+          </button>
+          <button className="mini" onClick={() => void workspace.reload()}>
+            Reload
+          </button>
+          <button className="mini" onClick={() => workspace.close()}>
+            Close project
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            className="mini"
+            onClick={() => downloadText(`${store.project.name.replace(/\s+/g, "-").toLowerCase()}.project.json`, JSON.stringify(store.project, null, 2))}
+          >
+            Save project
+          </button>
+          <button className="mini" onClick={() => fileRef.current?.click()}>
+            Open project
+          </button>
+          <button className="mini danger" onClick={() => store.resetProject()}>
+            Reset
+          </button>
+        </>
+      )}
       <input
         ref={fileRef}
         type="file"

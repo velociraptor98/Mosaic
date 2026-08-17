@@ -1,3 +1,4 @@
+import { platform } from "../platform";
 import { hasUnmarkedEdits, mergeKeepRegions } from "./keep";
 import type { GeneratedFile } from "./generate";
 
@@ -36,12 +37,28 @@ type FileHandle = {
 
 let rootHandle: DirHandle | null = null;
 
+/**
+ * On desktop the project already has a real folder, so export writes straight
+ * into it — no picker, no permission prompt. Set by the Workspace on open.
+ */
+let projectRoot: string | null = null;
+
+export function setProjectRoot(root: string | null): void {
+  projectRoot = root;
+}
+
 export function canWriteToDisk(): boolean {
+  if (projectRoot) return true;
   return typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === "function";
 }
 
+/** True when writes need no further permission from the user. */
+export function writesGoToProject(): boolean {
+  return projectRoot !== null;
+}
+
 export function connectedFolder(): string | null {
-  return rootHandle?.name ?? null;
+  return projectRoot ?? rootHandle?.name ?? null;
 }
 
 export async function chooseFolder(): Promise<string | null> {
@@ -79,6 +96,7 @@ function rememberWrites(files: { path: string; contents: string }[]): void {
 }
 
 async function readExisting(path: string): Promise<string | null> {
+  if (projectRoot) return platform.readText(projectRoot, path);
   if (!rootHandle) return lastWrites()[path] ?? null;
   const parts = path.split("/");
   const name = parts.pop()!;
@@ -135,7 +153,7 @@ export async function writeFiles(
     written: [],
     skipped: [],
     refused: [],
-    mode: rootHandle ? "disk" : "download",
+    mode: projectRoot || rootHandle ? "disk" : "download",
   };
 
   const toWrite: FileDiff[] = [];
@@ -151,7 +169,16 @@ export async function writeFiles(
     toWrite.push(diff);
   }
 
-  if (rootHandle) {
+  if (projectRoot) {
+    const outcome = await platform.writeFiles(
+      projectRoot,
+      toWrite.map((d) => ({ rel: d.path, contents: d.contents })),
+    );
+    result.written.push(...outcome.written);
+    for (const failure of outcome.failed) {
+      result.refused.push(`${failure.rel} (${failure.error})`);
+    }
+  } else if (rootHandle) {
     for (const diff of toWrite) {
       const parts = diff.path.split("/");
       const name = parts.pop()!;

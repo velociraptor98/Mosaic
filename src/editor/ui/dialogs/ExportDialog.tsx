@@ -7,6 +7,7 @@ import {
   diffFiles,
   downloadText,
   writeFiles,
+  writesGoToProject,
   type FileDiff,
   type WriteResult,
 } from "../../export/write";
@@ -109,7 +110,7 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           <button className="ghost" onClick={onClose}>
             Close
           </button>
-          {canWriteToDisk() && (
+          {canWriteToDisk() && !writesGoToProject() && (
             <button
               className="ghost"
               onClick={async () => setFolder(await chooseFolder())}
@@ -139,11 +140,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {!canWriteToDisk() && (
+      {writesGoToProject() ? (
         <div className="banner">
-          This browser has no File System Access API, so Write downloads the files instead of
-          writing them into the source tree.
+          Writing straight into the open project at <code>{folder}</code> — no picker, no
+          permission prompt.
         </div>
+      ) : (
+        !canWriteToDisk() && (
+          <div className="banner">
+            This browser has no File System Access API, so Write downloads the files instead of
+            writing them into the source tree.
+          </div>
+        )
       )}
 
       <div className="export-layout">

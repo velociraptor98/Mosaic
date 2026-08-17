@@ -2,7 +2,9 @@ import { useState } from "react";
 import { childrenOf } from "../../shared/transform";
 import type { LeftTab } from "../store/project";
 import type { SceneObject, TileLayer } from "../../shared/types";
-import { useEditor, useStoreVersion } from "./context";
+import { platform } from "../platform";
+import { MANIFEST_PATH, scenePath } from "../project/serialize";
+import { useEditor, useStoreVersion, useWorkspace } from "./context";
 
 const TABS: { id: LeftTab; label: string }[] = [
   { id: "project", label: "Project" },
@@ -40,17 +42,50 @@ export function LeftDock() {
  * The editor opens a folder, not a file: every scene, prefab and asset the
  * manifest declares is listed here, with a modified marker per scene.
  */
+/** Porcelain codes, shortened to a badge the tree has room for. */
+function GitBadge({ code }: { code: string | undefined }) {
+  if (!code) return null;
+  const label = code === "??" ? "new" : code.replace(/\s+/g, "");
+  const kind = code === "??" ? "untracked" : code.includes("M") ? "modified" : "staged";
+  return (
+    <span className={`git-badge ${kind}`} title={`git status: ${code}`}>
+      {label}
+    </span>
+  );
+}
+
 function ProjectTree() {
-  const { store, openDialog } = useEditor();
+  const { store, workspace, openDialog } = useEditor();
+  useWorkspace(workspace);
+  const git = workspace.git;
 
   return (
     <div className="tree">
       <div className="tree-heading">
         <span>{store.project.name}</span>
-        <button className="mini" onClick={() => openDialog("newscene")}>
-          + scene
-        </button>
+        <span>
+          {workspace.isOpen && (
+            <button className="mini" title="Reveal in file manager" onClick={() => workspace.reveal()}>
+              ↗
+            </button>
+          )}
+          <button className="mini" onClick={() => openDialog("newscene")}>
+            + scene
+          </button>
+        </span>
       </div>
+
+      {workspace.isOpen && (
+        <div className="project-root" title={workspace.location!.root}>
+          {workspace.location!.root}
+        </div>
+      )}
+
+      {workspace.issues.length > 0 && (
+        <div className="banner warn">
+          {workspace.issues.length} issue(s) reading this folder: {workspace.issues[0]}
+        </div>
+      )}
 
       <div className="tree-group">src/scenes</div>
       {store.project.scenes.map((scene) => (
@@ -62,7 +97,8 @@ function ProjectTree() {
           >
             <span className="glyph">◇</span>
             {scene.key}.scene.json
-            {store.isDirty(scene.key) && <span className="dot" title="modified" />}
+            {store.isDirty(scene.key) && <span className="dot" title="unsaved" />}
+            <GitBadge code={git[scenePath(scene.key)]} />
           </button>
           {store.project.scenes.length > 1 && (
             <button
@@ -75,6 +111,12 @@ function ProjectTree() {
           )}
         </div>
       ))}
+
+      {platform.canGit && (
+        <div className="tree-group">
+          manifest <GitBadge code={git[MANIFEST_PATH]} />
+        </div>
+      )}
 
       <div className="tree-group">prefabs</div>
       {store.project.prefabs.length === 0 && <div className="empty">No prefabs yet.</div>}
@@ -105,6 +147,7 @@ function ProjectTree() {
         >
           <span className="glyph">▤</span>
           {asset.path.replace(/^assets\//, "")}
+          <GitBadge code={git[asset.path]} />
           <span className="meta">{asset.kind}</span>
         </button>
       ))}

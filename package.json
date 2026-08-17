@@ -8,7 +8,13 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "smoke": "vite build --config scripts/smoke.vite.config.ts && node node_modules/.smoke/smoke.js"
+    "smoke": "vite build --config scripts/smoke.vite.config.ts && node node_modules/.smoke/smoke.js",
+    "dev:app": "node scripts/dev-electron.mjs",
+    "build:main": "vite build --config electron/vite.config.ts && vite build --config electron/vite.preload.config.ts",
+    "build:app": "npm run build && npm run build:main",
+    "start:app": "npm run build:app && electron .",
+    "smoke:app": "npm run build:app && MOSAIC_SMOKE=1 electron .",
+    "smoke:all": "npm run smoke && npm run smoke:app"
   },
   "dependencies": {
     "phaser": "^4.2.1",
@@ -20,9 +26,12 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "chokidar": "^5.0.0",
+    "electron": "^43.4.0",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"
   },
-  "description": "Mosaic \u2014 a scene editor for Phaser"
+  "description": "Mosaic \u2014 a scene editor for Phaser",
+  "main": "dist-electron/main.mjs"
 }

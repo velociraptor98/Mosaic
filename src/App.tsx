@@ -3,9 +3,12 @@ import { EditorBridge } from "./editor/bridge";
 import { buildCommands, stopAndPrompt, type DialogName } from "./editor/commands";
 import { PhaserHost } from "./editor/phaser/PhaserHost";
 import { Playtest } from "./editor/phaser/playtest";
+import { platform } from "./editor/platform";
+import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
 import { BottomDock } from "./editor/ui/BottomDock";
-import { EditorContext } from "./editor/ui/context";
+import { EditorContext, useWorkspace } from "./editor/ui/context";
+import { Launcher } from "./editor/ui/Launcher";
 import { Inspector } from "./editor/ui/Inspector";
 import { LeftDock } from "./editor/ui/LeftDock";
 import { MenuBar } from "./editor/ui/MenuBar";
@@ -23,13 +26,22 @@ import { PromoteDialog } from "./editor/ui/dialogs/PromoteDialog";
 const store = new ProjectStore();
 const bridge = new EditorBridge();
 const playtest = new Playtest(store, bridge);
+const workspace = new Workspace(store);
+
+// A debug handle for the desktop end-to-end test and for poking at state in
+// devtools. Intentionally read-write: this is an editor, not a sandbox.
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).mosaicDebug = { store, workspace, platform };
+}
 
 export default function App() {
   const [dialog, setDialog] = useState<DialogName>(null);
   const openDialog = useCallback((name: DialogName) => setDialog(name), []);
 
+  const workspaceRevision = useWorkspace(workspace);
+
   const ctx = useMemo(
-    () => ({ store, bridge, playtest, dialog, openDialog }),
+    () => ({ store, bridge, playtest, workspace, dialog, openDialog }),
     [dialog, openDialog],
   );
 
@@ -44,6 +56,19 @@ export default function App() {
 
   useKeyboardShortcuts(ctx);
 
+  // Mosaic works on a folder: on desktop there is no editor to show until one
+  // is open. The browser build has no folders, so it goes straight in.
+  const needsProject = platform.canOpenProjects && !workspace.isOpen;
+  void workspaceRevision;
+
+  if (needsProject) {
+    return (
+      <EditorContext.Provider value={ctx}>
+        <Launcher workspace={workspace} />
+      </EditorContext.Provider>
+    );
+  }
+
   return (
     <EditorContext.Provider value={ctx}>
       <div className="app">
@@ -54,7 +79,7 @@ export default function App() {
             <Toolbar />
             {/* Registration marks: the reference brackets its blueprint
                 frames this way, and the canvas is the one real drawing here. */}
-            <div className="canvas-frame">
+            <div className="canvas-frame blueprint">
               <i className="corner tl" />
               <i className="corner tr" />
               <i className="corner bl" />
@@ -88,6 +113,7 @@ export default function App() {
 function useKeyboardShortcuts(ctx: {
   store: ProjectStore;
   playtest: Playtest;
+  workspace: Workspace;
   openDialog: (name: DialogName) => void;
 }) {
   useEffect(() => {
@@ -125,7 +151,13 @@ function useKeyboardShortcuts(ctx: {
           case "g":
             return run("edit.group");
           case "n":
-            return run("scene.new");
+            return run(e.shiftKey ? "project.new" : "scene.new");
+          case "o":
+            return run("project.open");
+          case "s":
+            return run("project.save");
+          case "w":
+            return run("project.close");
           case "e":
             return run("scene.export");
           case "i":

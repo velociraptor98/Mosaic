@@ -480,16 +480,13 @@ kbd {
 /* The canvas sits on the reference's 2% mat, bracketed by registration
    marks — the .blueprint/.corner treatment, applied to the one element that
    is genuinely a drawing. */
-.canvas-frame {
+/* Registration marks, as the reference defines them on .blueprint. */
+.blueprint {
   position: relative;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--wash-1);
   border: 1px solid var(--color-divider);
-  margin: var(--space-3);
 }
 
-.canvas-frame .corner {
+.blueprint > .corner {
   position: absolute;
   width: 11px;
   height: 11px;
@@ -498,45 +495,54 @@ kbd {
   pointer-events: none;
 }
 
-.canvas-frame .corner::before,
-.canvas-frame .corner::after {
+.blueprint > .corner::before,
+.blueprint > .corner::after {
   content: "";
   position: absolute;
   background: currentColor;
 }
 
-.canvas-frame .corner::before {
+.blueprint > .corner::before {
   left: 5px;
   top: 0;
   width: 1px;
   height: 100%;
 }
 
-.canvas-frame .corner::after {
+.blueprint > .corner::after {
   top: 5px;
   left: 0;
   width: 100%;
   height: 1px;
 }
 
-.canvas-frame .corner.tl {
+.blueprint > .corner.tl {
   top: -6px;
   left: -6px;
 }
 
-.canvas-frame .corner.tr {
+.blueprint > .corner.tr {
   top: -6px;
   right: -6px;
 }
 
-.canvas-frame .corner.bl {
+.blueprint > .corner.bl {
   bottom: -6px;
   left: -6px;
 }
 
-.canvas-frame .corner.br {
+.blueprint > .corner.br {
   bottom: -6px;
   right: -6px;
+}
+
+.canvas-frame {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--wash-1);
+  border: 1px solid var(--color-divider);
+  margin: var(--space-3);
 }
 
 .phaser-host,
@@ -1743,6 +1749,131 @@ kbd {
 
 .export-file .path {
   max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* -------------------------------------------------------------- launcher */
+
+.launcher {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  padding: var(--space-8);
+  background: var(--wash-1);
+  overflow: auto;
+}
+
+.launcher-panel {
+  width: min(560px, 100%);
+  background: var(--color-bg);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.launcher-head {
+  margin-bottom: var(--space-4);
+}
+
+.launcher-actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.launcher-actions button {
+  padding: var(--space-3) var(--space-6);
+  font-size: 14px;
+}
+
+.recents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.recents li {
+  display: flex;
+  align-items: center;
+}
+
+.recent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  text-align: left;
+  padding: var(--space-2);
+  border-left: 2px solid transparent;
+  min-width: 0;
+}
+
+.recent:hover {
+  background: var(--wash-3);
+  border-left-color: var(--color-accent);
+}
+
+.recent-name {
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.recent-path {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* Git status badges in the Project tree (desktop only — the browser build has
+   no repo to ask). */
+.git-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 4px;
+  margin-left: var(--space-1);
+  border: 1px solid var(--color-divider);
+  color: var(--text-dim);
+  flex: none;
+}
+
+.git-badge.modified {
+  border-color: var(--color-caution);
+  color: var(--color-caution-800);
+}
+
+.git-badge.untracked {
+  border-color: var(--color-accent);
+  color: var(--color-accent-800);
+}
+
+.git-badge.staged {
+  border-color: var(--color-accent-2);
+  color: var(--color-accent-2-700);
+}
+
+.project-root {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 0 var(--space-1) var(--space-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

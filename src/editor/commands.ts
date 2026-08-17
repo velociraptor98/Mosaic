@@ -1,3 +1,5 @@
+import { platform } from "./platform";
+import type { Workspace } from "./project/workspace";
 import type { ProjectStore } from "./store/project";
 import type { Playtest } from "./phaser/playtest";
 
@@ -15,6 +17,7 @@ export type DialogName =
 export interface CommandContext {
   store: ProjectStore;
   playtest: Playtest;
+  workspace: Workspace;
   openDialog: (name: DialogName) => void;
 }
 
@@ -43,8 +46,22 @@ const mod = navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl";
  * declares its own undo behaviour by going through the store.
  */
 export function buildCommands(ctx: CommandContext): Command[] {
-  const { store, playtest, openDialog } = ctx;
+  const { store, playtest, workspace, openDialog } = ctx;
+
+  const projectCommands: Command[] = platform.canOpenProjects
+    ? [
+        { id: "project.open", title: "Open project folder…", category: "Project", binding: `${mod}O`, run: () => void workspace.pickAndOpen() },
+        { id: "project.new", title: "New project folder…", category: "Project", binding: `${mod}⇧N`, run: () => void workspace.createAndOpen() },
+        { id: "project.save", title: "Save project to disk", category: "Project", binding: `${mod}S`, run: () => void workspace.saveNow() },
+        { id: "project.reload", title: "Reload project from disk", category: "Project", run: () => void workspace.reload() },
+        { id: "project.close", title: "Close project", category: "Project", binding: `${mod}W`, run: () => workspace.close() },
+        { id: "project.reveal", title: "Reveal project in file manager", category: "Project", run: () => workspace.reveal() },
+        { id: "project.git", title: "Refresh git status", category: "Project", run: () => void workspace.refreshGit() },
+      ]
+    : [];
+
   return [
+    ...projectCommands,
     { id: "palette.open", title: "Open command palette", category: "General", binding: `${mod}K`, run: () => openDialog("palette") },
     { id: "scene.new", title: "New scene…", category: "Scene", binding: `${mod}N`, run: () => openDialog("newscene") },
     { id: "scene.export", title: "Export scene…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },

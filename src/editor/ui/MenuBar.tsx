@@ -8,7 +8,7 @@ import { useEditor, useStoreVersion } from "./context";
  * PAUSE freezes the loop and STEP advances exactly one update.
  */
 export function MenuBar() {
-  const { store, bridge, playtest, openDialog } = useEditor();
+  const { store, bridge, playtest, workspace, openDialog } = useEditor();
   useStoreVersion(store);
   const [transport, setTransport] = useState({ playing: false, paused: false, frame: 0 });
 
@@ -90,7 +90,7 @@ export function MenuBar() {
             </button>
             <button
               className="stop"
-              onClick={() => stopAndPrompt({ store, playtest, openDialog })}
+              onClick={() => stopAndPrompt({ store, playtest, workspace, openDialog })}
               title="Stop and restore the snapshot"
             >
               ■ STOP

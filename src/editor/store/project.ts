@@ -98,6 +98,12 @@ export class ProjectStore {
   private strokeLabel = "";
   private txDepth = 0;
   private persistTimer: number | null = null;
+  /**
+   * Where persistence goes. The browser build leaves this null and falls back
+   * to localStorage; the desktop build points it at the project folder, which
+   * is why a desktop project has no storage ceiling.
+   */
+  private persister: ((project: ProjectData) => void) | null = null;
   version = 0;
   storageWarning: string | null = null;
 
@@ -1050,11 +1056,21 @@ export class ProjectStore {
     this.loadProject(createStarterProject());
   }
 
+  /** Route persistence somewhere other than localStorage (desktop: to disk). */
+  setPersister(persister: ((project: ProjectData) => void) | null): void {
+    this.persister = persister;
+    this.storageWarning = null;
+  }
+
   private schedulePersist(): void {
     if (typeof window === "undefined") return; // headless (tests, SSR)
     if (this.persistTimer !== null) window.clearTimeout(this.persistTimer);
     this.persistTimer = window.setTimeout(() => {
       this.persistTimer = null;
+      if (this.persister) {
+        this.persister(this.project);
+        return;
+      }
       try {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(this.project));
         this.storageWarning = null;

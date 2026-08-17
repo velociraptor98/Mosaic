@@ -2,6 +2,7 @@ import { collectLoaderManifest } from "../../shared/manifest";
 import { resolveObject } from "../../shared/prefabs";
 import { objectsById, worldTransform } from "../../shared/transform";
 import type { ProjectData, SceneData, SceneObject, TileLayer } from "../../shared/types";
+import { MANIFEST_PATH, toManifest } from "../project/serialize";
 
 export interface GeneratedFile {
   path: string;
@@ -28,9 +29,11 @@ export function generateFiles(
       contents: JSON.stringify(scene, null, 2) + "\n",
       language: "json",
     });
+    // The same manifest the project reader consumes, so an exported folder
+    // can be opened again — export is a round trip, not a one-way dump.
     files.push({
-      path: "phaser.editor.json",
-      contents: JSON.stringify(projectManifest(project), null, 2) + "\n",
+      path: MANIFEST_PATH,
+      contents: JSON.stringify(toManifest(project), null, 2) + "\n",
       language: "json",
     });
   }
@@ -51,19 +54,6 @@ export function generateFiles(
   }
 
   return files;
-}
-
-/** The manifest that ships with the game: no data: URLs, just paths. */
-function projectManifest(project: ProjectData) {
-  return {
-    name: project.name,
-    scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: `src/scenes/${s.key}.scene.json` })),
-    assets: project.assets.map(({ url: _url, ...rest }) => rest),
-    prefabs: project.prefabs,
-    anims: project.anims,
-    groups: project.groups,
-    collision: project.collision,
-  };
 }
 
 function usedPrefabs(project: ProjectData, scene: SceneData): string[] {
