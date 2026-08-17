@@ -1,0 +1,18 @@
+<!-- Reversed lockup on the steel field — the one permitted filled field.
+     Splash screen, app store, dark chrome. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#1d2d3d"/>
+  <g transform="translate(140 140) scale(9.31)" fill="#f2f2f3">
+    <rect x="0" y="0" width="8" height="8"/>
+    <rect x="0" y="9" width="8" height="8"/>
+    <rect x="0" y="18" width="8" height="8"/>
+    <rect x="9" y="0" width="8" height="8"/>
+    <rect x="18" y="0" width="8" height="8"/>
+    <rect x="18" y="9" width="8" height="8"/>
+    <rect x="18" y="18" width="8" height="8"/>
+  </g>
+  <g transform="translate(140 140) scale(9.31)" fill="none" stroke="#f2f2f3" stroke-width="1">
+    <rect x="9.5" y="9.5" width="7" height="7"/>
+    <rect x="9.5" y="18.5" width="7" height="7"/>
+  </g>
+</svg>
