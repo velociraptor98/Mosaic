@@ -9,8 +9,14 @@
  *   npm run smoke
  */
 import { autoDetectFrames, nameFrames, sliceGrid } from "../src/editor/assets/slice";
-import { generateFiles, generateSceneClass } from "../src/editor/export/generate";
+import { generateFiles, generatePrefabClass, generateSceneClass } from "../src/editor/export/generate";
 import { extractKeepRegions, hasUnmarkedEdits, mergeKeepRegions } from "../src/editor/export/keep";
+import {
+  DEFAULT_OPTIONS,
+  isValidNpmName,
+  planScaffold,
+  slugify,
+} from "../src/editor/project/scaffold";
 import { SET_TILES, openTilesFor } from "../src/editor/ui/logoGeometry";
 import { ProjectStore } from "../src/editor/store/project";
 import { defaultBody } from "../src/editor/store/templates";
@@ -307,6 +313,91 @@ group("Workflow 9 — export");
   ok("an edit inside one is not", !hasUnmarkedEdits(edited, code));
 }
 
+// ------------------------------------------------- prefab classes in export
+group("Prefabs become classes the scene actually constructs");
+{
+  store.activateScene("Level_01");
+  // Workflow 5 left the Coin prefab in place, minus the instance it unpacked.
+  const prefabName = "Coin";
+  const instances = store.scene!.objects.filter((o) => o.prefab === prefabName);
+  ok("there are prefab instances to export", instances.length >= 2, String(instances.length));
+
+  // One instance diverges; the rest stay linked.
+  store.setObjectProp(instances[0].id, "data.value", 25);
+
+  const code = generateSceneClass(store.project, store.scene!);
+  ok("instances are constructed through the prefab class",
+     code.includes(`new ${prefabName}(this,`), "no `new` call emitted");
+  ok("the scene imports that class",
+     code.includes(`import { ${prefabName} } from "../prefabs/${prefabName}";`));
+  // Count, rather than pattern-match: workflow 5 unpacked one coin, and that
+  // one SHOULD still be a plain sprite.
+  const constructed = code.split(`new ${prefabName}(this,`).length - 1;
+  ok("every instance is constructed, none left as a plain sprite",
+     constructed === instances.length, `${constructed} of ${instances.length}`);
+
+  const lines = code.split("\n");
+  const blockFor = (varName: string) => {
+    const start = lines.findIndex((l) => l.includes(`const ${varName} = new ${prefabName}(`));
+    if (start === -1) return [];
+    const end = lines.findIndex((l, i) => i > start && l.includes("this.objects["));
+    return lines.slice(start, end + 1);
+  };
+  const overriding = blockFor(
+    lines.find((l) => l.includes(`= new ${prefabName}(`))!.match(/const (\w+) =/)![1],
+  );
+  ok("the overriding instance emits its override", overriding.some((l) => l.includes("setData(\"value\", 25)")),
+     overriding.join(" | "));
+
+  // A linked instance must emit nothing the definition already owns, or the
+  // definition would be baked in and propagation would stop working.
+  const linkedVar = lines
+    .filter((l) => l.includes(`= new ${prefabName}(`))
+    .map((l) => l.match(/const (\w+) =/)![1])[1];
+  const linked = blockFor(linkedVar);
+  ok("a linked instance emits no definition properties",
+     !linked.some((l) => /setData|setTexture|setSize|setOffset|setAllowGravity/.test(l)),
+     linked.join(" | "));
+  ok("but it still gets its own name, depth and position",
+     linked.some((l) => l.includes("setName(")) && linked.some((l) => l.includes("setDepth(")));
+
+  ok("prefab instances still join their collision group",
+     code.includes(`this.physics.add.group([`) && code.includes(linkedVar));
+
+  // Editing the definition must move every linked instance in the OUTPUT too.
+  store.updatePrefab(prefabName, { scaleX: 3 });
+  const scaled = generateSceneClass(store.project, store.scene!);
+  const scaledLinked = scaled
+    .split("\n")
+    .slice(scaled.split("\n").findIndex((l) => l.includes(`const ${linkedVar} = new`)));
+  ok("a definition change is not re-emitted per instance (it lives in the class)",
+     !scaledLinked.slice(0, 4).some((l) => l.includes("setScale(3")),
+     scaledLinked.slice(0, 4).join(" | "));
+  const cls = generatePrefabClass(store.project, prefabName);
+  ok("the class carries the definition's scale instead", cls.includes("this.setScale(3"), cls);
+  store.updatePrefab(prefabName, { scaleX: 1 });
+
+  // Animations: the class must not play before create() registers them.
+  store.upsertAnim({ key: "spin", fps: 8, loop: true, frames: [{ textureKey: "obj-coin", frame: "__BASE" }] });
+  store.updatePrefab(prefabName, { playOnSpawn: "spin" });
+  const withAnim = generateSceneClass(store.project, store.scene!);
+  const animClass = generatePrefabClass(store.project, prefabName);
+  ok("the prefab constructor does not play the animation", !/this\.play\(/.test(animClass));
+  ok("the scene plays it after anims.create",
+     withAnim.lastIndexOf("this.anims.create") < withAnim.indexOf(".play(\"spin\")"));
+  store.updatePrefab(prefabName, { playOnSpawn: undefined });
+
+  // A body-less prefab is not an arcade sprite.
+  const plain = store.scene!.objects.find((o) => !o.prefab && !o.body && o.type !== "container");
+  if (plain) {
+    store.setSelection([plain.id]);
+    store.createPrefab("Marker", [], [plain.id]);
+    const markerCls = generatePrefabClass(store.project, "Marker");
+    ok("a prefab with no body extends GameObjects.Sprite",
+       markerCls.includes("extends Phaser.GameObjects.Sprite"), markerCls.split("\n")[4]);
+  }
+}
+
 // ------------------------------------------------------- cross-scene undo
 group("Undo isolation");
 {
@@ -354,6 +445,95 @@ group("Identity — the mark reproduces Mosaic Logo.html");
   ok("below 16px it is the solid cut (favicon, app icon, menu strip)",
      openTilesFor(15) === null && openTilesFor(14) === null && openTilesFor(13) === null);
   ok("at and above 16px the open tiles are drawn", openTilesFor(16) !== null);
+}
+
+// ----------------------------------------------------- new project scaffold
+group("New project — the scaffold plan");
+{
+  ok("names are slugged for npm", slugify("Sky Ward 2!") === "sky-ward-2", slugify("Sky Ward 2!"));
+  ok("an empty name still yields a usable slug", slugify("  ") === "untitled");
+  ok("a valid npm name is recognised", isValidNpmName("skyward"));
+  ok("a name needing slugging is flagged, not rejected", !isValidNpmName("Sky Ward"));
+
+  const base = { ...DEFAULT_OPTIONS, name: "skyward", location: "/tmp/projects" };
+  const plan = planScaffold(base);
+
+  ok("the plan resolves a root under the location", plan.root === "/tmp/projects/skyward", plan.root);
+  ok("nothing in the plan is written yet — it is data", Array.isArray(plan.files));
+  ok("the review lists skipped files too, so the diff is whole",
+     plan.files.length > plan.writes.length);
+
+  const rels = plan.writes.map((f) => f.rel);
+  for (const required of [
+    "package.json",
+    "mosaic.config.json",
+    "phaser.editor.json",
+    "index.html",
+    "src/main.ts",
+    "src/scenes/Level_01.ts",
+    "src/scenes/Level_01.scene.json",
+    "src/prefabs/Player.ts",
+    "README.md",
+  ]) {
+    ok(`writes ${required}`, rels.includes(required), rels.join(" "));
+  }
+
+  const pkg = JSON.parse(plan.files.find((f) => f.rel === "package.json")!.contents);
+  ok("package.json carries the slug and phaser", pkg.name === "skyward" && !!pkg.dependencies.phaser);
+  ok("vite is a dev dependency when vite is chosen", !!pkg.devDependencies.vite);
+
+  // Options actually change the plan.
+  const js = planScaffold({ ...base, language: "js" });
+  ok("javascript swaps every extension",
+     js.writes.some((f) => f.rel === "src/main.js") && !js.writes.some((f) => f.rel.endsWith("main.ts")));
+
+  const noBundler = planScaffold({ ...base, bundler: "none" });
+  ok("bundler:none skips the vite config",
+     !noBundler.writes.some((f) => f.rel.startsWith("vite.config")),
+     noBundler.writes.map((f) => f.rel).join(" "));
+  ok("and it is still LISTED as skipped, not hidden",
+     noBundler.files.some((f) => f.rel.startsWith("vite.config") && f.skipped));
+
+  const webpack = planScaffold({ ...base, bundler: "webpack" });
+  ok("webpack writes its own config",
+     webpack.writes.some((f) => f.rel.startsWith("webpack.config")));
+
+  const empty = planScaffold({ ...base, template: "empty" });
+  ok("the empty template skips the player prefab",
+     !empty.writes.some((f) => f.rel.startsWith("src/prefabs/")));
+
+  const noArt = planScaffold({ ...base, sampleArt: false });
+  ok("placeholder art is optional",
+     !noArt.writes.some((f) => f.rel.startsWith("assets/")));
+
+  const noGit = planScaffold({ ...base, git: false });
+  ok("gitignore follows the git option", !noGit.writes.some((f) => f.rel === ".gitignore"));
+
+  // Config really drives the generated game, not just the editor.
+  const custom = planScaffold({
+    ...base,
+    config: { canvas: { width: 640, height: 360 }, tile: 16, scale: "ENVELOP", physics: "matter", pixelArt: false },
+  });
+  const main = custom.files.find((f) => f.rel === "src/main.ts")!.contents;
+  ok("canvas size reaches the game config", main.includes("width: 640") && main.includes("height: 360"));
+  ok("scale mode reaches the game config", main.includes("Phaser.Scale.ENVELOP"), main);
+  ok("physics choice reaches the game config", main.includes('default: "matter"'));
+  ok("pixelArt reaches the game config", main.includes("pixelArt: false"));
+  const cfg = JSON.parse(custom.files.find((f) => f.rel === "mosaic.config.json")!.contents);
+  ok("and the same values are written to mosaic.config.json", cfg.tile === 16 && cfg.scale === "ENVELOP");
+
+  const scene = JSON.parse(
+    custom.files.find((f) => f.rel === "src/scenes/Level_01.scene.json")!.contents,
+  );
+  ok("the scene is sized from the config", scene.settings.width === 640 && scene.settings.gridSize === 16);
+  ok("the tile layer is sized from the config",
+     scene.layers.find((l: { kind: string }) => l.kind === "tile").tileWidth === 16);
+
+  ok("templates are runnable — the scene has a layer and an object",
+     plan.project.scenes[0].layers.length > 0 && plan.project.scenes[0].objects.length > 0);
+
+  const art = plan.files.filter((f) => f.encoding === "base64");
+  ok("art is planned as binary, not as text", art.length === 2, String(art.length));
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

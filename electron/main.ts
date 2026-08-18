@@ -27,7 +27,12 @@ function createWindow(): BrowserWindow {
     minHeight: 700,
     backgroundColor: "#f2f2f3",
     title: "Mosaic",
+    // The design calls for our own title bar (mark + wordmark), so the native
+    // one is hidden. That floats the traffic lights over the page, so the
+    // renderer reserves room for them and declares its own drag regions.
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Centred against the 44px menu bar: (44 - 16) / 2.
+    trafficLightPosition: { x: 16, y: 14 },
     webPreferences: {
       preload: path.join(dirname, "preload.cjs"),
       contextIsolation: true,

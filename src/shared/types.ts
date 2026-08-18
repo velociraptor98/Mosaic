@@ -187,10 +187,35 @@ export interface SceneData {
   objects: SceneObject[];
 }
 
+/**
+ * Project-wide defaults every new scene inherits, written to
+ * mosaic.config.json and mirrored into the Phaser game config on export. These
+ * are project config, not per-scene settings, so the tenth scene matches the
+ * first.
+ */
+export interface ProjectConfig {
+  canvas: { width: number; height: number };
+  /** Drives the editor grid and the snap increment. */
+  tile: number;
+  scale: "FIT" | "ENVELOP" | "NONE";
+  physics: "arcade" | "matter" | "none";
+  /** Forces nearest-neighbour filtering and integer camera positions. */
+  pixelArt: boolean;
+}
+
+export const DEFAULT_CONFIG: ProjectConfig = {
+  canvas: { width: 960, height: 540 },
+  tile: 32,
+  scale: "FIT",
+  physics: "arcade",
+  pixelArt: true,
+};
+
 export type CollisionRule = "collide" | "overlap" | "ignore";
 
 export interface ProjectData {
   name: string;
+  config: ProjectConfig;
   scenes: SceneData[];
   prefabs: PrefabDef[];
   assets: AssetDef[];

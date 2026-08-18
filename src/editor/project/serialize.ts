@@ -1,11 +1,13 @@
 import { DEFAULT_GROUPS } from "../../shared/definitions";
-import type {
-  AnimDef,
-  AssetDef,
-  CollisionRule,
-  PrefabDef,
-  ProjectData,
-  SceneData,
+import {
+  DEFAULT_CONFIG,
+  type AnimDef,
+  type AssetDef,
+  type CollisionRule,
+  type PrefabDef,
+  type ProjectConfig,
+  type ProjectData,
+  type SceneData,
 } from "../../shared/types";
 import type { DiskFile, ProjectSource } from "../platform/types";
 import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset } from "../store/templates";
@@ -20,6 +22,7 @@ import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset 
  */
 
 export const MANIFEST_PATH = "phaser.editor.json";
+export const CONFIG_PATH = "mosaic.config.json";
 export const scenePath = (key: string) => `src/scenes/${key}.scene.json`;
 
 export interface ProjectManifest {
@@ -48,6 +51,9 @@ export function toManifest(project: ProjectData): ProjectManifest {
 export function projectToFiles(project: ProjectData): DiskFile[] {
   return [
     { rel: MANIFEST_PATH, contents: JSON.stringify(toManifest(project), null, 2) + "\n" },
+    // Scene defaults live in their own file, so a developer can read and edit
+    // them without wading through the editor's manifest.
+    { rel: CONFIG_PATH, contents: JSON.stringify(project.config, null, 2) + "\n" },
     ...project.scenes.map((scene) => ({
       rel: scenePath(scene.key),
       contents: JSON.stringify(scene, null, 2) + "\n",
@@ -60,6 +66,23 @@ export interface LoadResult {
   issues: string[];
   /** True when the folder held nothing Mosaic recognised. */
   scaffolded: boolean;
+}
+
+/** mosaic.config.json, defaulted field by field so a partial file still opens. */
+function readConfig(contents: string | null | undefined, issues: string[]): ProjectConfig {
+  if (!contents) return structuredClone(DEFAULT_CONFIG);
+  const parsed = parse<Partial<ProjectConfig>>(contents, CONFIG_PATH, issues);
+  if (!parsed) return structuredClone(DEFAULT_CONFIG);
+  return {
+    canvas: {
+      width: parsed.canvas?.width ?? DEFAULT_CONFIG.canvas.width,
+      height: parsed.canvas?.height ?? DEFAULT_CONFIG.canvas.height,
+    },
+    tile: parsed.tile ?? DEFAULT_CONFIG.tile,
+    scale: parsed.scale ?? DEFAULT_CONFIG.scale,
+    physics: parsed.physics ?? DEFAULT_CONFIG.physics,
+    pixelArt: parsed.pixelArt ?? DEFAULT_CONFIG.pixelArt,
+  };
 }
 
 function parse<T>(contents: string, label: string, issues: string[]): T | null {
@@ -113,6 +136,7 @@ export function projectFromSource(
 
   const project: ProjectData = {
     name: manifest?.name ?? folderName,
+    config: readConfig(source.config, issues),
     scenes: scenes.length ? scenes : createStarterProject().scenes,
     prefabs: manifest?.prefabs ?? [],
     anims: manifest?.anims ?? [],

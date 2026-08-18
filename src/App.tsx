@@ -4,11 +4,14 @@ import { buildCommands, stopAndPrompt, type DialogName } from "./editor/commands
 import { PhaserHost } from "./editor/phaser/PhaserHost";
 import { Playtest } from "./editor/phaser/playtest";
 import { platform } from "./editor/platform";
+import { DEFAULT_OPTIONS, planScaffold } from "./editor/project/scaffold";
 import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
 import { BottomDock } from "./editor/ui/BottomDock";
 import { EditorContext, useWorkspace } from "./editor/ui/context";
+import { FirstRunChecklist } from "./editor/ui/FirstRunChecklist";
 import { Launcher } from "./editor/ui/Launcher";
+import { NewProjectFlow, type FirstRunInfo } from "./editor/ui/newproject/NewProjectFlow";
 import { Inspector } from "./editor/ui/Inspector";
 import { LeftDock } from "./editor/ui/LeftDock";
 import { MenuBar } from "./editor/ui/MenuBar";
@@ -31,11 +34,19 @@ const workspace = new Workspace(store);
 // A debug handle for the desktop end-to-end test and for poking at state in
 // devtools. Intentionally read-write: this is an editor, not a sandbox.
 if (typeof window !== "undefined") {
-  (window as unknown as Record<string, unknown>).mosaicDebug = { store, workspace, platform };
+  (window as unknown as Record<string, unknown>).mosaicDebug = {
+    store,
+    workspace,
+    platform,
+    planScaffold,
+    DEFAULT_OPTIONS,
+  };
 }
 
 export default function App() {
   const [dialog, setDialog] = useState<DialogName>(null);
+  const [creating, setCreating] = useState(false);
+  const [firstRun, setFirstRun] = useState<FirstRunInfo | null>(null);
   const openDialog = useCallback((name: DialogName) => setDialog(name), []);
 
   const workspaceRevision = useWorkspace(workspace);
@@ -61,10 +72,27 @@ export default function App() {
   const needsProject = platform.canOpenProjects && !workspace.isOpen;
   void workspaceRevision;
 
+  if (creating) {
+    return (
+      <EditorContext.Provider value={ctx}>
+        <DragStrip />
+        <NewProjectFlow
+          workspace={workspace}
+          onCancel={() => setCreating(false)}
+          onCreated={(info) => {
+            setCreating(false);
+            setFirstRun(info);
+          }}
+        />
+      </EditorContext.Provider>
+    );
+  }
+
   if (needsProject) {
     return (
       <EditorContext.Provider value={ctx}>
-        <Launcher workspace={workspace} />
+        <DragStrip />
+        <Launcher workspace={workspace} onNewProject={() => setCreating(true)} />
       </EditorContext.Provider>
     );
   }
@@ -89,6 +117,9 @@ export default function App() {
             <BottomDock />
           </main>
           <Inspector />
+          {firstRun && workspace.location?.root === firstRun.root && (
+            <FirstRunChecklist root={firstRun.root} installing={firstRun.installing} />
+          )}
         </div>
         <StatusBar />
 
@@ -103,6 +134,15 @@ export default function App() {
       </div>
     </EditorContext.Provider>
   );
+}
+
+/**
+ * The launcher and the wizard draw no title bar, so without this there is
+ * nothing to grab the window by on those screens.
+ */
+function DragStrip() {
+  if (!platform.canOpenProjects) return null;
+  return <div className="launcher-dragstrip" />;
 }
 
 /**

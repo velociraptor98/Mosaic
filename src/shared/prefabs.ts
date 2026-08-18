@@ -64,6 +64,19 @@ export function resolveObject(project: ProjectData, obj: SceneObject): SceneObje
   return resolved as unknown as SceneObject;
 }
 
+/**
+ * Every object in a scene, resolved. Use this to build the index for world
+ * transforms: a prefab instance keeps a stale copy of the definition's scale
+ * and rotation on itself, so walking the raw objects would compose the wrong
+ * transform whenever a definition has changed since the instance was made.
+ */
+export function resolvedIndex(
+  project: ProjectData,
+  scene: { objects: SceneObject[] },
+): Map<string, SceneObject> {
+  return new Map(scene.objects.map((o) => [o.id, resolveObject(project, o)]));
+}
+
 /** The value the definition would supply for a path, ignoring overrides. */
 export function definitionValue(prefab: PrefabDef, path: string): unknown {
   return getPath(prefab.root, path);

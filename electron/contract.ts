@@ -19,13 +19,23 @@ export const IPC = {
   unwatch: "mosaic:unwatch",
   gitStatus: "mosaic:gitStatus",
   recents: "mosaic:recents",
+  remember: "mosaic:remember",
   forget: "mosaic:forget",
   revealInFolder: "mosaic:revealInFolder",
   setTitle: "mosaic:setTitle",
+  pickDirectory: "mosaic:pickDirectory",
+  defaultProjectsDir: "mosaic:defaultProjectsDir",
+  validateTarget: "mosaic:validateTarget",
+  toolchain: "mosaic:toolchain",
+  createProject: "mosaic:createProject",
+  gitInit: "mosaic:gitInit",
+  install: "mosaic:install",
 } as const;
 
 /** Pushed from main -> renderer when watched files change on disk. */
 export const CHANGE_CHANNEL = "mosaic:projectChanged";
+/** Pushed while a dependency install runs. */
+export const INSTALL_CHANNEL = "mosaic:installProgress";
 
 export interface ProjectFolder {
   root: string;
@@ -34,6 +44,10 @@ export interface ProjectFolder {
 
 export interface RecentProject extends ProjectFolder {
   lastOpened: number;
+  /** Re-validated on show: a missing folder is greyed, never dropped. */
+  missing?: boolean;
+  scenes?: number;
+  phaser?: string | null;
 }
 
 export interface AssetFileInfo {
@@ -48,6 +62,8 @@ export interface ProjectFiles {
   root: string;
   /** Contents of phaser.editor.json, or null when the folder has none yet. */
   manifest: string | null;
+  /** Contents of mosaic.config.json — scene defaults. */
+  config: string | null;
   scenes: { rel: string; contents: string }[];
   prefabs: { rel: string; contents: string }[];
   assets: AssetFileInfo[];
@@ -56,6 +72,40 @@ export interface ProjectFiles {
 export interface WriteRequest {
   rel: string;
   contents: string;
+  /** base64 for binary files (art); utf8 by default. */
+  encoding?: "utf8" | "base64";
+}
+
+/** What the New Project flow can learn about a target folder before writing. */
+export interface TargetCheck {
+  resolved: string;
+  exists: boolean;
+  isEmpty: boolean;
+  writable: boolean;
+  /** Set when the folder already holds a Mosaic project. */
+  hasProject: boolean;
+  error?: string;
+}
+
+export interface Toolchain {
+  node: string | null;
+  npm: string | null;
+  git: string | null;
+}
+
+export interface CreateResult {
+  ok: boolean;
+  root: string;
+  written: string[];
+  error?: string;
+}
+
+export interface InstallProgress {
+  root: string;
+  chunk?: string;
+  done?: boolean;
+  code?: number | null;
+  error?: string;
 }
 
 export interface WriteResultIpc {
@@ -94,7 +144,18 @@ export interface MosaicApi {
   /** Absolute path of a dropped File. Empty string when unavailable. */
   pathForFile(file: File): string;
 
+  pickDirectory(defaultPath?: string): Promise<string | null>;
+  defaultProjectsDir(): Promise<string>;
+  validateTarget(parent: string, slug: string): Promise<TargetCheck>;
+  toolchain(): Promise<Toolchain>;
+  /** Transactional: a failure part-way rolls the folder back. */
+  createProject(root: string, files: WriteRequest[]): Promise<CreateResult>;
+  gitInit(root: string): Promise<boolean>;
+  install(root: string): Promise<void>;
+  onInstallProgress(listener: (p: InstallProgress) => void): () => void;
+
   gitStatus(root: string): Promise<GitStatus>;
+  remember(folder: ProjectFolder): Promise<void>;
   recents(): Promise<RecentProject[]>;
   forget(root: string): Promise<void>;
   revealInFolder(root: string, rel?: string): Promise<void>;

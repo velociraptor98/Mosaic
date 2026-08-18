@@ -22,8 +22,8 @@ npm run dev:app     # the desktop app (Electron + Vite dev server)
 npm run dev         # the browser demo at the printed URL
 
 npm run smoke:all   # both test suites
-npm run smoke       # headless pass over the editor's logic (72 checks)
-npm run smoke:app   # boots the real shell against a real folder (20 checks)
+npm run smoke       # headless pass over the editor's logic (119 checks)
+npm run smoke:app   # boots the real shell against a real folder (57 checks)
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
@@ -138,9 +138,12 @@ same scene in, same bytes out — so diffs stay small enough to read in review.
 
 Emit order is `preload` → `create` (layers bottom-up) → colliders →
 animations, with play-on-spawn calls emitted after the animations they need.
-Prefabs become classes so hand-written logic has somewhere to live. Tile data
-stays in the `.scene.json`, which the class imports, so the source carries no
-walls of literal numbers.
+Prefabs become classes **and the scene constructs them** — `new Coin(this, x, y)`
+— so behaviour you write on a prefab actually runs. The definition's properties
+live in the class constructor; an instance emits only what it overrides, which
+is what keeps propagation working after export. Tile data stays in the
+`.scene.json`, which the class imports, so the source carries no walls of
+literal numbers.
 
 Writing shows a diff first. Where the browser supports the File System Access
 API you can point the editor at your real source tree and it writes there;
@@ -151,6 +154,48 @@ Watch re-emits on every change so a running dev server stays in step.
 
 Export changes nothing in the scene: the editor and the generated code read the
 same `scene.json`.
+
+## The New Project flow
+
+Implements `Mosaic New Project Flow.html` — seven screens from launcher to
+first tile. Every choice writes a real file; nothing is remembered only in the
+editor.
+
+| Screen | Where |
+|---|---|
+| 1. Launcher | `ui/Launcher.tsx` |
+| 2. Template | `ui/newproject/NewProjectFlow.tsx` |
+| 3. Details | ” |
+| 4. Scene defaults | ” |
+| 5. Review | ” |
+| 6. Creating | ” |
+| 7. First run | `ui/FirstRunChecklist.tsx` |
+
+- **Launcher** — recents carry scene count, Phaser version and last-opened, so
+  the right project can be picked without opening it. A folder that has moved
+  greys out with a Locate… action; it is never silently dropped.
+- **Templates** are runnable, not stubs: Empty, Platformer, Top-down and
+  Endless runner each produce a real scene with a camera, a tilemap layer and a
+  controllable object already wired.
+- **Details** validates while you type — parent writable, target free, npm-name
+  validity, node/npm present — so a bad target is caught before the create
+  button rather than after it. The folder is created on confirm, not here.
+- **Scene defaults** are project config, not per-scene settings: they land in
+  `mosaic.config.json` and are mirrored into the generated Phaser game config,
+  so the tenth scene matches the first.
+- **Review** shows the whole diff, skipped files included and struck through.
+  Engineers own the folder; the editor should never surprise them with a file
+  they did not see coming.
+- **Creating** is transactional — any failure part-way rolls the folder back,
+  so cancelling leaves nothing on disk. Dependency install is spawned in the
+  background and the editor opens as soon as the scene file exists; install
+  failure is a status-bar banner, not a blocker.
+- **First run** shows a five-item checklist bound to real state — it ticks from
+  *doing* the thing, so it ticks itself if you get there before reading it.
+  Dismissal is stored per project and never returns.
+
+`project/scaffold.ts` plans the whole thing as pure data: the Review screen
+renders exactly what it returns, and Creating commits exactly the same list.
 
 ## Desktop vs browser
 
@@ -277,8 +322,9 @@ src/
 
   editor/
     platform/       the desktop/browser seam: types.ts, electron.ts, browser.ts
-    project/        serialize.ts (folder <-> ProjectData), workspace.ts
-                    (opening, saving, watching, git)
+    project/        serialize.ts (folder <-> ProjectData), scaffold.ts (the
+                    new-project plan), workspace.ts (opening, saving,
+                    watching, git, background install)
     store/          project.ts (state + slice-based undo), undo.ts,
                     templates.ts, ids.ts
     phaser/         EditorScene.ts (tools, snapping, handles, body editing),
@@ -324,12 +370,16 @@ inside the keep markers survives every regeneration.
 
 ## Known limits
 
-- Assets live in the project as data URLs and persist to `localStorage`; a
-  large project will exceed the quota (the status bar says so). "Save project"
-  writes the whole project as JSON.
+- **Browser build only:** the project lives in `localStorage` with assets
+  inlined as data URLs, so a large project will exceed the quota (the status
+  bar says so), and there is no folder, no watching and no git. The desktop
+  build has none of these limits.
+- The desktop app is **not packaged**: `npm run dev:app` and `npm run start:app`
+  run it from source. electron-builder, signing, notarization and auto-update
+  are not set up.
 - Arcade physics only. Bodies are box or circle; arbitrary polygons are a
   Matter concern and are not modelled.
-- The editor cannot watch the source tree for *external* edits to scene files;
-  re-open the project JSON (or re-export) after editing scenes outside it.
 - Play-test ships a default player controller (arrows/WASD, jump on gravity
   scenes) so RUN does something; real behaviour belongs in your exported code.
+- Prefabs are single-node: a prefab's child objects are stored in the
+  definition but neither rendered nor exported as children.

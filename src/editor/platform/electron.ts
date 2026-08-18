@@ -46,6 +46,7 @@ function kindFor(rel: string): AssetDef["kind"] {
 export function createElectronPlatform(api: MosaicApi): Platform {
   return {
     kind: "electron",
+    os: api.platform,
     canOpenProjects: true,
     canWatch: true,
     canGit: true,
@@ -59,6 +60,7 @@ export function createElectronPlatform(api: MosaicApi): Platform {
       return {
         root: files.root,
         manifest: files.manifest,
+        config: files.config,
         scenes: files.scenes,
         prefabs: files.prefabs,
         assets: files.assets,
@@ -98,7 +100,17 @@ export function createElectronPlatform(api: MosaicApi): Platform {
       };
     },
 
+    pickDirectory: (defaultPath) => api.pickDirectory(defaultPath),
+    defaultProjectsDir: () => api.defaultProjectsDir(),
+    validateTarget: (parent, slug) => api.validateTarget(parent, slug),
+    toolchain: () => api.toolchain(),
+    scaffoldProject: (root, files) => api.createProject(root, files),
+    gitInit: (root) => api.gitInit(root),
+    install: (root) => api.install(root),
+    onInstallProgress: (listener) => api.onInstallProgress(listener),
+
     gitStatus: (root) => api.gitStatus(root),
+    remember: (location) => api.remember(location),
     recents: () => api.recents(),
     forget: (root) => api.forget(root),
     reveal: (root, rel) => api.revealInFolder(root, rel),

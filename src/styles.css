@@ -1756,84 +1756,137 @@ kbd {
   text-align: left;
 }
 
-/* -------------------------------------------------------------- launcher */
+/* ---------------------------------------------- launcher + new project flow */
 
-.launcher {
+.launcher,
+.wizard {
   height: 100%;
   display: grid;
   place-items: center;
-  padding: var(--space-8);
+  padding: var(--space-6);
   background: var(--wash-1);
   overflow: auto;
 }
 
-.launcher-panel {
-  width: min(560px, 100%);
+.launcher-window {
+  width: min(1020px, 100%);
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
   background: var(--color-bg);
-  padding: var(--space-8);
+  box-shadow: var(--shadow-md);
+  min-height: 520px;
+}
+
+.launcher-main {
+  padding: 44px 40px;
+  border-right: 1px solid var(--color-divider);
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  box-shadow: var(--shadow-sm);
 }
 
-.launcher-head {
-  margin-bottom: var(--space-4);
+.launcher-lockup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.launcher-lockup .descriptor {
+  margin-top: 5px;
+  letter-spacing: 0.28em;
 }
 
 .launcher-actions {
   display: flex;
+  flex-direction: column;
   gap: var(--space-2);
+  margin-top: var(--space-8);
+  max-width: 330px;
 }
 
-.launcher-actions button {
-  padding: var(--space-3) var(--space-6);
+button.block {
+  justify-content: flex-start;
+  padding: 11px var(--space-4);
+  width: 100%;
   font-size: 14px;
 }
 
-.recents {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 240px;
-  overflow: auto;
-}
-
-.recents li {
-  display: flex;
-  align-items: center;
-}
-
-.recent {
+.launcher-spacer {
   flex: 1;
+}
+
+.launcher-main .hint {
+  max-width: 330px;
+  line-height: 1.6;
+}
+
+.launcher-recents {
+  padding: 34px;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  text-align: left;
-  padding: var(--space-2);
-  border-left: 2px solid transparent;
+  gap: var(--space-2);
   min-width: 0;
 }
 
-.recent:hover {
+.launcher-recents .section-title {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.recent-card {
+  display: flex;
+  align-items: flex-start;
+  border: 1px solid var(--color-divider);
+}
+
+.recent-card:first-of-type {
+  border-color: var(--color-accent);
+}
+
+.recent-card.missing {
+  opacity: 0.55;
+}
+
+.recent-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  text-align: left;
+  padding: var(--space-3);
+  font-family: var(--font-body);
+  min-width: 0;
+}
+
+.recent-open:hover {
   background: var(--wash-3);
-  border-left-color: var(--color-accent);
+}
+
+.recent-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
 }
 
 .recent-name {
-  font-family: var(--font-body);
-  font-size: 13px;
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 16px;
+}
+
+.recent-when {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
 }
 
 .recent-path {
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: var(--text-dim);
-  max-width: 100%;
+  color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1841,42 +1894,502 @@ kbd {
   text-align: left;
 }
 
-/* Git status badges in the Project tree (desktop only — the browser build has
-   no repo to ask). */
-.git-badge {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  line-height: 1;
-  padding: 2px 4px;
-  margin-left: var(--space-1);
-  border: 1px solid var(--color-divider);
-  color: var(--text-dim);
-  flex: none;
+.recent-tags {
+  display: flex;
+  gap: var(--space-1);
+  margin-top: 2px;
 }
 
-.git-badge.modified {
+.recent-tags .tag-outline {
+  font-size: 9.5px;
+}
+
+.warn-tag {
   border-color: var(--color-caution);
   color: var(--color-caution-800);
 }
 
-.git-badge.untracked {
+.hint.mono {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+/* ------------------------------------------------------------- the wizard */
+
+.wizard-window {
+  width: min(1020px, 100%);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  min-height: 568px;
+}
+
+.wizard-titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px var(--space-4);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.wizard-title {
+  font-family: var(--font-heading);
+  font-size: 12.5px;
+  letter-spacing: 0.12em;
+}
+
+.wizard-meta {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.wizard-spacer {
+  flex: 1;
+}
+
+.wizard-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wizard-split {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  min-height: 0;
+}
+
+.wizard-split > .wizard-pane {
+  border-right: 1px solid var(--color-divider);
+}
+
+.wizard-pane {
+  padding: 30px 34px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  overflow: auto;
+}
+
+.wizard-pane header h2 {
+  font-size: 26px;
+  line-height: 1.1;
+}
+
+.wizard-pane header p {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.wizard-rail {
+  padding: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  background: var(--wash-1);
+  min-width: 0;
+  overflow: auto;
+}
+
+.wizard-rail .section-title {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.wizard-actions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.wizard-actions.end {
+  justify-content: flex-end;
+  margin-top: auto;
+}
+
+.row.wrap {
+  gap: var(--space-6);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.grid3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--space-2);
+}
+
+.segmented.full {
+  display: flex;
+  width: 100%;
+}
+
+.segmented.full button {
+  flex: 1;
+}
+
+/* templates */
+
+.tpl-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+.tpl-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  padding: var(--space-3);
+  border-color: var(--color-divider);
+  font-family: var(--font-body);
+}
+
+.tpl-card.active {
   border-color: var(--color-accent);
-  color: var(--color-accent-800);
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
 }
 
-.git-badge.staged {
-  border-color: var(--color-accent-2);
-  color: var(--color-accent-2-700);
+.tpl-thumb {
+  height: 96px;
+  position: relative;
+  overflow: hidden;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 30%, transparent);
+  background: var(--wash-2);
 }
 
-.project-root {
+.tpl-box {
+  position: absolute;
+  border: 1px solid var(--color-accent-700);
+}
+
+.tpl-box.fill {
+  border: none;
+  background: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.tpl-name {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 16px;
+  margin-top: 9px;
+}
+
+.tpl-desc {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.tpl-files {
   font-family: var(--font-mono);
   font-size: 10px;
   color: var(--text-dim);
-  padding: 0 var(--space-1) var(--space-2);
+  margin-top: 7px;
+}
+
+.tpl-includes {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-end;
+  border-top: 1px solid var(--color-divider);
+  padding-top: var(--space-4);
+  margin-top: auto;
+}
+
+.tpl-includes > div:first-child {
+  flex: 1;
+}
+
+.tpl-includes .section-title {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* details */
+
+.resolve,
+.config-preview,
+.code-preview {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.8;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.resolve {
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+
+.config-preview,
+.code-preview {
+  background: var(--color-accent-900);
+  color: #dfe7ef;
+  padding: var(--space-3);
+  white-space: pre;
+  overflow: auto;
+  max-height: 300px;
+}
+
+.check-row {
+  display: flex;
+  gap: var(--space-2);
+  font-size: 12px;
+  align-items: baseline;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+.check-row .mark {
+  font-family: var(--font-mono);
+  color: var(--color-accent-700);
+}
+
+.check-row.warn .mark {
+  color: var(--color-caution-800);
+}
+
+/* defaults preview */
+
+.canvas-preview {
+  position: relative;
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--color-text) 28%, transparent);
+  background-color: #fbfbfc;
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--color-text) 9%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--color-text) 9%, transparent) 1px, transparent 1px);
+}
+
+.cp-ground {
+  position: absolute;
+  left: 8%;
+  bottom: 0;
+  width: 84%;
+  height: 14%;
+  border: 1px dashed color-mix(in srgb, var(--color-text) 35%, transparent);
+}
+
+.cp-player {
+  position: absolute;
+  left: 16%;
+  bottom: 14%;
+  width: 5%;
+  height: 16%;
+  border: 1px solid var(--color-accent-700);
+  background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+}
+
+.cp-label {
+  position: absolute;
+  left: 2%;
+  top: 2%;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* review */
+
+.file-tree {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.95;
+}
+
+.file-row {
+  display: flex;
+  gap: var(--space-1);
+  color: var(--color-accent-800);
+}
+
+.file-row.skipped {
+  opacity: 0.35;
+  text-decoration: line-through;
+  color: var(--color-text);
+}
+
+.file-row .sign {
+  width: 14px;
+  opacity: 0.6;
+}
+
+.file-row .note {
+  margin-left: auto;
+  opacity: 0.45;
+  font-size: 10.5px;
+}
+
+.file-count {
+  margin-right: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+/* creating */
+
+.wizard-creating {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-6);
+  padding: var(--space-8);
+}
+
+.wizard-creating h2 {
+  font-size: 26px;
+}
+
+.progress-bar {
+  width: 420px;
+  height: 6px;
+  border: 1px solid var(--color-divider);
+  position: relative;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
+}
+
+.progress-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--color-accent);
+  animation: mosaic-bar 2.4s ease-out forwards;
+}
+
+@keyframes mosaic-bar {
+  from {
+    width: 4%;
+  }
+  to {
+    width: 100%;
+  }
+}
+
+.progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 420px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.progress-row {
+  display: flex;
+  color: var(--text-muted);
+}
+
+.progress-row.done {
+  color: var(--color-accent-800);
+}
+
+.progress-row .mark {
+  width: 16px;
+}
+
+.progress-row .ms {
+  opacity: 0.45;
+  font-size: 10.5px;
+}
+
+/* ------------------------------------------------------ first-run checklist */
+
+.firstrun {
+  position: absolute;
+  right: 20px;
+  bottom: 268px;
+  width: 250px;
+  padding: var(--space-4);
+  background: var(--color-bg);
+  box-shadow: var(--shadow-md);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.firstrun .section-title {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.firstrun-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.firstrun-item {
+  display: flex;
+  gap: var(--space-2);
+  color: var(--text-muted);
+}
+
+.firstrun-item .mark {
+  opacity: 0.4;
+}
+
+.firstrun-item.done {
+  color: var(--color-text);
+}
+
+.firstrun-item.done .mark {
+  opacity: 1;
+  color: var(--color-accent-700);
+}
+
+/* ------------------------------------------------------- desktop chrome
+   The native title bar is hidden so the app can draw its own, which has two
+   consequences the renderer has to handle: the macOS traffic lights float over
+   the top-left of the page, and nothing is draggable until we say so. */
+
+/* Reserve the traffic lights' corner. Only on macOS — Windows and Linux keep a
+   normal frame, and the browser build has no window chrome at all. */
+.is-mac .menubar {
+  padding-left: 86px;
+}
+
+/* Drag regions. A container marked `drag` makes everything inside it
+   draggable, so every interactive child has to opt back out — otherwise the
+   buttons in the title bar stop responding to clicks. */
+.is-desktop .menubar,
+.is-desktop .wizard-titlebar,
+.is-desktop .launcher-dragstrip {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.is-desktop .menubar button,
+.is-desktop .menubar select,
+.is-desktop .menubar input,
+.is-desktop .menubar .palette-field,
+.is-desktop .wizard-titlebar button {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* The launcher and the wizard have no menu bar, so they get a strip of their
+   own across the top of the window. */
+.launcher-dragstrip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  z-index: 1;
 }

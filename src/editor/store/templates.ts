@@ -9,27 +9,47 @@ import {
   objectTextureKey,
 } from "../../shared/definitions";
 import { placeholderTilesetDataUrl } from "../../shared/tilesetImage";
-import type {
-  AssetDef,
-  CollisionRule,
-  ProjectData,
-  SceneData,
-  SceneObject,
-  TileLayer,
+import {
+  DEFAULT_CONFIG,
+  type AssetDef,
+  type CollisionRule,
+  type ProjectConfig,
+  type ProjectData,
+  type SceneData,
+  type SceneObject,
+  type TileLayer,
 } from "../../shared/types";
-import { uid } from "./ids";
+import { uid, uniqueName } from "./ids";
 
+/**
+ * Every template is a real, runnable scene — a camera, a tilemap layer and a
+ * controllable object already wired — not an empty stub with TODOs. Empty
+ * exists for people porting an existing game.
+ */
 export const SCENE_TEMPLATES = [
-  { id: "empty", label: "Empty", blurb: "One object layer, nothing else." },
+  {
+    id: "empty",
+    label: "Empty",
+    blurb: "One scene, one camera. Nothing else.",
+    includes: ["Level_01", "MainCamera", "mosaic.config.json"],
+  },
   {
     id: "platformer",
     label: "Platformer",
-    blurb: "Ground tile layer, gravity, a player with an arcade body.",
+    blurb: "Tilemap terrain, gravity, jump controller.",
+    includes: ["Level_01", "Terrain layer", "Player.prefab", "arcade gravity 900", "camera follow", "wire_32 tileset"],
   },
   {
     id: "topdown",
     label: "Top-down",
-    blurb: "Grass field, zero gravity, a player that walks in 4 directions.",
+    blurb: "8-way movement, wall collision, room bounds.",
+    includes: ["Level_01", "Walls layer", "Player.prefab", "room bounds", "wire_32 tileset"],
+  },
+  {
+    id: "runner",
+    label: "Endless runner",
+    blurb: "Scrolling chunks, spawner, score.",
+    includes: ["Level_01", "Chunk.prefab", "Spawner", "score HUD", "wire_32 tileset"],
   },
 ] as const;
 
@@ -42,7 +62,14 @@ function emptyGrid(cols = COLS, rows = ROWS, fill = -1): number[][] {
   return Array.from({ length: rows }, () => Array<number>(cols).fill(fill));
 }
 
-export function makeTileLayer(name: string, grid?: number[][]): TileLayer {
+export function makeTileLayer(
+  name: string,
+  grid?: number[][],
+  dims?: { cols: number; rows: number; tile: number },
+): TileLayer {
+  const cols = dims?.cols ?? COLS;
+  const rows = dims?.rows ?? ROWS;
+  const tile = dims?.tile ?? TILE_SIZE;
   return {
     id: uid("layer"),
     name,
@@ -50,11 +77,11 @@ export function makeTileLayer(name: string, grid?: number[][]): TileLayer {
     visible: true,
     locked: false,
     tilesetId: BUILTIN_TILESET_ID,
-    tileWidth: TILE_SIZE,
-    tileHeight: TILE_SIZE,
-    cols: COLS,
-    rows: ROWS,
-    data: grid ?? emptyGrid(),
+    tileWidth: tile,
+    tileHeight: tile,
+    cols,
+    rows,
+    data: grid ?? emptyGrid(cols, rows),
   };
 }
 
@@ -108,54 +135,89 @@ export function createSceneFromTemplate(
   key: string,
   name: string,
   template: TemplateId,
+  config: ProjectConfig = DEFAULT_CONFIG,
 ): SceneData {
+  const tile = config.tile;
+  const cols = Math.max(4, Math.round(config.canvas.width / tile));
+  const rows = Math.max(4, Math.round(config.canvas.height / tile));
+  const dims = { cols, rows, tile };
+  const grid = () => emptyGrid(cols, rows);
+
   const settings = {
-    width: COLS * TILE_SIZE,
-    height: ROWS * TILE_SIZE,
+    width: config.canvas.width,
+    height: config.canvas.height,
     backgroundColor: "#e9e9ea",
-    gravityY: template === "platformer" ? 900 : 0,
-    gridSize: TILE_SIZE,
+    gravityY: template === "platformer" || template === "runner" ? 900 : 0,
+    gridSize: tile,
   };
 
+  const objectLayer = () => ({
+    id: uid("layer"),
+    name: "Objects",
+    kind: "object" as const,
+    visible: true,
+    locked: false,
+  });
+
   if (template === "empty") {
-    const objects: SceneObject[] = [];
-    const objLayer = { id: uid("layer"), name: "Objects", kind: "object" as const, visible: true, locked: false };
-    return { key, name, settings, layers: [objLayer], objects };
+    return { key, name, settings, layers: [objectLayer()], objects: [] };
   }
 
   if (template === "platformer") {
-    const grid = emptyGrid();
-    for (let c = 0; c < COLS; c++) {
-      grid[ROWS - 1][c] = 4;
-      grid[ROWS - 2][c] = 0;
+    const data = grid();
+    for (let c = 0; c < cols; c++) {
+      data[rows - 1][c] = 4;
+      data[rows - 2][c] = 0;
     }
-    for (let c = 4; c <= 8; c++) grid[ROWS - 6][c] = 1;
-    for (let c = 13; c <= 18; c++) grid[ROWS - 8][c] = 1;
-    const tiles = makeTileLayer("Ground", grid);
-    const objLayer = { id: uid("layer"), name: "Objects", kind: "object" as const, visible: true, locked: false };
-    const player = makeObject("player", objLayer.id, 3 * TILE_SIZE, (ROWS - 4) * TILE_SIZE, {
+    for (let c = 4; c <= 8; c++) data[rows - 6][c] = 1;
+    for (let c = 13; c <= Math.min(18, cols - 2); c++) data[rows - 8][c] = 1;
+    const tiles = makeTileLayer("Terrain", data, dims);
+    const objects = objectLayer();
+    const player = makeObject("player", objects.id, 3 * tile, (rows - 4) * tile, {
       body: defaultBody("player"),
     });
-    const spawn = makeObject("spawn", objLayer.id, 3 * TILE_SIZE, (ROWS - 4) * TILE_SIZE);
-    return { key, name, settings, layers: [tiles, objLayer], objects: [spawn, player] };
+    const spawn = makeObject("spawn", objects.id, 3 * tile, (rows - 4) * tile);
+    return { key, name, settings, layers: [tiles, objects], objects: [spawn, player] };
   }
 
-  const grid = emptyGrid(COLS, ROWS, 0);
-  for (let r = 4; r <= 7; r++) for (let c = 3; c <= 7; c++) grid[r][c] = 2;
-  for (let c = 0; c < COLS; c++) {
-    grid[0][c] = 4;
-    grid[ROWS - 1][c] = 4;
+  if (template === "runner") {
+    const data = grid();
+    for (let c = 0; c < cols; c++) data[rows - 1][c] = 4;
+    for (let c = 6; c <= 9; c++) data[rows - 5][c] = 1;
+    for (let c = 15; c <= 18 && c < cols; c++) data[rows - 7][c] = 1;
+    const tiles = makeTileLayer("Chunks", data, dims);
+    const objects = objectLayer();
+    const player = makeObject("player", objects.id, 2 * tile, (rows - 4) * tile, {
+      body: defaultBody("player"),
+    });
+    const coins = [0, 1, 2].map((i) =>
+      makeObject("coin", objects.id, (16 + i) * tile, (rows - 9) * tile, {
+        name: `Coin ${i + 1}`,
+        body: { ...defaultBody("coin")!, allowGravity: false },
+      }),
+    );
+    return { key, name, settings, layers: [tiles, objects], objects: [player, ...coins] };
   }
-  for (let r = 0; r < ROWS; r++) {
-    grid[r][0] = 4;
-    grid[r][COLS - 1] = 4;
+
+  // top-down: walls around a room, zero gravity
+  const data = emptyGrid(cols, rows, 0);
+  for (let r = 4; r <= Math.min(7, rows - 2); r++) {
+    for (let c = 3; c <= Math.min(7, cols - 2); c++) data[r][c] = 2;
   }
-  const tiles = makeTileLayer("Ground", grid);
-  const objLayer = { id: uid("layer"), name: "Objects", kind: "object" as const, visible: true, locked: false };
-  const player = makeObject("player", objLayer.id, 6 * TILE_SIZE, 10 * TILE_SIZE, {
+  for (let c = 0; c < cols; c++) {
+    data[0][c] = 4;
+    data[rows - 1][c] = 4;
+  }
+  for (let r = 0; r < rows; r++) {
+    data[r][0] = 4;
+    data[r][cols - 1] = 4;
+  }
+  const tiles = makeTileLayer("Walls", data, dims);
+  const objects = objectLayer();
+  const player = makeObject("player", objects.id, 6 * tile, Math.floor(rows / 2) * tile, {
     body: { ...defaultBody("player")!, allowGravity: false },
   });
-  return { key, name, settings, layers: [tiles, objLayer], objects: [player] };
+  return { key, name, settings, layers: [tiles, objects], objects: [player] };
 }
 
 export function placeholderTilesetAsset(): AssetDef {
@@ -213,13 +275,14 @@ export function createStarterProject(): ProjectData {
   const level = createSceneFromTemplate("Level_01", "Level 01", "platformer");
   const objLayer = level.layers.find((l) => l.kind === "object")!;
 
-  // A row of coins, deliberately repeated — workflow 5 turns these into a prefab.
+  // A row of coins, deliberately repeated — workflow 5 turns these into a
+  // prefab. Names stay unique: they key the generated scene's objects map.
   for (let i = 0; i < 4; i++) {
-    level.objects.push(
-      makeObject("coin", objLayer.id, (13 + i) * TILE_SIZE + 16, (ROWS - 9) * TILE_SIZE, {
-        body: { ...defaultBody("coin")!, allowGravity: false },
-      }),
-    );
+    const coin = makeObject("coin", objLayer.id, (13 + i) * TILE_SIZE + 16, (ROWS - 9) * TILE_SIZE, {
+      body: { ...defaultBody("coin")!, allowGravity: false },
+    });
+    coin.name = uniqueName(coin.name, level.objects.map((o) => o.name));
+    level.objects.push(coin);
   }
   level.objects.push(
     makeObject("enemy", objLayer.id, 18 * TILE_SIZE, (ROWS - 4) * TILE_SIZE, {
@@ -230,6 +293,7 @@ export function createStarterProject(): ProjectData {
 
   return {
     name: "Starter Project",
+    config: structuredClone(DEFAULT_CONFIG),
     scenes: [level],
     prefabs: [],
     assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],

@@ -12,4 +12,14 @@ export const platform: Platform = api ? createElectronPlatform(api) : browserPla
 
 export const isDesktop = platform.kind === "electron";
 
+/**
+ * Marks the document so CSS can reserve space for the macOS traffic lights,
+ * which float over our own title bar.
+ */
+if (typeof document !== "undefined") {
+  const root = document.documentElement;
+  if (isDesktop) root.classList.add("is-desktop");
+  if (isDesktop && platform.os === "darwin") root.classList.add("is-mac");
+}
+
 export type * from "./types";

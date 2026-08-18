@@ -1,11 +1,14 @@
 import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { execFile } from "node:child_process";
-import fs from "node:fs/promises";
+import fs, { constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
+import { spawn } from "node:child_process";
+import os from "node:os";
 import {
   CHANGE_CHANNEL,
+  INSTALL_CHANNEL,
   IPC,
   type AssetFileInfo,
   type FileChange,
@@ -13,6 +16,10 @@ import {
   type ProjectFiles,
   type ProjectFolder,
   type RecentProject,
+  type CreateResult,
+  type InstallProgress,
+  type TargetCheck,
+  type Toolchain,
   type WriteRequest,
   type WriteResultIpc,
 } from "./contract";
@@ -20,6 +27,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 const MANIFEST = "phaser.editor.json";
+const CONFIG = "mosaic.config.json";
 const SCENE_DIR = "src/scenes";
 const PREFAB_DIR = "src/prefabs";
 const ASSET_DIR = "assets";
@@ -162,9 +170,8 @@ export function registerIpc(): void {
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const root = result.filePaths[0];
-    const folder = { root, name: path.basename(root) };
-    await rememberRecent(folder);
-    return folder;
+    // The recent entry is recorded when the project actually opens, not here.
+    return { root, name: path.basename(root) };
   });
 
   ipcMain.handle(IPC.createFolder, async (): Promise<ProjectFolder | null> => {
@@ -179,9 +186,7 @@ export function registerIpc(): void {
     const root = result.filePath;
     await fs.mkdir(path.join(root, SCENE_DIR), { recursive: true });
     await fs.mkdir(path.join(root, ASSET_DIR), { recursive: true });
-    const folder = { root, name: path.basename(root) };
-    await rememberRecent(folder);
-    return folder;
+    return { root, name: path.basename(root) };
   });
 
   ipcMain.handle(
@@ -195,6 +200,7 @@ export function registerIpc(): void {
       return {
         root,
         manifest: await readIfExists(path.join(root, MANIFEST)),
+        config: await readIfExists(path.join(root, CONFIG)),
         scenes: await readDirFiles(root, SCENE_DIR, /\.scene\.json$/),
         prefabs: await readDirFiles(root, PREFAB_DIR, /\.prefab\.json$/),
         assets: await listAssets(root),
@@ -210,7 +216,7 @@ export function registerIpc(): void {
         try {
           const abs = resolveInside(root, file.rel);
           await fs.mkdir(path.dirname(abs), { recursive: true });
-          await fs.writeFile(abs, file.contents, "utf8");
+          await writeOne(abs, file);
           result.written.push(file.rel);
         } catch (err) {
           result.failed.push({ rel: file.rel, error: (err as Error).message });
@@ -243,7 +249,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.watch, async (_e, root: string) => {
     if (watchers.has(root)) return;
-    const watcher = chokidar.watch([MANIFEST, SCENE_DIR, PREFAB_DIR, ASSET_DIR], {
+    const watcher = chokidar.watch([MANIFEST, CONFIG, SCENE_DIR, PREFAB_DIR, ASSET_DIR], {
       cwd: root,
       ignoreInitial: true,
       awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 40 },
@@ -277,7 +283,36 @@ export function registerIpc(): void {
   });
 
   ipcMain.handle(IPC.gitStatus, async (_e, root: string) => gitStatus(root));
-  ipcMain.handle(IPC.recents, async () => readRecents());
+  ipcMain.handle(IPC.remember, async (_e, folder: ProjectFolder) => rememberRecent(folder));
+
+  ipcMain.handle(IPC.recents, async (): Promise<RecentProject[]> => {
+    const list = await readRecents();
+    return Promise.all(
+      list.map(async (entry) => {
+        const stat = await fs.stat(entry.root).catch(() => null);
+        if (!stat?.isDirectory()) return { ...entry, missing: true };
+        const scenes = await fs
+          .readdir(path.join(entry.root, SCENE_DIR))
+          .catch(() => [] as string[]);
+        let phaser: string | null = null;
+        const pkg = await readIfExists(path.join(entry.root, "package.json"));
+        if (pkg) {
+          try {
+            const parsed = JSON.parse(pkg);
+            phaser = parsed.dependencies?.phaser ?? parsed.devDependencies?.phaser ?? null;
+          } catch {
+            /* an unreadable package.json just means no version badge */
+          }
+        }
+        return {
+          ...entry,
+          missing: false,
+          scenes: scenes.filter((f) => f.endsWith(".scene.json")).length,
+          phaser,
+        };
+      }),
+    );
+  });
   ipcMain.handle(IPC.forget, async (_e, root: string) => {
     const list = (await readRecents()).filter((r) => r.root !== root);
     await fs.writeFile(recentsFile(), JSON.stringify(list, null, 2));
@@ -291,10 +326,170 @@ export function registerIpc(): void {
     BrowserWindow.fromWebContents(event.sender)?.setTitle(title);
   });
 
+  ipcMain.handle(IPC.pickDirectory, async (_e, defaultPath?: string) => {
+    const result = await dialog.showOpenDialog({
+      title: "Choose a location",
+      defaultPath,
+      properties: ["openDirectory", "createDirectory"],
+      buttonLabel: "Choose",
+    });
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.defaultProjectsDir, async () => {
+    // ~/dev when it exists, because that is where most people keep code.
+    const dev = path.join(os.homedir(), "dev");
+    try {
+      const stat = await fs.stat(dev);
+      if (stat.isDirectory()) return dev;
+    } catch {
+      /* fall through */
+    }
+    return app.getPath("documents");
+  });
+
+  /**
+   * Everything the details screen needs to show BEFORE the folder exists:
+   * whether the parent is writable, whether the target is free, and whether a
+   * project is already sitting there.
+   */
+  ipcMain.handle(
+    IPC.validateTarget,
+    async (_e, parent: string, slug: string): Promise<TargetCheck> => {
+      const resolved = path.resolve(parent || os.homedir(), slug);
+      const check: TargetCheck = {
+        resolved,
+        exists: false,
+        isEmpty: true,
+        writable: false,
+        hasProject: false,
+      };
+      try {
+        // Writability is a property of the nearest existing ancestor.
+        let probe = resolved;
+        for (;;) {
+          try {
+            await fs.access(probe, fsConstants.W_OK);
+            check.writable = true;
+            break;
+          } catch {
+            const up = path.dirname(probe);
+            if (up === probe) break;
+            probe = up;
+          }
+        }
+        const stat = await fs.stat(resolved).catch(() => null);
+        if (stat?.isDirectory()) {
+          check.exists = true;
+          const entries = await fs.readdir(resolved);
+          check.isEmpty = entries.filter((n) => n !== ".DS_Store").length === 0;
+          check.hasProject = entries.includes(MANIFEST) || entries.includes(CONFIG);
+        } else if (stat) {
+          check.exists = true;
+          check.isEmpty = false;
+          check.error = "A file already exists at that path";
+        }
+      } catch (err) {
+        check.error = (err as Error).message;
+      }
+      return check;
+    },
+  );
+
+  ipcMain.handle(IPC.toolchain, async (): Promise<Toolchain> => ({
+    node: await which("node", ["--version"]),
+    npm: await which("npm", ["--version"]),
+    git: await which("git", ["--version"]),
+  }));
+
+  /**
+   * Transactional create: on any failure the folder is rolled back to what it
+   * was, so cancelling or crashing leaves nothing behind.
+   */
+  ipcMain.handle(
+    IPC.createProject,
+    async (_e, root: string, files: WriteRequest[]): Promise<CreateResult> => {
+      const existedBefore = await fs
+        .stat(root)
+        .then((s) => s.isDirectory())
+        .catch(() => false);
+      const written: string[] = [];
+      try {
+        await fs.mkdir(root, { recursive: true });
+        for (const file of files) {
+          const abs = resolveInside(root, file.rel);
+          await fs.mkdir(path.dirname(abs), { recursive: true });
+          if (await exists(abs)) {
+            throw new Error(`Refusing to overwrite ${file.rel}`);
+          }
+          await writeOne(abs, file);
+          written.push(file.rel);
+        }
+        return { ok: true, root, written };
+      } catch (err) {
+        // Roll back: remove what we wrote, and the folder itself if we made it.
+        for (const rel of written.reverse()) {
+          await fs.rm(path.resolve(root, rel), { force: true }).catch(() => {});
+        }
+        if (!existedBefore) await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+        return { ok: false, root, written: [], error: (err as Error).message };
+      }
+    },
+  );
+
+  ipcMain.handle(IPC.gitInit, async (_e, root: string) => {
+    try {
+      await execFileAsync("git", ["init", "-q"], { cwd: root, timeout: 10000 });
+      await execFileAsync("git", ["add", "-A"], { cwd: root, timeout: 20000 });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  /**
+   * Install runs in the background: scaffolding is fast, install is not, and
+   * the editor should open on the scene rather than hold a modal for minutes.
+   */
+  ipcMain.handle(IPC.install, async (event, root: string) => {
+    const send = (payload: InstallProgress) => {
+      if (!event.sender.isDestroyed()) event.sender.send(INSTALL_CHANNEL, payload);
+    };
+    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+    let child;
+    try {
+      child = spawn(npm, ["install"], { cwd: root, shell: process.platform === "win32" });
+    } catch (err) {
+      send({ root, done: true, code: null, error: (err as Error).message });
+      return;
+    }
+    child.stdout?.on("data", (d) => send({ root, chunk: String(d) }));
+    child.stderr?.on("data", (d) => send({ root, chunk: String(d) }));
+    child.on("error", (err) => send({ root, done: true, code: null, error: err.message }));
+    child.on("close", (code) => send({ root, done: true, code }));
+  });
+
   app.on("will-quit", () => {
     for (const watcher of watchers.values()) void watcher.close();
     watchers.clear();
   });
+}
+
+async function writeOne(abs: string, file: WriteRequest): Promise<void> {
+  if (file.encoding === "base64") {
+    await fs.writeFile(abs, Buffer.from(file.contents, "base64"));
+  } else {
+    await fs.writeFile(abs, file.contents, "utf8");
+  }
+}
+
+async function which(cmd: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(cmd, args, { timeout: 4000 });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
 }
 
 /** Files are copied INTO the project, never referenced from outside it. */

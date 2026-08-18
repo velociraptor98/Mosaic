@@ -3,7 +3,7 @@ import { setProjectRoot } from "../export/write";
 import { platform } from "../platform";
 import type { ProjectChange, ProjectLocation, RecentEntry } from "../platform/types";
 import type { ProjectStore } from "../store/project";
-import { MANIFEST_PATH, projectFromSource, projectToFiles, scenePath } from "./serialize";
+import { CONFIG_PATH, MANIFEST_PATH, projectFromSource, projectToFiles, scenePath } from "./serialize";
 
 /**
  * Assets discovered on disk arrive without dimensions — the main process only
@@ -48,6 +48,8 @@ export class Workspace {
   issues: string[] = [];
   lastSavedAt = 0;
   saving = false;
+  /** Background dependency install, when the New Project flow started one. */
+  install: { running: boolean; log: string; code: number | null; error?: string } | null = null;
   /** Bumped on every change, so React can subscribe with useSyncExternalStore. */
   revision = 0;
 
@@ -65,6 +67,30 @@ export class Workspace {
 
   constructor(store: ProjectStore) {
     this.store = store;
+    // Install output streams to the status bar; failure is a banner, not a
+    // blocker — the project is usable either way.
+    platform.onInstallProgress((p) => {
+      if (!this.location || p.root !== this.location.root) return;
+      const current = this.install ?? { running: true, log: "", code: null };
+      this.install = {
+        running: !p.done,
+        log: (current.log + (p.chunk ?? "")).slice(-4000),
+        code: p.code ?? current.code,
+        error: p.error ?? current.error,
+      };
+      if (p.done) {
+        this.store.setStatus(
+          p.code === 0 ? "npm install finished" : `npm install failed (${p.error ?? p.code})`,
+        );
+      }
+      this.emit();
+    });
+  }
+
+  /** Called by the New Project flow once it has spawned an install. */
+  markInstalling(): void {
+    this.install = { running: true, log: "", code: null };
+    this.emit();
   }
 
   subscribe = (fn: () => void): (() => void) => {
@@ -120,6 +146,7 @@ export class Workspace {
 
     this.startWatching();
     void this.refreshGit();
+    void platform.remember(location);
     platform.setWindowTitle(`${project.name} — Mosaic`);
     this.store.setStatus(
       issues.length
@@ -220,7 +247,7 @@ export class Workspace {
     if (!external.length) return;
 
     const touchedProject = external.some(
-      (c) => c.rel === MANIFEST_PATH || c.rel.endsWith(".scene.json"),
+      (c) => c.rel === MANIFEST_PATH || c.rel === CONFIG_PATH || c.rel.endsWith(".scene.json"),
     );
     const touchedAssets = external.some((c) => c.rel.startsWith("assets/"));
 

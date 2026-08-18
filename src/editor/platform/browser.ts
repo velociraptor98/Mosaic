@@ -1,5 +1,13 @@
 import type { AssetDef } from "../../shared/types";
-import type { Platform, ProjectLocation, ProjectSource, WriteOutcome } from "./types";
+import type {
+  CreateResult,
+  Platform,
+  ProjectLocation,
+  ProjectSource,
+  TargetCheck,
+  Toolchain,
+  WriteOutcome,
+} from "./types";
 
 /**
  * The browser build keeps the model it has always had: the project lives in
@@ -9,6 +17,7 @@ import type { Platform, ProjectLocation, ProjectSource, WriteOutcome } from "./t
  */
 export const browserPlatform: Platform = {
   kind: "browser",
+  os: "",
   canOpenProjects: false,
   canWatch: false,
   canGit: false,
@@ -48,6 +57,32 @@ export const browserPlatform: Platform = {
   async gitStatus(): Promise<Record<string, string>> {
     return {};
   },
+  // The New Project flow needs a filesystem; the browser build reports it as
+  // unavailable rather than half-implementing it.
+  async pickDirectory(): Promise<string | null> {
+    return null;
+  },
+  async defaultProjectsDir(): Promise<string> {
+    return "";
+  },
+  async validateTarget(): Promise<TargetCheck> {
+    return { resolved: "", exists: false, isEmpty: true, writable: false, hasProject: false };
+  },
+  async toolchain(): Promise<Toolchain> {
+    return { node: null, npm: null, git: null };
+  },
+  async scaffoldProject(): Promise<CreateResult> {
+    return { ok: false, root: "", written: [], error: "Not available in the browser" };
+  },
+  async gitInit(): Promise<boolean> {
+    return false;
+  },
+  async install(): Promise<void> {},
+  onInstallProgress(): () => void {
+    return () => {};
+  },
+
+  async remember(): Promise<void> {},
   async recents() {
     return [];
   },

@@ -28,6 +28,16 @@ export function StatusBar() {
         undo {stack.depth}
         {store.isDirty(store.activeSceneKey) ? " · modified" : ""}
       </span>
+      {desktop && workspace.install?.running && (
+        <span className="warn" title="Dependency install is running in the background">
+          npm install · running
+        </span>
+      )}
+      {desktop && workspace.install && !workspace.install.running && workspace.install.code !== 0 && (
+        <span className="warn" title={workspace.install.log.slice(-400)}>
+          npm install failed
+        </span>
+      )}
       {desktop ? (
         <>
           <span title={workspace.location?.root}>

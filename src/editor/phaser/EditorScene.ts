@@ -1,6 +1,6 @@
 import Phaser from "phaser";
-import { resolveObject } from "../../shared/prefabs";
-import { objectsById, worldTransform } from "../../shared/transform";
+import { resolveObject, resolvedIndex } from "../../shared/prefabs";
+import { worldTransform } from "../../shared/transform";
 import type { Layer, SceneObject, TileLayer } from "../../shared/types";
 import type { EditorBridge } from "../bridge";
 import type { ProjectStore } from "../store/project";
@@ -288,7 +288,9 @@ export class EditorScene extends Phaser.Scene {
 
   private syncSprites(): void {
     const scene = this.store.scene!;
-    const index = objectsById(scene);
+    // Resolved, so a prefab instance composes its DEFINITION's scale and
+    // rotation rather than the stale copy stored on the instance.
+    const index = resolvedIndex(this.store.project, scene);
     const seen = new Set<string>();
     const layerDepth = new Map(scene.layers.map((l, i) => [l.id, i]));
 
@@ -312,7 +314,7 @@ export class EditorScene extends Phaser.Scene {
         sprite.setTexture(key, frame);
       }
 
-      const world = worldTransform(raw, index);
+      const world = worldTransform(index.get(raw.id) ?? raw, index);
       sprite.setPosition(world.x, world.y);
       sprite.setRotation(Phaser.Math.DegToRad(world.rotation));
       sprite.setScale(world.scaleX, world.scaleY);

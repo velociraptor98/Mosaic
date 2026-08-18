@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import { CHANGE_CHANNEL, IPC, type FileChange, type MosaicApi } from "./contract";
+import {
+  CHANGE_CHANNEL,
+  INSTALL_CHANNEL,
+  IPC,
+  type FileChange,
+  type InstallProgress,
+  type MosaicApi,
+} from "./contract";
 
 /**
  * The only bridge between the renderer and Node. Everything is an explicit,
@@ -39,7 +46,23 @@ const api: MosaicApi = {
     }
   },
 
+  pickDirectory: (defaultPath) => ipcRenderer.invoke(IPC.pickDirectory, defaultPath),
+  defaultProjectsDir: () => ipcRenderer.invoke(IPC.defaultProjectsDir),
+  validateTarget: (parent, slug) => ipcRenderer.invoke(IPC.validateTarget, parent, slug),
+  toolchain: () => ipcRenderer.invoke(IPC.toolchain),
+  createProject: (root, files) => ipcRenderer.invoke(IPC.createProject, root, files),
+  gitInit: (root) => ipcRenderer.invoke(IPC.gitInit, root),
+  install: (root) => ipcRenderer.invoke(IPC.install, root),
+  onInstallProgress: (listener: (p: InstallProgress) => void) => {
+    const handler = (_e: unknown, payload: InstallProgress) => listener(payload);
+    ipcRenderer.on(INSTALL_CHANNEL, handler);
+    return () => {
+      ipcRenderer.off(INSTALL_CHANNEL, handler);
+    };
+  },
+
   gitStatus: (root) => ipcRenderer.invoke(IPC.gitStatus, root),
+  remember: (folder) => ipcRenderer.invoke(IPC.remember, folder),
   recents: () => ipcRenderer.invoke(IPC.recents),
   forget: (root) => ipcRenderer.invoke(IPC.forget, root),
   revealInFolder: (root, rel) => ipcRenderer.invoke(IPC.revealInFolder, root, rel),
