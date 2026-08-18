@@ -1,4 +1,5 @@
 import { collectLoaderManifest } from "../../shared/manifest";
+import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
 import { findPrefab, resolveObject, resolvedIndex } from "../../shared/prefabs";
 import { worldTransform } from "../../shared/transform";
 import type { ProjectData, SceneData, SceneObject, TileLayer } from "../../shared/types";
@@ -103,6 +104,9 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   const groupVars = new Map<string, string>();
   const usedPrefabClasses = new Set<string>();
   const objectKeys = new Set<string>();
+  /** Script classes this scene constructs, keyed by src::class. */
+  const scriptImports = new Map<string, { alias: string; module: string }>();
+  const scriptAliases = new Set<string>();
 
   /** Keys of `this.objects`, kept unique even when two objects share a name. */
   const objectKey = (name: string, fallback: string): string => {
@@ -160,6 +164,11 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   );
   if (scene.settings.gravityY) {
     L.push(`    this.physics.world.gravity.y = ${scene.settings.gravityY};`);
+  }
+  if (sceneHasScripts(project, scene)) {
+    // One host per scene owns the update loop, so scripts run in the order
+    // this file attaches them — which is the order the editor's list shows.
+    L.push(`    this.scripts = new ScriptHost(this);`);
   }
   L.push(``);
 
@@ -225,6 +234,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
         L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
         emitProperties(L, v, obj, null, world);
       }
+
+      emitScripts(L, v, obj, scriptImports, scriptAliases);
 
       if (obj.group && obj.body) {
         let gv = groupVars.get(obj.group);
@@ -321,6 +332,7 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   L.push(`    // </keep>`);
   L.push(`  }`);
   L.push(``);
+  if (sceneHasScripts(project, scene)) L.push(`  scripts!: ScriptHost;`);
   L.push(`  objects: Record<string, Phaser.GameObjects.Sprite> = {};`);
   L.push(`  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer> = {};`);
   L.push(`  groups: Record<string, Phaser.Physics.Arcade.Group> = {};`);
@@ -334,11 +346,71 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   for (const name of [...usedPrefabClasses].sort()) {
     imports.push(`import { ${className(name)} } from "../prefabs/${className(name)}";`);
   }
+  if (scriptImports.size) {
+    imports.push(`import { ScriptHost } from "${moduleFor(SCRIPT_BASE_FILE)}";`);
+    for (const [key, entry] of [...scriptImports].sort(([a], [b]) => a.localeCompare(b))) {
+      const name = key.split("::")[1];
+      const binding = entry.alias === name ? name : `${name} as ${entry.alias}`;
+      imports.push(`import { ${binding} } from "${entry.module}";`);
+    }
+  }
   if (!imports.length) return L.join("\n");
   return L.join("\n").replace(
     `import Phaser from "phaser";`,
     [`import Phaser from "phaser";`, ...imports].join("\n"),
   );
+}
+
+function sceneHasScripts(project: ProjectData, scene: SceneData): boolean {
+  return scene.objects.some((o) => scriptsOf(resolveObject(project, o)).length > 0);
+}
+
+/** src/scripts/Foo.ts, as imported from a file in src/scenes/. */
+function moduleFor(src: string): string {
+  const withoutExt = src.replace(/\.(ts|tsx|js|jsx|mts|mjs)$/, "");
+  const parts = withoutExt.split("/");
+  const from = ["src", "scenes"];
+  let shared = 0;
+  while (shared < from.length && parts[shared] === from[shared]) shared++;
+  const up = from.length - shared;
+  const rel = [...Array(up).fill(".."), ...parts.slice(shared)].join("/");
+  return rel.startsWith(".") ? rel : `./${rel}`;
+}
+
+/**
+ * Attaches the object's scripts, in list order.
+ *
+ * A disabled script is still constructed and still gets its values — the
+ * runtime skips create/update — so switching one off in the editor and back on
+ * at runtime behaves the way the inspector implies.
+ */
+function emitScripts(
+  L: string[],
+  v: string,
+  obj: SceneObject,
+  imports: Map<string, { alias: string; module: string }>,
+  aliases: Set<string>,
+): void {
+  for (const script of scriptsOf(obj)) {
+    const key = `${script.src}::${script.class}`;
+    let entry = imports.get(key);
+    if (!entry) {
+      // Two classes may share a name in different folders; the second one to
+      // arrive is imported under an alias rather than shadowing the first.
+      let alias = script.class;
+      let n = 2;
+      while (aliases.has(alias)) alias = `${script.class}${n++}`;
+      aliases.add(alias);
+      entry = { alias, module: moduleFor(script.src) };
+      imports.set(key, entry);
+    }
+    const props = Object.entries(script.props ?? {});
+    const propsArg = props.length
+      ? `{ ${props.map(([k, val]) => `${JSON.stringify(k)}: ${JSON.stringify(val)}`).join(", ")} }`
+      : "{}";
+    const enabledArg = script.enabled ? "" : ", false";
+    L.push(`    this.scripts.add(${v}, new ${entry.alias}(), ${propsArg}${enabledArg});`);
+  }
 }
 
 /**

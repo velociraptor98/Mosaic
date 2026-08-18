@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditorBridge } from "./editor/bridge";
-import { buildCommands, stopAndPrompt, type DialogName } from "./editor/commands";
+import { buildCommands, startPlaytest, stopAndPrompt, type DialogName } from "./editor/commands";
 import { PhaserHost } from "./editor/phaser/PhaserHost";
 import { Playtest } from "./editor/phaser/playtest";
 import { platform } from "./editor/platform";
 import { DEFAULT_OPTIONS, planScaffold } from "./editor/project/scaffold";
 import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
+import { isTrusted, revokeRoot, trustRoot } from "./editor/scripts/runtime";
 import { BottomDock } from "./editor/ui/BottomDock";
 import { EditorContext, useWorkspace } from "./editor/ui/context";
 import { FirstRunChecklist } from "./editor/ui/FirstRunChecklist";
@@ -15,9 +16,12 @@ import { NewProjectFlow, type FirstRunInfo } from "./editor/ui/newproject/NewPro
 import { Inspector } from "./editor/ui/Inspector";
 import { LeftDock } from "./editor/ui/LeftDock";
 import { MenuBar } from "./editor/ui/MenuBar";
+import { SourceDrawer } from "./editor/ui/SourceDrawer";
 import { StatusBar } from "./editor/ui/StatusBar";
 import { Toolbar } from "./editor/ui/Toolbar";
 import { AtlasDialog } from "./editor/ui/dialogs/AtlasDialog";
+import { AttachScriptDialog } from "./editor/ui/dialogs/AttachScriptDialog";
+import { ScriptTrustDialog } from "./editor/ui/dialogs/ScriptTrustDialog";
 import { CollisionDialog } from "./editor/ui/dialogs/CollisionDialog";
 import { CommandPalette } from "./editor/ui/dialogs/CommandPalette";
 import { ExportDialog } from "./editor/ui/dialogs/ExportDialog";
@@ -28,8 +32,10 @@ import { PromoteDialog } from "./editor/ui/dialogs/PromoteDialog";
 
 const store = new ProjectStore();
 const bridge = new EditorBridge();
-const playtest = new Playtest(store, bridge);
+// The workspace comes first: the play-test compiles the project's scripts
+// through it before it boots a scene.
 const workspace = new Workspace(store);
+const playtest = new Playtest(store, bridge, workspace);
 
 // A debug handle for the desktop end-to-end test and for poking at state in
 // devtools. Intentionally read-write: this is an editor, not a sandbox.
@@ -37,7 +43,10 @@ if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).mosaicDebug = {
     store,
     workspace,
+    playtest,
+    bridge,
     platform,
+    scriptTrust: { isTrusted, trustRoot, revokeRoot },
     planScaffold,
     DEFAULT_OPTIONS,
   };
@@ -113,6 +122,8 @@ export default function App() {
               <i className="corner bl" />
               <i className="corner br" />
               <PhaserHost store={store} bridge={bridge} playtest={playtest} />
+              {/* Reading a class happens over the scene, not instead of it. */}
+              <SourceDrawer />
             </div>
             <BottomDock />
           </main>
@@ -129,6 +140,8 @@ export default function App() {
         {dialog === "atlas" && <AtlasDialog onClose={() => setDialog(null)} />}
         {dialog === "prefab" && <PrefabDialog onClose={() => setDialog(null)} />}
         {dialog === "collision" && <CollisionDialog onClose={() => setDialog(null)} />}
+        {dialog === "attachscript" && <AttachScriptDialog onClose={() => setDialog(null)} />}
+        {dialog === "scripttrust" && <ScriptTrustDialog onClose={() => setDialog(null)} />}
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
         {dialog === "promote" && <PromoteDialog onClose={() => setDialog(null)} />}
       </div>
@@ -204,7 +217,7 @@ function useKeyboardShortcuts(ctx: {
             return run("asset.import");
           case "enter":
             e.preventDefault();
-            return ctx.playtest.playing ? stopAndPrompt(ctx) : ctx.playtest.start();
+            return ctx.playtest.playing ? stopAndPrompt(ctx) : startPlaytest(ctx);
           default:
             return;
         }

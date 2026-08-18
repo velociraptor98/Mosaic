@@ -1,4 +1,4 @@
-import { SET_TILES, openTilesFor } from "./logoGeometry";
+import { SET_TILES, openTilesFor } from "../../shared/logoGeometry";
 
 /**
  * The Mosaic mark, per `Mosaic Logo.html`.

@@ -10,6 +10,8 @@ export type DialogName =
   | "atlas"
   | "prefab"
   | "collision"
+  | "attachscript"
+  | "scripttrust"
   | "export"
   | "promote"
   | null;
@@ -69,6 +71,9 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "asset.atlas", title: "Slice atlas…", category: "Assets", run: () => openDialog("atlas") },
     { id: "prefab.create", title: "Create prefab from selection…", category: "Prefabs", run: () => openDialog("prefab") },
     { id: "physics.matrix", title: "Edit collision matrix…", category: "Physics", run: () => openDialog("collision") },
+    { id: "script.attach", title: "Attach script to selection…", category: "Scripts", run: () => openDialog("attachscript") },
+    { id: "script.inspect", title: "Show scripts on selection", category: "Scripts", run: () => store.setUi({ inspectorTab: "scripts" }) },
+    { id: "script.reindex", title: "Re-index scripts from disk", category: "Scripts", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
 
     { id: "tool.select", title: "Tool: Select", category: "Tools", binding: "V", run: () => store.setUi({ tool: "select" }) },
     { id: "tool.place", title: "Tool: Place", category: "Tools", binding: "B", run: () => store.setUi({ tool: "place" }) },
@@ -91,10 +96,24 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
     { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
 
-    { id: "play.run", title: playtest.playing ? "Stop play-test" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (playtest.playing ? stopAndPrompt(ctx) : playtest.start()) },
+    { id: "play.run", title: playtest.playing ? "Stop play-test" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (playtest.playing ? stopAndPrompt(ctx) : startPlaytest(ctx)) },
     { id: "play.pause", title: "Pause / resume", category: "Play", binding: "F5", run: () => (playtest.paused ? playtest.resume() : playtest.pause()) },
     { id: "play.step", title: "Step one frame", category: "Play", binding: "F6", run: () => playtest.step() },
   ];
+}
+
+/**
+ * RUN, through the one door every entry point uses.
+ *
+ * A scene with behaviour on a project that has not been trusted asks first —
+ * pressing play should never be the moment someone else's code starts running.
+ */
+export function startPlaytest(ctx: CommandContext): void {
+  if (ctx.playtest.needsTrust()) {
+    ctx.openDialog("scripttrust");
+    return;
+  }
+  ctx.playtest.start();
 }
 
 export function stopAndPrompt(ctx: CommandContext): void {

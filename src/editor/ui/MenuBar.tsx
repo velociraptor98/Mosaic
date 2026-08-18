@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { stopAndPrompt } from "../commands";
+import { startPlaytest, stopAndPrompt } from "../commands";
 import { MosaicLockup } from "./Logo";
 import { useEditor, useStoreVersion } from "./context";
 
@@ -70,7 +70,11 @@ export function MenuBar() {
 
       <div className="transport">
         {!transport.playing ? (
-          <button className="run" onClick={() => playtest.start()} title="Run (Ctrl/⌘↵)">
+          <button
+            className="run"
+            onClick={() => startPlaytest({ store, playtest, workspace, openDialog })}
+            title="Run (Ctrl/⌘↵)"
+          >
             ▶ RUN
           </button>
         ) : (

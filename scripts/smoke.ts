@@ -9,6 +9,15 @@
  *   npm run smoke
  */
 import { autoDetectFrames, nameFrames, sliceGrid } from "../src/editor/assets/slice";
+import {
+  attachableClasses,
+  buildIndex,
+  componentFiles,
+  parseScriptFile,
+  propertiesOf,
+} from "../src/editor/scripts/parse";
+import { samplePlayerController, scriptStub, toClassName } from "../src/editor/scripts/stub";
+import { scriptFilePath } from "../src/shared/scripts";
 import { generateFiles, generatePrefabClass, generateSceneClass } from "../src/editor/export/generate";
 import { extractKeepRegions, hasUnmarkedEdits, mergeKeepRegions } from "../src/editor/export/keep";
 import {
@@ -17,7 +26,8 @@ import {
   planScaffold,
   slugify,
 } from "../src/editor/project/scaffold";
-import { SET_TILES, openTilesFor } from "../src/editor/ui/logoGeometry";
+import { SET_TILES, openTilesFor } from "../src/shared/logoGeometry";
+import { FIELD, REVERSED, mosaicIconBitmap, pixelAt } from "../src/shared/logoBitmap";
 import { ProjectStore } from "../src/editor/store/project";
 import { defaultBody } from "../src/editor/store/templates";
 import { resolveObject } from "../src/shared/prefabs";
@@ -534,6 +544,341 @@ group("New project — the scaffold plan");
 
   const art = plan.files.filter((f) => f.encoding === "base64");
   ok("art is planned as binary, not as text", art.length === 2, String(art.length));
+
+  // Script components need three things on disk: the base class, a compiler
+  // that accepts the decorator, and something to read.
+  ok("the scaffold writes the base class and a worked example",
+     rels.includes("src/scripts/ScriptComponent.ts") &&
+       rels.includes("src/scripts/PlayerController.ts"));
+  ok("and a tsconfig that accepts @property",
+     JSON.parse(plan.files.find((f) => f.rel === "tsconfig.json")!.contents).compilerOptions
+       .experimentalDecorators === true);
+  ok("the template's player opens with behaviour already attached", (() => {
+    const player = plan.project.scenes[0].objects.find((o) => o.type === "player");
+    return player?.scripts?.[0]?.class === "PlayerController";
+  })());
+  ok("the generated scene constructs it",
+     plan.files.find((f) => f.rel === "src/scenes/Level_01.ts")!.contents.includes(
+       "new PlayerController()",
+     ));
+  const jsPlan = planScaffold({ ...base, language: "js" });
+  ok("a javascript project lists the script files as skipped, not silently absent",
+     !jsPlan.writes.some((f) => f.rel.startsWith("src/scripts/")) &&
+       jsPlan.files.some((f) => f.rel === "src/scripts/ScriptComponent.ts" && f.skipped));
+  const emptyPlan = planScaffold({ ...base, template: "empty" });
+  ok("the empty template still gets the base class, with nothing attached",
+     emptyPlan.writes.some((f) => f.rel === "src/scripts/ScriptComponent.ts") &&
+       !emptyPlan.writes.some((f) => f.rel === "src/scripts/PlayerController.ts"));
+}
+
+// ------------------------------------------------------- script components
+group("Script components — reading the code behind an object");
+{
+  const SOURCE = `import { ScriptComponent, property } from "./ScriptComponent";
+
+export class PlayerController extends ScriptComponent {
+  @property({ min: 0, max: 600 })
+  moveSpeed = 180;
+
+  @property()
+  jumpVelocity = -420;
+
+  @property({ label: "coyote time (ms)" })
+  coyoteMs = 120;
+
+  @property()
+  doubleJump = false;
+
+  @property({ type: "ref" })
+  groundLayer = "Terrain";
+
+  @property({ options: ["stone", "grass"] })
+  clipSet = "stone";
+
+  @property()
+  onDeath = () => {};
+
+  private grounded = false;   // not exposed
+
+  update(dt) {
+    this.grounded = this.probe(this.groundLayer, 8);
+  }
+}
+
+abstract class Base extends ScriptComponent {
+  @property()
+  shared = 1;
+}
+
+export class Derived extends Base {}
+
+class Helper extends ScriptComponent {}
+`;
+
+  const parsed = parseScriptFile("src/scripts/PlayerController.ts", SOURCE);
+  const player = parsed.classes.find((c) => c.name === "PlayerController")!;
+  const names = player.properties.map((p) => p.name);
+
+  ok("only @property fields are exposed",
+     names.join() === "moveSpeed,jumpVelocity,coyoteMs,doubleJump,groundLayer,clipSet,onDeath",
+     names.join());
+  ok("private fields stay private", !names.includes("grounded"));
+  ok("methods are not read as fields", !names.includes("update"));
+
+  const byName = (n: string) => player.properties.find((p) => p.name === n)!;
+  ok("types are inferred from the initialiser",
+     byName("moveSpeed").type === "number" && byName("doubleJump").type === "boolean",
+     `${byName("moveSpeed").type}/${byName("doubleJump").type}`);
+  ok("defaults come from the class, not from the scene",
+     byName("moveSpeed").default === 180 && byName("jumpVelocity").default === -420);
+  ok("min/max reach the inspector", byName("moveSpeed").min === 0 && byName("moveSpeed").max === 600);
+  ok("a label overrides the field name", byName("coyoteMs").label === "coyote time (ms)");
+  ok("an explicit type wins over inference", byName("groundLayer").type === "ref");
+  ok("options make it an enum picker",
+     byName("clipSet").type === "enum" && byName("clipSet").options?.join() === "stone,grass");
+  ok("callbacks render read-only", byName("onDeath").type === "function" && byName("onDeath").codeOnly);
+
+  // The drawer highlights declarations, so the lines have to be real.
+  const declLine = SOURCE.split("\n").findIndex((l) => l.includes("@property({ min: 0, max: 600 })")) + 1;
+  ok("the decorator's line is recorded for the source drawer",
+     byName("moveSpeed").line === declLine && byName("moveSpeed").endLine === declLine + 1,
+     `${byName("moveSpeed").line}/${byName("moveSpeed").endLine}`);
+
+  const index = buildIndex([parsed]);
+  const offered = attachableClasses(index).map((c) => c.name);
+  ok("abstract and non-exported classes are indexed but not offered",
+     offered.join() === "Derived,PlayerController", offered.join());
+  ok("a subclass inherits its base's properties",
+     propertiesOf(index, index.classes.find((c) => c.name === "Derived")!).map((p) => p.name).join() === "shared");
+
+  const broken = parseScriptFile("src/scripts/Broken.ts", "export class Broken extends ScriptComponent {\n");
+  ok("a file that does not close is reported, not thrown", !!broken.error, broken.error);
+
+  const nested = parseScriptFile(
+    "src/scripts/Nested.ts",
+    `export class Nested extends ScriptComponent {\n  private table = { property: 1, min: 2 };\n}\n`,
+  );
+  ok("object literals inside a class are not read as declarations",
+     nested.classes[0].properties.length === 0);
+
+  const adjacent = parseScriptFile(
+    "src/scripts/Two.ts",
+    `export class First extends ScriptComponent {\n  @property()\n  a = 1;\n}\nexport class Second extends ScriptComponent {\n  @property\n  b = 2;\n\n  tick() {}\n}\n`,
+  );
+  ok("two classes with no blank line between them stay apart", (() => {
+    const [first, second] = adjacent.classes;
+    return (
+      adjacent.classes.length === 2 &&
+      first.properties.map((p) => p.name).join() === "a" &&
+      second.properties.map((p) => p.name).join() === "b"
+    );
+  })(), adjacent.classes.map((c) => `${c.name}:${c.properties.map((p) => p.name)}`).join(" "));
+
+  const notAComponent = buildIndex([
+    parseScriptFile("src/util/Vec.ts", "export class Vec {\n  @property()\n  x = 0;\n}\n"),
+  ]);
+  ok("a class that does not extend ScriptComponent is never offered",
+     attachableClasses(notAComponent).length === 0);
+
+  // The Project panel lists script files, and only script files.
+  const projectIndex = buildIndex([
+    parsed,
+    parseScriptFile("src/main.ts", "const game = 1;\nexport default game;\n"),
+    parseScriptFile("src/scenes/Level_01.ts", "export class Level_01 extends Phaser.Scene {}\n"),
+    parseScriptFile("src/scripts/fx/Shake.ts", "export class Shake extends ScriptComponent {}\n"),
+  ]);
+  const listed = componentFiles(projectIndex).map((f) => f.src);
+  ok("the project's script files are listed, in path order",
+     listed.join() === "src/scripts/fx/Shake.ts,src/scripts/PlayerController.ts", listed.join());
+  ok("a scene class or a plain module is not a script file",
+     !listed.some((f) => f.includes("main.ts") || f.includes("Level_01")), listed.join());
+  ok("the panel lists every component a file declares, attachable or not", (() => {
+    const file = componentFiles(projectIndex).find((f) => f.src.endsWith("PlayerController.ts"))!;
+    // PlayerController, Base (abstract), Derived, Helper (not exported) — all
+    // four are components; only two of them can be attached.
+    return file.classes.length === 4 && file.components.length === 4;
+  })());
+
+  ok("the stub and the sample both parse as what they claim to be", (() => {
+    const stub = parseScriptFile(scriptFilePath("Enemy"), scriptStub("Enemy"));
+    const sample = parseScriptFile(scriptFilePath("PlayerController"), samplePlayerController());
+    return (
+      stub.classes[0]?.name === "Enemy" &&
+      stub.classes[0].properties.length === 2 &&
+      sample.classes[0]?.properties.length === 4
+    );
+  })());
+  ok("a typed name becomes a class name", toClassName("player controller") === "PlayerController");
+}
+
+group("Script components — the scene stores values, the class stores fields");
+{
+  store.activateScene("Level_01");
+  const objId = store.scene!.objects.find((o) => o.type === "player")!.id;
+  // Undo replaces the scene object wholesale, so the object is looked up by id
+  // every time rather than held across an edit.
+  const live = () => store.scene!.objects.find((o) => o.id === objId)!;
+  const classes = () => store.scriptsFor(live()).map((s) => s.class).join();
+  const cls = { name: "PlayerController", src: "src/scripts/PlayerController.ts" };
+  const other = { name: "HealthComponent", src: "src/scripts/HealthComponent.ts" };
+
+  store.setSelection([objId]);
+  store.attachScript([objId], cls);
+  ok("attaching writes {class, src, enabled, props}", (() => {
+    const ref = store.scriptsFor(live())[0];
+    return ref.class === "PlayerController" && ref.src === cls.src && ref.enabled === true;
+  })());
+
+  store.attachScript([objId], other);
+  store.moveScript(objId, 1, -1);
+  ok("order is execution order, and reordering rewrites it",
+     classes() === "HealthComponent,PlayerController", classes());
+
+  store.setScriptProp(objId, 1, "moveSpeed", 220);
+  ok("a value is written into the scene, not into the class",
+     store.scriptsFor(live())[1].props.moveSpeed === 220);
+
+  store.setScriptEnabled(objId, 1, false);
+  ok("disabling keeps the values", (() => {
+    const ref = store.scriptsFor(live())[1];
+    return ref.enabled === false && ref.props.moveSpeed === 220;
+  })());
+
+  store.undo();
+  ok("each script edit is one undo", store.scriptsFor(live())[1].enabled === true);
+
+  store.clearScriptProp(objId, 1, "moveSpeed");
+  ok("clearing a value falls back to the class default",
+     !("moveSpeed" in store.scriptsFor(live())[1].props));
+
+  store.attachScript([objId], cls);
+  ok("the same class twice is allowed",
+     store.scriptsFor(live()).filter((s) => s.class === "PlayerController").length === 2);
+
+  store.detachScript(objId, 2);
+  store.detachScript(objId, 0);
+  ok("detaching removes exactly one row", classes() === "PlayerController", classes());
+
+  const missing = store.validate().filter((i) => i.message.includes("PlayerController"));
+  ok("without an index there is nothing to validate against", missing.length === 0);
+}
+
+group("Script components — prefab defines, instance overrides");
+{
+  const objId = store.scene!.objects.find((o) => o.type === "player")!.id;
+  store.setSelection([objId]);
+  const prefab = store.createPrefab("ScriptedPlayer", ["scripts.0.props.moveSpeed"], [objId])!;
+  ok("the prefab definition carries the scripts", (prefab.root.scripts ?? []).length === 1);
+
+  const instance = store.scene!.objects.find((o) => o.prefab === "ScriptedPlayer")!;
+  ok("the instance resolves its list from the definition", store.scriptsFor(instance).length === 1);
+  store.transact("smoke: edit the definition", () => {
+    prefab.root.scripts![0].props.jumpVelocity = -500;
+  });
+  ok("editing the definition reaches every instance",
+     store.scriptsFor(instance)[0].props.jumpVelocity === -500);
+
+  store.setScriptProp(instance.id, 0, "moveSpeed", 220);
+  ok("a value edit on an instance records an override, not an edit to the prefab",
+     instance.overrides?.["scripts.0.props.moveSpeed"] === 220 &&
+       (prefab.root.scripts?.[0].props.moveSpeed === undefined),
+     JSON.stringify(instance.overrides));
+  ok("and resolution puts it back on top of the definition",
+     store.scriptsFor(instance)[0].props.moveSpeed === 220);
+
+  store.revertOverride(instance.id, "scripts.0.props.moveSpeed");
+  ok("reverting drops the override and the prefab's value shows through",
+     store.scriptsFor(instance)[0].props.moveSpeed === undefined);
+
+  store.setScriptEnabled(instance.id, 0, false);
+  ok("enabled state is overridable per instance",
+     instance.overrides?.["scripts.0.enabled"] === false && store.scriptsFor(instance)[0].enabled === false);
+
+  store.attachScript([instance.id], { name: "FootstepAudio", src: "src/scripts/FootstepAudio.ts" });
+  ok("a structural change makes the instance own the whole list",
+     Array.isArray(instance.overrides?.scripts) &&
+       (instance.overrides!.scripts as unknown[]).length === 2,
+     JSON.stringify(Object.keys(instance.overrides ?? {})));
+  ok("and the per-value overrides are folded in rather than applied twice",
+     !Object.keys(instance.overrides ?? {}).some((k) => k.startsWith("scripts.")),
+     Object.keys(instance.overrides ?? {}).join());
+  ok("the prefab is untouched by any of it", (prefab.root.scripts ?? []).length === 1);
+
+  store.applyInstanceToPrefab(instance.id);
+  ok("apply pushes the instance's list up into the definition",
+     (store.project.prefabs.find((p) => p.name === "ScriptedPlayer")!.root.scripts ?? []).length === 2);
+  store.deletePrefab("ScriptedPlayer");
+}
+
+group("Script components — export wires them up");
+{
+  const scene = store.scene!;
+  const obj = scene.objects.find((o) => o.type === "player")!;
+  store.transact("smoke: scripts for codegen", () => {
+    obj.scripts = [
+      { class: "PlayerController", src: "src/scripts/PlayerController.ts", enabled: true, props: { moveSpeed: 220 } },
+      { class: "PlayerController", src: "src/scripts/fx/PlayerController.ts", enabled: true, props: {} },
+      { class: "FootstepAudio", src: "src/scripts/FootstepAudio.ts", enabled: false, props: {} },
+    ];
+  });
+
+  const code = generateSceneClass(store.project, store.scene!);
+  ok("the host is constructed once per scene", code.split("new ScriptHost(this)").length === 2);
+  ok("the base class is imported from the project's own source",
+     code.includes('import { ScriptHost } from "../scripts/ScriptComponent";'), code.slice(0, 400));
+  ok("values authored in the editor are passed to the constructor",
+     code.includes('this.scripts.add(player, new PlayerController(), { "moveSpeed": 220 });'), code);
+  ok("a disabled script is still constructed, and says so",
+     code.includes('new FootstepAudio(), {}, false)'), code);
+  ok("two classes of one name are imported under distinct aliases",
+     code.includes("PlayerController as PlayerController2") &&
+       code.includes("new PlayerController2()"), code);
+  ok("a scene without scripts carries no host", (() => {
+    const bare = store.project.scenes.find((s) => s.key !== store.activeSceneKey);
+    return bare ? !generateSceneClass(store.project, bare).includes("ScriptHost") : true;
+  })());
+
+  store.transact("smoke: clear scripts", () => {
+    delete obj.scripts;
+  });
+}
+
+// ---------------------------------------------------------------- app icon
+group("Identity — the app icon is the mark");
+{
+  const size = 512;
+  const icon = mosaicIconBitmap(size);
+  ok("the icon is square and fully opaque",
+     icon.width === size && icon.height === size && icon.data.length === size * size * 4);
+
+  const rgb = (x: number, y: number) => pixelAt(icon, x, y).slice(0, 3).join();
+  ok("the field is the one permitted filled field", rgb(4, 4) === FIELD.join(), rgb(4, 4));
+
+  // The mark occupies the middle 47%; unit u of the 26-unit grid maps here.
+  const scale = (size * (242 / 512)) / 26;
+  const origin = (size - 26 * scale) / 2;
+  const at = (u: number) => Math.round(origin + u * scale);
+
+  ok("every set tile is drawn reversed on it",
+     SET_TILES.every(([x, y]) => rgb(at(x + 4), at(y + 4)) === REVERSED.join()),
+     SET_TILES.map(([x, y]) => rgb(at(x + 4), at(y + 4))).join(" | "));
+
+  // The two open tiles are outlines: mark on the edge, field in the middle.
+  const open = openTilesFor(size)!;
+  ok("the open tiles are outlined, not filled",
+     rgb(at(13), at(13)) === FIELD.join() && rgb(at(13), at(22)) === FIELD.join(),
+     `${rgb(at(13), at(13))} / ${rgb(at(13), at(22))}`);
+  ok("and their stroke is on the cell boundary the ladder puts it on",
+     rgb(at(open.inset), at(13)) === REVERSED.join(), rgb(at(open.inset), at(13)));
+
+  ok("the icon is drawn from the same geometry the UI draws", (() => {
+    // A cell the mark leaves empty must be field, or the two have diverged.
+    return rgb(at(13), at(13)) === FIELD.join() && SET_TILES.length === 7;
+  })());
+
+  const tinted = mosaicIconBitmap(64, { field: REVERSED, mark: FIELD });
+  ok("the palette is a parameter, not a constant",
+     pixelAt(tinted, 2, 2).slice(0, 3).join() === REVERSED.join());
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);

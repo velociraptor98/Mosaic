@@ -4,6 +4,7 @@ import fs, { constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
+import { bundleScripts } from "./bundleScripts";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import {
@@ -17,6 +18,10 @@ import {
   type ProjectFolder,
   type RecentProject,
   type CreateResult,
+  type EditorOpen,
+  type ScriptBundle,
+  type ScriptEntry,
+  type ScriptFileIpc,
   type InstallProgress,
   type TargetCheck,
   type Toolchain,
@@ -29,10 +34,15 @@ const execFileAsync = promisify(execFile);
 const MANIFEST = "phaser.editor.json";
 const CONFIG = "mosaic.config.json";
 const SCENE_DIR = "src/scenes";
+const SRC_DIR = "src";
 const PREFAB_DIR = "src/prefabs";
 const ASSET_DIR = "assets";
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|wav|m4a)$/i;
+const SCRIPT_EXT = /\.(ts|tsx|js|jsx|mts|mjs)$/i;
+/** Source files are read whole for the index; anything huge is not source. */
+const MAX_SCRIPT_BYTES = 512 * 1024;
+const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", "coverage", ".next"]);
 
 const watchers = new Map<string, FSWatcher>();
 
@@ -135,6 +145,84 @@ async function listAssets(root: string): Promise<AssetFileInfo[]> {
   return out;
 }
 
+/**
+ * Every source file under src/, read whole.
+ *
+ * The main process stays dumb here too: it does not know what a script is, it
+ * just hands the renderer the text. Parsing, and deciding which classes are
+ * script components, happens above the platform seam where the browser build
+ * would do it as well.
+ */
+async function listScripts(root: string): Promise<ScriptFileIpc[]> {
+  const out: ScriptFileIpc[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries;
+    try {
+      entries = await fs.readdir(path.join(root, dir), { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const rel = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKIP_DIRS.has(entry.name)) continue;
+        await walk(rel);
+        continue;
+      }
+      if (!SCRIPT_EXT.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
+      const abs = path.join(root, rel);
+      const stat = await fs.stat(abs).catch(() => null);
+      if (!stat || stat.size > MAX_SCRIPT_BYTES) continue;
+      const contents = await readIfExists(abs);
+      if (contents !== null) out.push({ rel: toPosix(rel), contents, modified: stat.mtimeMs });
+    }
+  };
+  await walk(SRC_DIR);
+  out.sort((a, b) => a.rel.localeCompare(b.rel));
+  return out;
+}
+
+/**
+ * Hands a file to the user's real editor. Mosaic shows source read-only, so
+ * this is the one door out to editing it — the configured editor first, then
+ * whatever the OS has registered, and never a silent no-op.
+ */
+async function openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen> {
+  let abs: string;
+  try {
+    abs = resolveInside(root, rel);
+  } catch (err) {
+    return { ok: false, via: "none", error: (err as Error).message };
+  }
+  if (!(await exists(abs))) return { ok: false, via: "none", error: `${rel} is not on disk` };
+
+  const target = line && line > 0 ? `${abs}:${line}` : abs;
+  const configured = process.env.MOSAIC_EDITOR?.trim();
+  const candidates: { cmd: string; args: string[] }[] = [];
+  if (configured) candidates.push({ cmd: configured, args: ["-g", target] });
+  candidates.push(
+    { cmd: "code", args: ["-g", target] },
+    { cmd: "cursor", args: ["-g", target] },
+    { cmd: "subl", args: [target] },
+  );
+
+  for (const candidate of candidates) {
+    try {
+      await execFileAsync(candidate.cmd, candidate.args, {
+        timeout: 5000,
+        shell: process.platform === "win32",
+      });
+      return { ok: true, via: "editor" };
+    } catch {
+      // Not installed, or not on PATH. Try the next one.
+    }
+  }
+
+  // No code editor: the OS handler at least opens the file, minus the line.
+  const error = await shell.openPath(abs);
+  return error ? { ok: false, via: "none", error } : { ok: true, via: "system" };
+}
+
 // -------------------------------------------------------------------- git
 
 async function gitStatus(root: string): Promise<GitStatus> {
@@ -230,6 +318,24 @@ export function registerIpc(): void {
     readIfExists(resolveInside(root, rel)),
   );
 
+  ipcMain.handle(IPC.readScripts, async (_e, root: string): Promise<ScriptFileIpc[]> =>
+    listScripts(root),
+  );
+
+  ipcMain.handle(IPC.openInEditor, async (_e, root: string, rel: string, line?: number) =>
+    openInEditor(root, rel, line),
+  );
+
+  ipcMain.handle(
+    IPC.bundleScripts,
+    async (_e, root: string, entries: ScriptEntry[]): Promise<ScriptBundle> => {
+      // Every entry is resolved against the root before it reaches the
+      // bundler, so a renderer cannot ask for a file outside the project.
+      for (const entry of entries) resolveInside(root, entry.src);
+      return bundleScripts(root, entries);
+    },
+  );
+
   ipcMain.handle(IPC.importAssets, async (_e, root: string): Promise<AssetFileInfo[]> => {
     const result = await dialog.showOpenDialog({
       title: "Import assets",
@@ -249,9 +355,13 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.watch, async (_e, root: string) => {
     if (watchers.has(root)) return;
-    const watcher = chokidar.watch([MANIFEST, CONFIG, SCENE_DIR, PREFAB_DIR, ASSET_DIR], {
+    // src/ rather than src/scenes: scripts live beside the scenes they are
+    // attached in, and an edit to one has to re-index as promptly as an edit
+    // to the other reloads.
+    const watcher = chokidar.watch([MANIFEST, CONFIG, SRC_DIR, PREFAB_DIR, ASSET_DIR], {
       cwd: root,
       ignoreInitial: true,
+      ignored: (p: string) => SKIP_DIRS.has(path.basename(p)),
       awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 40 },
     });
     // Coalesce bursts: a single save from an editor can fire several events.

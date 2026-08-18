@@ -2393,3 +2393,300 @@ button.block {
   height: 38px;
   z-index: 1;
 }
+
+/* ------------------------------------------------------------------ scripts
+
+   The behaviour attached to an object. The list is execution order, so it
+   reads as an ordered list of rows rather than as a set of cards; a row's
+   values are indented under it, because they belong to that class and to
+   nothing else. Source is shown, never edited: the drawer is monospace and
+   read-only, with the declarations the inspector renders tinted in accent. */
+
+.scripts-panel .section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.scripts-panel .section-title .count,
+.tabs .tab-count {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  padding: 0 4px;
+  background: var(--tint-accent);
+  color: var(--color-accent-800);
+}
+
+.tabs .tab-count {
+  margin-left: 4px;
+}
+
+.scripts-panel .section-title .add {
+  margin-left: auto;
+}
+
+.script-row {
+  border: 1px solid var(--color-divider);
+  border-left-width: 2px;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.script-row.disabled {
+  opacity: 0.62;
+}
+
+.script-row.disabled .cls {
+  text-decoration: line-through;
+}
+
+.script-row.missing {
+  border-left-color: var(--color-danger);
+}
+
+.script-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.script-head input[type="checkbox"] {
+  accent-color: var(--color-accent);
+  flex: none;
+}
+
+.script-head .cls {
+  font-family: var(--font-heading);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+}
+
+.script-head .ordinal {
+  color: var(--text-dim);
+}
+
+.script-head .path {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.script-head .chev {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/* The filled square is the design's override marker: a value that differs
+   from the prefab's, rather than one merely present. */
+.script-head .marker {
+  width: 6px;
+  height: 6px;
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent);
+  display: inline-block;
+  margin-left: 4px;
+}
+
+.script-note {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding-left: 22px;
+}
+
+.script-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2) 0 0 22px;
+  border-top: 1px solid var(--color-divider);
+  margin-top: var(--space-1);
+}
+
+.script-body .field.readonly code {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.field-conflict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.override-row.stale {
+  border-left-color: var(--color-caution);
+  background: var(--color-caution-100);
+}
+
+.script-badge {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  min-width: 14px;
+  text-align: center;
+  padding: 0 3px;
+  background: var(--tint-accent);
+  color: var(--color-accent-800);
+  margin-left: auto;
+}
+
+/* attach picker */
+
+.script-palette .palette-head,
+.script-palette .palette-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-heading);
+  font-size: 10.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.script-palette .palette-foot {
+  border-bottom: none;
+  border-top: 1px solid var(--color-divider);
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-body);
+  color: var(--text-muted);
+}
+
+.script-palette .palette-head .muted {
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-dim);
+}
+
+.script-palette li {
+  flex-wrap: wrap;
+}
+
+.script-palette li .subtitle {
+  width: 100%;
+}
+
+.script-palette li.create .title {
+  color: var(--color-accent-800);
+}
+
+.script-palette .tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.script-palette .tag.warn {
+  color: var(--color-caution-800);
+}
+
+/* read-only source drawer */
+
+.source-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 62%);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-divider);
+  box-shadow: var(--shadow-md);
+  z-index: 3;
+}
+
+.source-drawer > header,
+.source-drawer > footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.source-drawer > header code {
+  font-size: 10.5px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-drawer > header .tag {
+  font-family: var(--font-heading);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.source-drawer > footer {
+  border-bottom: none;
+  border-top: 1px solid var(--color-divider);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.source-code {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-2) 0;
+}
+
+.source-line {
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  padding: 0 var(--space-3);
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+  white-space: pre;
+}
+
+.source-line.hl {
+  background: var(--tint-accent);
+  color: var(--color-accent-900);
+}
+
+.source-line .n {
+  width: 30px;
+  flex: none;
+  text-align: right;
+  padding-right: var(--space-3);
+  color: var(--text-dim);
+  user-select: none;
+}
+
+.source-line .t {
+  flex: 1;
+}
+
+/* A compile error is code: monospaced, scrollable, never truncated to a
+   sentence that hides the line the bundler is pointing at. */
+.compile-error {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  margin: var(--space-2) 0 0;
+  max-height: 140px;
+  overflow: auto;
+  white-space: pre-wrap;
+}

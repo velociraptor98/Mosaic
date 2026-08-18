@@ -5,8 +5,9 @@ rendering the real scene data; the surrounding UI is React. Scenes are plain
 JSON that the editor, the play-test and a shipped game all read — there is no
 import step to lose data in.
 
-Implements the nine workflows in `Phaser Editor Workflows.html`, styled to the
-tokens in that document and branded per `Mosaic Logo.html`.
+Built to the design documents that specify it — the editor workflows, the new
+project flow, the logo sheet, and `Mosaic Script Inspector Flow.html`, the one
+still in the tree, which specifies workflow 10 below.
 
 Mosaic is a **desktop app**. It opens a project *folder*, treats the scene
 files in it as the source of truth, watches them for edits made elsewhere, and
@@ -22,20 +23,24 @@ npm run dev:app     # the desktop app (Electron + Vite dev server)
 npm run dev         # the browser demo at the printed URL
 
 npm run smoke:all   # both test suites
-npm run smoke       # headless pass over the editor's logic (119 checks)
-npm run smoke:app   # boots the real shell against a real folder (57 checks)
+npm run smoke       # headless pass over the editor's logic (180 checks)
+npm run smoke:app   # boots the real shell against a real folder (106 checks)
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
+
+npm run pack        # an unsigned .app in release/ (electron-builder --dir)
+npm run dist        # installers: dmg / nsis / AppImage for the host platform
+npm run smoke:packed  # runs the desktop suite against the PACKAGED app (macOS arm64)
 ```
 
-## The nine workflows, and where they live
+## The ten workflows, and where they live
 
 ### 1. Project & scenes — `project/workspace.ts`, `project/serialize.ts`, `store/project.ts`
 The editor opens a *folder*, not a file — `readProject(dir)` parses
 `phaser.editor.json`, and chokidar watches the tree and re-reads on change. The
-Project tab lists every scene, prefab, asset and animation, with an unsaved
-marker and **the git status of each**. New scenes come from templates (Empty /
+Project tab lists every scene, prefab, script, asset and animation, with an
+unsaved marker and **the git status of each**. New scenes come from templates (Empty /
 Platformer / Top-down) that write a runnable scene — camera, tile layer, a
 player with a body. Keys are derived and collision-free before write.
 
@@ -155,6 +160,73 @@ Watch re-emits on every change so a running dev server stays in step.
 Export changes nothing in the scene: the editor and the generated code read the
 same `scene.json`.
 
+### 10. Script components — `scripts/parse.ts`, `scripts/registry.ts`, `ui/ScriptsTab.tsx`
+The scene shows what a script does; **the file stays the source of truth**. A
+class in your own `src/` marks fields with `@property`, and Mosaic renders
+those fields in the Scripts tab. The class says what exists; the scene says
+what it is set to. Editing a value writes into `scene.json`, never into
+your `.ts`.
+
+Scene data is `scripts: [{ class, src, enabled, props }]` per object. The
+editor resolves class → file through an index built on project open and kept
+warm by the same watcher that reloads scenes: `readScripts` hands the renderer
+every source file under `src/`, and `parse.ts` reads the declarations out of
+them **statically** — Mosaic never executes your game code to find out what it
+exposes, which is also why the index survives a file that does not compile
+(the fields grey out and the last good metadata stays).
+
+- **Order is execution order.** Rows run top to bottom, drag or ↑↓ to reorder,
+  and the order is written back to the file. The checkbox is *enabled* state,
+  not deletion: a disabled script keeps its values and is still constructed at
+  runtime, so re-enabling it mid-game just works.
+- **Only declared fields are editable.** `@property` carries type, label,
+  min/max and enum options; objects and callbacks render read-only with a *code
+  only* tag. A field removed from the class keeps its value in the scene file,
+  flagged rather than deleted; a field whose type changed offers a conversion
+  instead of coercing silently.
+- **Attach from what the project has.** The picker lists real exported classes
+  extending `ScriptComponent` — no free-text class names, because an attach
+  that cannot resolve is not worth offering. Abstract and non-exported classes
+  are indexed (a subclass needs them) but not offered. Nothing matches?
+  *Create script…* writes `src/scripts/<Name>.ts` from the stub, indexes it and
+  attaches it in one action. A class already attached asks before duplicating,
+  and duplicates are numbered `#2`.
+- **The Project tab lists them.** Every file under `src/` that declares a
+  component shows in the folder view beside the scenes, prefabs and assets,
+  with its classes, its git status, how many objects across the project run it,
+  and ↗ to open it in your editor. Clicking one opens it read-only.
+- **View source** opens the file in a read-only drawer with the declarations
+  the inspector is rendering highlighted, so the mapping from field to code is
+  obvious. External saves re-index and refresh the field list in place; the
+  text you are reading gets a *reload* banner rather than moving underneath
+  you. *Open in editor* hands the file to `$MOSAIC_EDITOR`, then `code`,
+  `cursor`, `subl`, then the OS handler — at the property's line where it can.
+- **Prefab vs instance.** Scripts live on the prefab; an instance stores only
+  the diff. A value edit records `scripts.<i>.props.<field>`; a structural edit
+  (attach, detach, reorder) makes the instance own the whole list and folds the
+  per-value overrides in, so nothing is applied twice. *Apply to prefab* pushes
+  the diff up, *Revert* drops it.
+- **Play-test runs them.** RUN compiles the project's classes with rolldown in
+  the main process — Phaser stays external and is handed the editor's own
+  instance, so a script's `instanceof` is asked against the same Phaser that
+  built the sprite — and the result is evaluated in the renderer and passed to
+  `buildScene`. Editing a script while the scene is playing recompiles and
+  restarts it on the new code; a file that does not compile leaves the run
+  alive on the last good build and says so. A script that throws is switched
+  off rather than allowed to take the frame loop with it.
+- **Running project code is asked for, once.** Everywhere else Mosaic reads
+  source; play-test executes it. So a project with behaviour asks before its
+  first run, and the answer is remembered **by the editor, per folder** — never
+  in the project, where the project could grant itself the permission.
+- **Export wires it up.** The generated scene constructs one `ScriptHost`, then
+  `this.scripts.add(player, new PlayerController(), { moveSpeed: 220 })` in list
+  order, with `, false` for a disabled script. Two classes of one name in
+  different folders are imported under distinct aliases. `runtime/scripts.ts`
+  is the base class, the `@property` decorator and the host — one file, type
+  checked here, copied verbatim into your project as
+  `src/scripts/ScriptComponent.ts`, so what the editor parses and what your
+  game runs cannot drift apart.
+
 ## The New Project flow
 
 Implements `Mosaic New Project Flow.html` — seven screens from launcher to
@@ -207,6 +279,7 @@ One renderer, two targets, with a single seam between them: `src/editor/platform
 | Assets | files, served over `mosaic://` | inlined data: URLs |
 | Saving | debounced write into the folder | debounced write to localStorage |
 | External edits | watched (chokidar), reloaded | n/a |
+| Scripts | indexed from `src/**`, attachable | unavailable — no source tree |
 | Git status | per file in the Project panel | n/a |
 | Export | straight into the project | File System Access API, else download |
 | Storage ceiling | none | ~5MB, warned about in the status bar |
@@ -220,6 +293,8 @@ target it is running on.
 ```
 electron/
   main.ts        window + app lifecycle; registers the asset protocol and IPC
+  appIcon.ts     the mark, rasterised into the window and dock icon
+  bundleScripts.ts  compiles the project's script classes for the play-test
   preload.ts     the ONLY bridge: contextBridge -> window.mosaic
   contract.ts    channel names + payload types, shared by main and renderer
   ipc.ts         fs, native dialogs, chokidar watcher, git status
@@ -244,6 +319,36 @@ same watcher events an external edit does, the echo is filtered **by comparing
 content**, not by a time window — a window races any edit made shortly after a
 save and swallows it silently. If a file changes on disk while the scene has
 unsaved edits, Mosaic says so instead of overwriting either side.
+
+## Packaging
+
+`npm run pack` writes an unsigned app to `release/`; `npm run dist` writes
+installers. The whole desktop suite can be run against the *packaged* bundle
+rather than the source tree — `npm run smoke:packed` — which is what catches
+the things packaging breaks and nothing else does: asar paths, a dependency
+that was only ever a devDependency, a native module that cannot be loaded from
+inside an archive.
+
+Three details the config exists for:
+
+- **`chokidar` and `rolldown` are `dependencies`, not devDependencies.** Both
+  are imported by the main process at run time — the watcher and the script
+  compiler. A packager ships only `dependencies`, so anything the built
+  `main.mjs` imports has to be one.
+- **`asarUnpack: ["**/@rolldown/**"]`.** Rolldown's compiler is a Rust binary,
+  and a `.node` cannot be loaded from inside an asar.
+- **`directories.output: "release"`.** electron-builder defaults to `dist/`,
+  which is where the renderer bundle already lives.
+
+The bundle icon comes from `npm run icon`, which writes `build/icon.png` at
+1024² from the same geometry the UI and the running app draw — electron-builder
+derives `.icns` and `.ico` from it. Nothing about the mark is checked in as a
+bitmap.
+
+Signing, when the certificates exist: a Developer ID Application cert plus
+`hardenedRuntime` and an entitlements file on macOS. One entitlement is
+specific to this app — the play-test evaluates compiled scripts with
+`new Function`, so the hardened runtime needs `com.apple.security.cs.allow-jit`.
 
 ## Design
 
@@ -284,7 +389,7 @@ rather than as programmer art dropped onto a designed surface.
 
 ### Identity
 
-`src/editor/ui/Logo.tsx` holds the mark from `Mosaic Logo.html`: a 3×3 grid on a
+`src/editor/ui/Logo.tsx` holds the mark: a 3×3 grid on a
 26-unit canvas, 8-unit tile and 1-unit gutter — the canvas grid itself. Seven
 set tiles read as an **M**; the two open tiles are the cells not yet painted.
 
@@ -300,6 +405,15 @@ tool strip, where a wordmark would compete with the tool labels.
 `public/app-icon.svg` is the reversed cut on `--color-accent-900` — the one
 filled field the sheet permits.
 
+The **desktop app icon is that same cut, rasterised at boot** rather than
+checked in as a bitmap: `shared/logoBitmap.ts` draws the mark from
+`shared/logoGeometry.ts` — the numbers the React `<MosaicMark>` and the
+headless suite also read — and `electron/appIcon.ts` wraps it in a PNG for
+`nativeImage`. Coverage is computed exactly per pixel (these are axis-aligned
+rectangles; supersampling would be the long way round), and the window and the
+macOS dock both take the result. No bitmap in the repo means no bitmap to drift
+from the mark.
+
 ## Layout
 
 ```
@@ -309,6 +423,10 @@ src/
     definitions.ts  Built-in tileset + object types
     textures.ts     Procedural placeholder art (Phaser)
     tilesetImage.ts The placeholder tileset as a PNG data URL (no Phaser)
+    logoGeometry.ts The mark's 3x3 grid — drawn by the UI, the app icon and the
+                    headless suite, so there is one set of numbers
+    logoBitmap.ts   That geometry rasterised: the app icon, with no bitmap
+                    checked into the repo
     prefabs.ts      Resolution: definition <- overrides, per property path
     transform.ts    Hierarchy maths, cycle rejection, world<->local
     manifest.ts     Derives the Phaser loader manifest from a scene
@@ -316,6 +434,8 @@ src/
   runtime/         ships inside your game — zero editor deps
     loadScene.ts    preloadProject / buildScene: tilemaps, sprites, bodies,
                     animations and the collision matrix
+    scripts.ts      ScriptComponent, the @property decorator and the host that
+                    runs them; copied into your project by the scaffold
 
   tokens.css       the reference document's design tokens
   styles.css       editor chrome built from them
@@ -331,10 +451,13 @@ src/
                     PlayScene.ts, playtest.ts, PhaserHost.tsx, snapping.ts,
                     textures.ts
     assets/slice.ts grid + auto-detect slicing, frame naming
+    scripts/        parse.ts (@property declarations, statically), registry.ts
+                    (the index, kept warm by the watcher), runtime.ts (the
+                    compiled classes + per-project trust), stub.ts (templates)
     export/         generate.ts, keep.ts, write.ts
     commands.ts     command registry, bindings, palette search
-    ui/             MenuBar, Toolbar, LeftDock, Inspector, BottomDock,
-                    StatusBar, Logo, fields, dialogs/
+    ui/             MenuBar, Toolbar, LeftDock, Inspector, ScriptsTab,
+                    SourceDrawer, BottomDock, StatusBar, Logo, fields, dialogs/
     bridge.ts       60fps canvas chatter (cursor, drag previews, transport)
 
 scripts/smoke.ts   headless pass over every workflow's logic
@@ -374,12 +497,28 @@ inside the keep markers survives every regeneration.
   inlined as data URLs, so a large project will exceed the quota (the status
   bar says so), and there is no folder, no watching and no git. The desktop
   build has none of these limits.
-- The desktop app is **not packaged**: `npm run dev:app` and `npm run start:app`
-  run it from source. electron-builder, signing, notarization and auto-update
-  are not set up.
+- The desktop app packages **unsigned**. `npm run pack` produces a working
+  `.app`, but code signing, notarization and auto-update are not set up, so
+  macOS quarantines a downloaded build (`xattr -dr com.apple.quarantine` clears
+  it for local use). Signing needs certificates, not code — see Packaging.
+- Because rolldown ships a **native binding**, builds are per-platform: a
+  Windows binary has to be built on Windows. The same binding is why
+  `asarUnpack` exists in the build config, and why the bundle is ~400MB.
 - Arcade physics only. Bodies are box or circle; arbitrary polygons are a
   Matter concern and are not modelled.
 - Play-test ships a default player controller (arrows/WASD, jump on gravity
   scenes) so RUN does something; real behaviour belongs in your exported code.
 - Prefabs are single-node: a prefab's child objects are stored in the
   definition but neither rendered nor exported as children.
+- Play-test compiles scripts with **rolldown**, which is therefore a runtime
+  dependency of the desktop build, and it runs them with `new Function` in the
+  renderer. That is the user's own code by construction — but it is not a
+  sandbox, which is why the trust prompt exists and why the browser build
+  refuses outright.
+- A hot restart replays the scene from the pre-play snapshot; **in-flight game
+  state is not carried across** a script edit. That is the honest reading of
+  "the code changed", and it keeps the result reproducible.
+- Script components are a TypeScript story: `@property` needs a compiler
+  configured for decorators, which the scaffold's `tsconfig.json` provides. A
+  JavaScript project lists the script files as skipped rather than writing code
+  that will not build.

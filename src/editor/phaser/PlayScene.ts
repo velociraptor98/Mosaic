@@ -3,12 +3,20 @@ import { buildScene } from "../../runtime/loadScene";
 import { setPath } from "../../shared/prefabs";
 import type { ProjectData, SceneData } from "../../shared/types";
 import type { EditorBridge } from "../bridge";
+import type { ScriptCtor } from "../scripts/runtime";
+import type { ScriptHost } from "../../runtime/scripts";
 
 export interface PlaySceneInit {
   project: ProjectData;
   scene: SceneData;
   bridge: EditorBridge;
   debug: boolean;
+  /**
+   * The project's compiled script classes. Absent when the project has none,
+   * when they did not compile, or when the user has not trusted this folder —
+   * in every one of those cases the scene still runs, without behaviour.
+   */
+  scripts?: Record<string, ScriptCtor>;
 }
 
 /**
@@ -21,6 +29,10 @@ export class PlayScene extends Phaser.Scene {
   private sceneData!: SceneData;
   private bridge!: EditorBridge;
   private debug = true;
+  private scripts?: Record<string, ScriptCtor>;
+  private host: ScriptHost | null = null;
+  /** Scripts that threw and were switched off, for the status bar. */
+  scriptErrors: { script: string; message: string }[] = [];
 
   private objects = new Map<string, Phaser.GameObjects.Sprite>();
   private player: Phaser.Physics.Arcade.Sprite | null = null;
@@ -41,6 +53,8 @@ export class PlayScene extends Phaser.Scene {
     this.sceneData = data.scene;
     this.bridge = data.bridge;
     this.debug = data.debug;
+    this.scripts = data.scripts;
+    this.scriptErrors = [];
     this.paused = false;
     this.frame = 0;
     this.volatile.clear();
@@ -54,8 +68,24 @@ export class PlayScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, s.width, s.height);
     this.physics.world.gravity.y = s.gravityY;
 
-    const built = buildScene(this, this.project, this.sceneData, { physics: true });
+    const built = buildScene(this, this.project, this.sceneData, {
+      physics: true,
+      scripts: this.scripts,
+    });
     this.objects = built.objectsById;
+    this.host = built.scripts;
+
+    // A script that throws is disabled rather than allowed to take the run
+    // down; the editor says which one, once, rather than every frame.
+    if (this.host) {
+      this.host.onError = ({ script, error }) => {
+        const name = script.constructor?.name ?? "script";
+        const message = error instanceof Error ? error.message : String(error);
+        this.scriptErrors.push({ script: name, message });
+        this.bridge.send("scriptError", { script: name, message });
+        console.error(`[mosaic] ${name} threw and was disabled`, error);
+      };
+    }
 
     // Debug draw runs in the same view as the editor, so a body that is wrong
     // by four pixels is obvious rather than inferred from behaviour.

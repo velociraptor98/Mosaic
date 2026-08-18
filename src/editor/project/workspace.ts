@@ -2,6 +2,9 @@ import type { ProjectData } from "../../shared/types";
 import { setProjectRoot } from "../export/write";
 import { platform } from "../platform";
 import type { ProjectChange, ProjectLocation, RecentEntry } from "../platform/types";
+import { ScriptRegistry } from "../scripts/registry";
+import { ScriptRuntime } from "../scripts/runtime";
+import { SCRIPT_EXT } from "../../shared/scripts";
 import type { ProjectStore } from "../store/project";
 import { CONFIG_PATH, MANIFEST_PATH, projectFromSource, projectToFiles, scenePath } from "./serialize";
 
@@ -52,6 +55,19 @@ export class Workspace {
   install: { running: boolean; log: string; code: number | null; error?: string } | null = null;
   /** Bumped on every change, so React can subscribe with useSyncExternalStore. */
   revision = 0;
+  /**
+   * The project's script index. It lives here because it is a property of the
+   * folder, like git status: opening a project builds it, and the same watcher
+   * that reloads a scene keeps it warm.
+   */
+  scripts = new ScriptRegistry();
+  /**
+   * The compiled half of the same thing: the classes the play-test constructs.
+   * Built on RUN, rebuilt when the source behind it changes.
+   */
+  scriptRuntime = new ScriptRuntime();
+  /** Set by the play-test, so a source edit can reach a running scene. */
+  onScriptsChanged: ((rels: string[]) => void) | null = null;
 
   private store: ProjectStore;
   private stopWatch: (() => void) | null = null;
@@ -67,6 +83,7 @@ export class Workspace {
 
   constructor(store: ProjectStore) {
     this.store = store;
+    store.setScriptIndex(this.scripts);
     // Install output streams to the status bar; failure is a banner, not a
     // blocker — the project is usable either way.
     platform.onInstallProgress((p) => {
@@ -144,6 +161,10 @@ export class Workspace {
     // what is on disk always matches what the editor is showing.
     if (scaffolded) await this.saveNow(project);
 
+    // The index is built in the background: the scene is on screen either
+    // way, and a project with hundreds of source files should not hold it up.
+    void this.scripts.load(location.root);
+
     this.startWatching();
     void this.refreshGit();
     void platform.remember(location);
@@ -163,6 +184,8 @@ export class Workspace {
     this.location = null;
     this.git = {};
     this.issues = [];
+    this.scripts.clear();
+    this.scriptRuntime.reset();
     setProjectRoot(null);
     if (!opts.keepStore) {
       this.store.setPersister(null);
@@ -251,6 +274,17 @@ export class Workspace {
     );
     const touchedAssets = external.some((c) => c.rel.startsWith("assets/"));
 
+    // Source edits re-index and refresh the inspector's field list in place.
+    // They never reload the scene: the class says what a script exposes, the
+    // scene says what it is set to, and only the class changed.
+    const touchedScripts = external
+      .filter((c) => SCRIPT_EXT.test(c.rel) && !c.rel.endsWith(".scene.json"))
+      .map((c) => c.rel);
+    if (touchedScripts.length) {
+      await this.scripts.refresh(touchedScripts);
+      this.onScriptsChanged?.(touchedScripts);
+    }
+
     if (this.store.stack().canUndo && touchedProject && this.store.isDirty(this.store.activeSceneKey)) {
       // Do not silently overwrite unsaved work with what is on disk.
       this.store.setStatus(
@@ -273,6 +307,7 @@ export class Workspace {
   /** Re-read the folder without touching the watcher or window title. */
   async reload(): Promise<void> {
     if (!this.location) return;
+    void this.scripts.load(this.location.root);
     const source = await platform.readProject(this.location.root);
     if (!source) return;
     const { project, issues } = projectFromSource(source, this.location.name, (rel) =>

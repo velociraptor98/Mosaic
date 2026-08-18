@@ -1,6 +1,9 @@
 import type { AssetDef } from "../../shared/types";
 import type {
   CreateResult,
+  EditorOpen,
+  ScriptBundle,
+  ScriptFile,
   Platform,
   ProjectLocation,
   ProjectSource,
@@ -36,6 +39,23 @@ export const browserPlatform: Platform = {
   },
   async readText(): Promise<string | null> {
     return null;
+  },
+  // Script components need a source tree to read declarations out of, and the
+  // browser build has no folder — so it reports none rather than inventing an
+  // index the user cannot edit.
+  async readScripts(): Promise<ScriptFile[]> {
+    return [];
+  },
+  async openInEditor(): Promise<EditorOpen> {
+    return { ok: false, via: "none", error: "The browser build has no local files to open" };
+  },
+  async bundleScripts(): Promise<ScriptBundle> {
+    return {
+      code: null,
+      error: "The browser build has no source tree to compile",
+      warnings: [],
+      modules: [],
+    };
   },
   async importAssets(): Promise<AssetDef[]> {
     return [];

@@ -4,7 +4,7 @@ import type { LeftTab } from "../store/project";
 import type { SceneObject, TileLayer } from "../../shared/types";
 import { platform } from "../platform";
 import { MANIFEST_PATH, scenePath } from "../project/serialize";
-import { useEditor, useStoreVersion, useWorkspace } from "./context";
+import { useEditor, useScripts, useStoreVersion, useWorkspace } from "./context";
 
 const TABS: { id: LeftTab; label: string }[] = [
   { id: "project", label: "Project" },
@@ -57,7 +57,20 @@ function GitBadge({ code }: { code: string | undefined }) {
 function ProjectTree() {
   const { store, workspace, openDialog } = useEditor();
   useWorkspace(workspace);
+  useScripts(workspace.scripts);
   const git = workspace.git;
+  const scriptFiles = workspace.scripts.files();
+  // How many objects, across every scene, actually run each class. A script
+  // nothing uses is worth seeing as much as one everything uses.
+  const usage = new Map<string, number>();
+  for (const scene of store.project.scenes) {
+    for (const obj of scene.objects) {
+      for (const script of store.scriptsFor(obj)) {
+        const key = `${script.src}::${script.class}`;
+        usage.set(key, (usage.get(key) ?? 0) + 1);
+      }
+    }
+  }
 
   return (
     <div className="tree">
@@ -138,6 +151,57 @@ function ProjectTree() {
         </div>
       ))}
 
+      {/* The editor indexes these, so the folder view has to show them: a
+          class the project has is as much a part of it as a scene is. */}
+      {platform.canOpenProjects && (
+        <>
+          <div className="tree-group">scripts</div>
+          {workspace.scripts.loading && <div className="empty">Indexing src/…</div>}
+          {!workspace.scripts.loading && scriptFiles.length === 0 && (
+            <div className="empty">
+              No script components yet. Select an object and use + Add in the Scripts tab to
+              write one.
+            </div>
+          )}
+          {scriptFiles.map((file) => {
+            const uses = file.components.reduce(
+              (n, cls) => n + (usage.get(`${file.src}::${cls.name}`) ?? 0),
+              0,
+            );
+            return (
+              <div key={file.src} className="tree-row-wrap">
+                <button
+                  className="tree-row"
+                  title={file.components
+                    .map((c) => `${c.name} · ${c.properties.length} @property`)
+                    .join("\n")}
+                  onClick={() =>
+                    store.setUi({
+                      sourceView: { src: file.src, className: file.components[0].name },
+                    })
+                  }
+                >
+                  <span className="glyph">ƒ</span>
+                  {file.src.replace(/^src\//, "")}
+                  <GitBadge code={git[file.src]} />
+                  <span className="meta">
+                    {file.components.map((c) => c.name).join(", ")}
+                    {uses > 0 ? ` · ${uses}×` : ""}
+                  </span>
+                </button>
+                <button
+                  className="mini"
+                  title="Open in your editor"
+                  onClick={() => void workspace.scripts.openExternal(file.src, file.components[0].line)}
+                >
+                  ↗
+                </button>
+              </div>
+            );
+          })}
+        </>
+      )}
+
       <div className="tree-group">assets</div>
       {store.project.assets.map((asset) => (
         <button
@@ -173,6 +237,7 @@ function ProjectTree() {
 function Outliner() {
   const { store } = useEditor();
   const scene = store.scene;
+  const scriptCount = (obj: SceneObject) => store.scriptsFor(obj).length;
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
   if (!scene) return <div className="empty">No scene.</div>;
@@ -206,6 +271,13 @@ function Outliner() {
           <span className="glyph">{obj.type === "container" ? "▣" : obj.prefab ? "⬡" : "◻"}</span>
           <span className="name">{obj.name}</span>
           {obj.prefab && <span className="meta">{obj.prefab}</span>}
+          {/* The badge is the script count: the canvas should say an object
+              has behaviour without the inspector being opened. */}
+          {scriptCount(obj) > 0 && (
+            <span className="script-badge" title={`${scriptCount(obj)} script(s)`}>
+              {scriptCount(obj)}
+            </span>
+          )}
           <button
             className="mini"
             title={obj.visible ? "Hide" : "Show"}

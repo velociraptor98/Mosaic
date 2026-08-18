@@ -5,6 +5,10 @@
  * canvas grid itself. Seven set tiles read as an M; the two open tiles are the
  * cells not yet painted.
  *
+ * Lives in shared/ because three consumers draw from it: the React mark, the
+ * headless suite that asserts it, and the main process, which rasterises the
+ * app icon from these same numbers rather than from a checked-in bitmap.
+ *
  * Kept free of JSX so the geometry can be asserted headlessly.
  */
 

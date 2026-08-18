@@ -1,4 +1,5 @@
 import { BrowserWindow, app } from "electron";
+import { mosaicIcon } from "./appIcon";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -115,6 +116,288 @@ export async function runSmoke(win: BrowserWindow): Promise<void> {
     );
     ok("a path escaping the project root is refused", escaped === 403, `status ${escaped}`);
 
+    // --- script components: the index, the watcher, and Create script… ---
+    await fs.mkdir(path.join(root, "src/scripts"), { recursive: true });
+    const patrolPath = path.join(root, "src/scripts/Patrol.ts");
+    await fs.writeFile(
+      patrolPath,
+      `import { ScriptComponent, property } from "./ScriptComponent";
+
+export class Patrol extends ScriptComponent {
+  @property({ min: 0, max: 400 })
+  speed = 60;
+
+  @property()
+  pingPong = true;
+}
+`,
+    );
+    await wait(2600); // watcher debounce + re-index
+
+    const indexed = await evaluate<{ name: string; props: number } | null>(
+      win,
+      `(() => {
+         const cls = window.mosaicDebug.workspace.scripts.attachable().find(c => c.name === "Patrol");
+         return cls ? { name: cls.name, props: cls.properties.length } : null;
+       })()`,
+    );
+    ok("a class written into src/ is indexed by the watcher", indexed?.name === "Patrol", JSON.stringify(indexed));
+    ok("its @property declarations come with it", indexed?.props === 2, JSON.stringify(indexed));
+
+    const attachedRef = await evaluate<{ class: string; src: string; enabled: boolean } | null>(
+      win,
+      `(() => {
+         const s = window.mosaicDebug.store;
+         const obj = s.scene.objects[0];
+         const cls = s.scriptIndex.attachable().find(c => c.name === "Patrol");
+         s.attachScript([obj.id], cls);
+         s.setScriptProp(obj.id, 0, "speed", 120);
+         const ref = s.scriptsFor(s.scene.objects.find(o => o.id === obj.id))[0];
+         return { class: ref.class, src: ref.src, enabled: ref.enabled };
+       })()`,
+    );
+    ok("attaching records the class and the file it was found in",
+       attachedRef?.class === "Patrol" && attachedRef.src === "src/scripts/Patrol.ts",
+       JSON.stringify(attachedRef));
+
+    await wait(1200);
+    const savedScene = JSON.parse(await fs.readFile(scenePath, "utf8"));
+    ok("the reference and its value are saved into the scene file", (() => {
+      const script = savedScene.objects?.[0]?.scripts?.[0];
+      return script?.class === "Patrol" && script.props.speed === 120;
+    })(), JSON.stringify(savedScene.objects?.[0]?.scripts));
+
+    // An external edit to the class re-indexes; it must not touch the values.
+    await fs.writeFile(
+      patrolPath,
+      `import { ScriptComponent, property } from "./ScriptComponent";
+
+export class Patrol extends ScriptComponent {
+  @property({ min: 0, max: 400 })
+  speed = 60;
+
+  @property()
+  pingPong = true;
+
+  @property({ label: "wait at the end (ms)" })
+  dwellMs = 250;
+}
+`,
+    );
+    await wait(2600);
+    const afterReindex = await evaluate<{ props: number; speed: unknown; label: string | null }>(
+      win,
+      `(() => {
+         const w = window.mosaicDebug.workspace;
+         const cls = w.scripts.attachable().find(c => c.name === "Patrol");
+         const props = w.scripts.properties(cls);
+         const s = window.mosaicDebug.store;
+         return {
+           props: props.length,
+           speed: s.scriptsFor(s.scene.objects[0])[0].props.speed,
+           label: props.find(p => p.name === "dwellMs")?.label ?? null,
+         };
+       })()`,
+    );
+    ok("editing the class refreshes the field list in place", afterReindex.props === 3, JSON.stringify(afterReindex));
+    ok("and leaves the values the scene authored alone", afterReindex.speed === 120, JSON.stringify(afterReindex));
+    ok("a label written in the decorator survives the round trip",
+       afterReindex.label === "wait at the end (ms)", String(afterReindex.label));
+
+    const created = await evaluate<string | null>(
+      win,
+      `window.mosaicDebug.workspace.scripts.create("Chaser").then(c => c ? c.src : null)`,
+    );
+    ok("Create script… writes a file and indexes it", created === "src/scripts/Chaser.ts", String(created));
+    const chaserSource = await fs.readFile(path.join(root, "src/scripts/Chaser.ts"), "utf8").catch(() => "");
+    ok("the stub it writes extends ScriptComponent",
+       chaserSource.includes("export class Chaser extends ScriptComponent"), chaserSource.slice(0, 80));
+    ok("and the base class is written beside it the first time",
+       await exists(path.join(root, "src/scripts/ScriptComponent.ts")));
+    const offersChaser = await evaluate<boolean>(
+      win,
+      `window.mosaicDebug.workspace.scripts.attachable().some(c => c.name === "Chaser")`,
+    );
+    ok("the new class is immediately attachable", offersChaser);
+
+    // --- the play-test actually runs the project's code ---
+    const observable = (version: number) => `import { ScriptComponent, property } from "./ScriptComponent";
+
+export class Patrol extends ScriptComponent {
+  @property({ min: 0, max: 400 })
+  speed = 60;
+
+  create(): void {
+    const probe = (globalThis as Record<string, unknown>).__mosaicSmoke = { version: ${version}, ticks: 0, speed: 0, created: true } as Record<string, unknown>;
+    probe.speed = this.speed;
+  }
+
+  update(dt: number): void {
+    void dt;
+    const probe = (globalThis as Record<string, unknown>).__mosaicSmoke as Record<string, number>;
+    if (probe) probe.ticks += 1;
+  }
+}
+`;
+    await fs.writeFile(patrolPath, observable(1));
+    await wait(2600);
+
+    const trust = await evaluate<{ before: boolean; after: boolean }>(
+      win,
+      `(() => {
+         const d = window.mosaicDebug;
+         const root = d.workspace.location.root;
+         const before = d.playtest.needsTrust();
+         d.scriptTrust.trustRoot(root);
+         return { before, after: d.playtest.needsTrust() };
+       })()`,
+    );
+    ok("a scene with behaviour asks before running someone's code", trust.before);
+    ok("and stops asking once the project is trusted", !trust.after);
+
+    await evaluate(win, "window.mosaicDebug.playtest.start()");
+    await wait(2500); // compile + a few frames
+
+    const ran = await evaluate<{ created: boolean; ticks: number; speed: number; playing: boolean }>(
+      win,
+      `(() => {
+         const probe = globalThis.__mosaicSmoke ?? {};
+         return {
+           created: !!probe.created,
+           ticks: probe.ticks ?? 0,
+           speed: probe.speed ?? 0,
+           playing: window.mosaicDebug.playtest.playing,
+         };
+       })()`,
+    );
+    ok("the project's script compiles and its create() runs", ran.created, JSON.stringify(ran));
+    ok("and update() is driven every frame", ran.ticks > 0, JSON.stringify(ran));
+    ok("the value authored in the editor reaches the live instance, not the class default",
+       ran.speed === 120, JSON.stringify(ran));
+    ok("the scene is still playing", ran.playing);
+
+    // Editing the source under a running scene restarts it on the new code.
+    await fs.writeFile(patrolPath, observable(2));
+    await wait(4000);
+    const hotReloaded = await evaluate<{ version: number; ticks: number; playing: boolean }>(
+      win,
+      `(() => {
+         const probe = globalThis.__mosaicSmoke ?? {};
+         return {
+           version: probe.version ?? 0,
+           ticks: probe.ticks ?? 0,
+           playing: window.mosaicDebug.playtest.playing,
+         };
+       })()`,
+    );
+    ok("editing a script while playing recompiles and restarts it", hotReloaded.version === 2,
+       JSON.stringify(hotReloaded));
+    ok("the restarted scene is running the new code", hotReloaded.ticks > 0, JSON.stringify(hotReloaded));
+    ok("and the transport never stopped", hotReloaded.playing);
+
+    // A file that does not compile keeps the run alive on the last good build.
+    await fs.writeFile(patrolPath, observable(3).replace("update(dt: number): void {", "update(dt: number): void {{{"));
+    await wait(4000);
+    const broken = await evaluate<{ status: string; error: string; version: number; playing: boolean; classes: number }>(
+      win,
+      `(() => {
+         const r = window.mosaicDebug.workspace.scriptRuntime;
+         return {
+           status: r.status,
+           error: (r.error ?? "").slice(0, 80),
+           version: globalThis.__mosaicSmoke?.version ?? 0,
+           playing: window.mosaicDebug.playtest.playing,
+           classes: Object.keys(r.classes).length,
+         };
+       })()`,
+    );
+    ok("a script that does not compile is reported", broken.status === "error" && !!broken.error,
+       JSON.stringify(broken));
+    ok("the running scene is left alone on the last good build",
+       broken.playing && broken.version === 2, JSON.stringify(broken));
+    ok("and the last good classes are kept, not emptied", broken.classes > 0, JSON.stringify(broken));
+
+    await evaluate(win, "window.mosaicDebug.playtest.stop()");
+    await fs.writeFile(patrolPath, observable(4));
+    await wait(2600);
+
+    // The panel itself has to render what all of that produced.
+    const panel = await evaluate<{ rows: number; head: string; badge: string | null }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         s.setSelection([s.scene.objects[0].id]);
+         s.setUi({ inspectorTab: "scripts", leftTab: "outliner" });
+         await new Promise(r => setTimeout(r, 150));
+         const row = document.querySelector(".script-row");
+         return {
+           rows: document.querySelectorAll(".script-row").length,
+           head: row ? row.querySelector(".cls").textContent : "",
+           badge: document.querySelector(".outliner-row .script-badge")?.textContent ?? null,
+         };
+       })()`,
+    );
+    ok("the Scripts panel renders a row per attached script", panel.rows === 1, JSON.stringify(panel));
+    ok("the row names the class", panel.head === "Patrol", panel.head);
+    ok("the outliner badges the object with its script count", panel.badge === "1", String(panel.badge));
+
+    const tree = await evaluate<{ rows: string[]; badge: string | null; opened: string | null }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         s.setUi({ leftTab: "project" });
+         await new Promise(r => setTimeout(r, 150));
+         const rows = [...document.querySelectorAll(".tree-row")]
+           .map(r => r.textContent)
+           .filter(t => t.includes("scripts/"));
+         const row = [...document.querySelectorAll(".tree-row")]
+           .find(r => r.textContent.includes("Patrol.ts"));
+         const badge = row?.querySelector(".git-badge")?.textContent ?? null;
+         row?.click();
+         await new Promise(r => setTimeout(r, 150));
+         const opened = s.ui.sourceView?.src ?? null;
+         return { rows, badge, opened };
+       })()`,
+    );
+    ok("the Project panel lists the project's script files",
+       tree.rows.some((r) => r.includes("scripts/Patrol.ts")), JSON.stringify(tree.rows));
+    ok("each row names the classes it declares",
+       tree.rows.some((r) => r.includes("Patrol")), JSON.stringify(tree.rows));
+    ok("and reports how many objects run them", tree.rows.some((r) => r.includes("1×")), JSON.stringify(tree.rows));
+    ok("clicking one opens it read-only", tree.opened === "src/scripts/Patrol.ts", String(tree.opened));
+
+    const drawer = await evaluate<{ lines: number; highlighted: number }>(
+      win,
+      `(async () => {
+         window.mosaicDebug.store.setUi({ sourceView: { src: "src/scripts/Patrol.ts", className: "Patrol" } });
+         await new Promise(r => setTimeout(r, 150));
+         return {
+           lines: document.querySelectorAll(".source-drawer .source-line").length,
+           highlighted: document.querySelectorAll(".source-drawer .source-line.hl").length,
+         };
+       })()`,
+    );
+    ok("View source opens the file read-only", drawer.lines > 5, JSON.stringify(drawer));
+    // Patrol.ts is the observable build by now: one @property, so two lines —
+    // the decorator and the field it annotates.
+    ok("and highlights the @property declarations it is rendering",
+       drawer.highlighted === 2, JSON.stringify(drawer));
+
+    const picker = await evaluate<{ open: boolean; offers: number }>(
+      win,
+      `(async () => {
+         document.querySelector(".scripts-panel .section-title .add").click();
+         await new Promise(r => setTimeout(r, 150));
+         const rows = document.querySelectorAll(".script-palette li").length;
+         document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+         const open = !!document.querySelector(".script-palette");
+         window.mosaicDebug.store.setUi({ sourceView: null });
+         return { open, offers: rows };
+       })()`,
+    );
+    ok("+ Add opens the attach picker", picker.open, JSON.stringify(picker));
+    ok("and it offers the classes the project actually has", picker.offers >= 2, JSON.stringify(picker));
+
     // --- window chrome: traffic lights and dragging ---
     const chrome = await evaluate<{
       isDesktop: boolean;
@@ -154,6 +437,15 @@ export async function runSmoke(win: BrowserWindow): Promise<void> {
       ok("traffic lights are centred against the bar",
          Math.abs((chrome.menubarHeight - 12) / 2 - 14) < 6, `bar ${chrome.menubarHeight}px`);
     }
+
+    // --- identity: the shell wears the mark, not Electron's default ---
+    const icon = mosaicIcon(512);
+    const iconSize = icon.getSize();
+    ok("the app icon rasterises to a real image", !icon.isEmpty());
+    ok("at the size the dock asks for", iconSize.width === 512 && iconSize.height === 512,
+       JSON.stringify(iconSize));
+    ok("and it round-trips as a PNG Electron can decode",
+       icon.toPNG().length > 0 && icon.toPNG().subarray(1, 4).toString("ascii") === "PNG");
 
     // --- git status: quiet outside a repo, real inside one ---
     const git = await evaluate<Record<string, string>>(

@@ -11,6 +11,8 @@ import {
   type TemplateId,
 } from "../store/templates";
 import { DEFAULT_GROUPS } from "../../shared/definitions";
+import { SCRIPT_BASE_FILE, newScriptRef, scriptFilePath } from "../../shared/scripts";
+import { samplePlayerController, scriptBaseSource } from "../scripts/stub";
 import { CONFIG_PATH } from "./serialize";
 
 /**
@@ -92,9 +94,23 @@ const PHASER_VERSION = "^4.2.1";
 export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   const slug = slugify(opts.name);
   const root = joinPath(opts.location, slug);
-  const ext = opts.language === "ts";
-  const e = ext ? "ts" : "js";
+  // Script components are a TypeScript story: the @property decorator is what
+  // the editor reads, and a JS project has no compiler configured to accept
+  // one. A JS scaffold lists them as skipped rather than writing code that
+  // will not build.
+  const typed = opts.language === "ts";
+  const e = typed ? "ts" : "js";
   const scene = createSceneFromTemplate("Level_01", "Level 01", opts.template, opts.config);
+
+  const sampleScript = typed && (opts.template === "platformer" || opts.template === "runner");
+  if (sampleScript) {
+    // The template's player comes with behaviour attached, so a new project
+    // opens on a worked example of the whole loop: class -> inspector -> file.
+    const player = scene.objects.find((o) => o.type === "player");
+    if (player) {
+      player.scripts = [newScriptRef("PlayerController", scriptFilePath("PlayerController"))];
+    }
+  }
 
   const project: ProjectData = {
     name: opts.name.trim() || slug,
@@ -166,6 +182,24 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     opts.sampleArt ? "placeholder art" : "skipped",
     !opts.sampleArt,
     "base64",
+  );
+  add(
+    "tsconfig.json",
+    typed ? tsconfigJson() : "",
+    typed ? "decorators, for @property" : "skipped",
+    !typed,
+  );
+  add(
+    SCRIPT_BASE_FILE,
+    typed ? scriptBaseSource() : "",
+    typed ? "ScriptComponent + @property" : "skipped",
+    !typed,
+  );
+  add(
+    scriptFilePath("PlayerController"),
+    sampleScript ? samplePlayerController() : "",
+    sampleScript ? "attached to the player" : "skipped",
+    !sampleScript,
   );
   add("anims.json", "[]\n", "");
   add(".gitignore", opts.git ? gitignore() : "", opts.git ? "" : "skipped", !opts.git);
@@ -355,6 +389,34 @@ ${
 `;
 }
 
+/**
+ * Decorators are the one compiler setting a Mosaic project needs: `@property`
+ * is what the editor reads out of a class, so a project that cannot compile
+ * one cannot use script components.
+ */
+function tsconfigJson(): string {
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          target: "ES2022",
+          module: "ESNext",
+          moduleResolution: "bundler",
+          lib: ["ES2022", "DOM"],
+          strict: true,
+          skipLibCheck: true,
+          noEmit: true,
+          experimentalDecorators: true,
+          useDefineForClassFields: false,
+        },
+        include: ["src"],
+      },
+      null,
+      2,
+    ) + "\n"
+  );
+}
+
 function gitignore(): string {
   return `node_modules
 dist
@@ -380,6 +442,7 @@ ${run}
 src/scenes/Level_01.scene.json   the editor's source of truth
 src/scenes/Level_01.${ext}${" ".repeat(Math.max(0, 12 - ext.length))}generated from it — edit inside // <keep> markers
 src/prefabs/                     one class per prefab
+src/scripts/                     ScriptComponent + the behaviour you attach
 assets/                          art and audio, copied in by the editor
 mosaic.config.json               canvas, tile size, scale mode, physics
 \`\`\`

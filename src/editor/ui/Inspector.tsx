@@ -5,12 +5,14 @@ import type { InspectorTab } from "../store/project";
 import { defaultBody } from "../store/templates";
 import type { AssetDef, SceneObject, TileLayer } from "../../shared/types";
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
+import { ScriptsTab } from "./ScriptsTab";
 import { useEditor, useStoreVersion } from "./context";
 
 const TABS: { id: InspectorTab; label: string }[] = [
   { id: "object", label: "Object" },
   { id: "tile", label: "Tiles" },
   { id: "physics", label: "Physics" },
+  { id: "scripts", label: "Scripts" },
   { id: "prefab", label: "Prefab" },
   { id: "anim", label: "Anim" },
   { id: "scene", label: "Scene" },
@@ -19,6 +21,10 @@ const TABS: { id: InspectorTab; label: string }[] = [
 export function Inspector() {
   const { store } = useEditor();
   useStoreVersion(store);
+  // The count rides on the tab for the same reason it rides on the outliner
+  // row: an object having behaviour should be visible without opening it.
+  const selected = store.selection[0];
+  const scriptCount = selected ? store.scriptsFor(selected).length : 0;
 
   return (
     <aside className="panel inspector">
@@ -30,6 +36,7 @@ export function Inspector() {
             onClick={() => store.setUi({ inspectorTab: tab.id })}
           >
             {tab.label}
+            {tab.id === "scripts" && scriptCount > 0 && <span className="tab-count">{scriptCount}</span>}
           </button>
         ))}
       </div>
@@ -37,6 +44,7 @@ export function Inspector() {
         {store.ui.inspectorTab === "object" && <ObjectTab />}
         {store.ui.inspectorTab === "tile" && <TileTab />}
         {store.ui.inspectorTab === "physics" && <PhysicsTab />}
+        {store.ui.inspectorTab === "scripts" && <ScriptsTab />}
         {store.ui.inspectorTab === "prefab" && <PrefabTab />}
         {store.ui.inspectorTab === "anim" && <AnimTab />}
         {store.ui.inspectorTab === "scene" && <SceneTab />}

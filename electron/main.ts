@@ -4,6 +4,7 @@ import path from "node:path";
 import { registerIpc } from "./ipc";
 import { runSmoke } from "./smoke";
 import { registerAssetProtocol, registerAssetScheme } from "./assets";
+import { mosaicIcon } from "./appIcon";
 
 /**
  * Mosaic's main process.
@@ -14,6 +15,10 @@ import { registerAssetProtocol, registerAssetScheme } from "./assets";
  */
 
 const DEV_URL = process.env.MOSAIC_DEV_SERVER;
+
+// The app is the mark, not Electron's default: drawn once at boot from the
+// same geometry the UI's <MosaicMark> draws.
+const APP_ICON = mosaicIcon(512);
 
 // Privileged scheme registration has to happen before the app is ready.
 registerAssetScheme();
@@ -27,6 +32,9 @@ function createWindow(): BrowserWindow {
     minHeight: 700,
     backgroundColor: "#f2f2f3",
     title: "Mosaic",
+    // Windows and Linux take the icon from the window; macOS takes it from the
+    // dock, set below.
+    icon: APP_ICON,
     // The design calls for our own title bar (mark + wordmark), so the native
     // one is hidden. That floats the traffic lights over the page, so the
     // renderer reserves room for them and declares its own drag regions.
@@ -57,6 +65,7 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  app.dock?.setIcon(APP_ICON);
   registerAssetProtocol();
   registerIpc();
   const win = createWindow();

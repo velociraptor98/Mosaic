@@ -23,6 +23,9 @@ const api: MosaicApi = {
   readProjectFiles: (root) => ipcRenderer.invoke(IPC.readProjectFiles, root),
   writeFiles: (root, files) => ipcRenderer.invoke(IPC.writeFiles, root, files),
   readText: (root, rel) => ipcRenderer.invoke(IPC.readText, root, rel),
+  readScripts: (root) => ipcRenderer.invoke(IPC.readScripts, root),
+  openInEditor: (root, rel, line) => ipcRenderer.invoke(IPC.openInEditor, root, rel, line),
+  bundleScripts: (root, entries) => ipcRenderer.invoke(IPC.bundleScripts, root, entries),
   importAssets: (root) => ipcRenderer.invoke(IPC.importAssets, root),
   copyAssets: (root, sources) => ipcRenderer.invoke(IPC.copyAssets, root, sources),
 

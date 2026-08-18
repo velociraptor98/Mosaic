@@ -15,6 +15,8 @@ export interface CanvasEvents {
   snapHit: { x: number | null; y: number | null };
   playtest: { playing: boolean; paused: boolean; frame: number };
   runtimeSelection: string | null;
+  /** A script threw during the play-test and was switched off. */
+  scriptError: { script: string; message: string };
   requestFocus: undefined;
 }
 

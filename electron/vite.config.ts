@@ -20,6 +20,8 @@ export default defineConfig({
       formats: ["es"],
       fileName: () => "main.mjs",
     },
-    rollupOptions: { external: ["electron", "chokidar", /^node:/] },
+    // rolldown compiles the project's scripts for the play-test; it is a real
+    // runtime dependency of the main process, native binary and all.
+    rollupOptions: { external: ["electron", "chokidar", "rolldown", /^node:/] },
   },
 });

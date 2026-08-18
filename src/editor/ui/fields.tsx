@@ -87,11 +87,15 @@ export function TextField({
   value,
   onCommit,
   placeholder,
+  marked,
+  onRevert,
 }: {
   label: string;
   value: string;
   onCommit: (v: string) => void;
   placeholder?: string;
+  marked?: boolean;
+  onRevert?: () => void;
 }) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
@@ -99,8 +103,22 @@ export function TextField({
     if (!focused.current) setText(value);
   }, [value]);
   return (
-    <label className="field">
-      <span className="field-label">{label}</span>
+    <label className={`field ${marked ? "overridden" : ""}`}>
+      <span className="field-label">
+        {label}
+        {marked && (
+          <button
+            className="revert"
+            title="Revert to the inherited value"
+            onClick={(e) => {
+              e.preventDefault();
+              onRevert?.();
+            }}
+          >
+            ⟲
+          </button>
+        )}
+      </span>
       <input
         value={text}
         placeholder={placeholder}

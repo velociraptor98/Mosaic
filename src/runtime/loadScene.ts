@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { resolveObject } from "../shared/prefabs";
 import { objectsById as indexObjects, worldTransform } from "../shared/transform";
 import { collectLoaderManifest } from "../shared/manifest";
+import { scriptsOf } from "../shared/scripts";
+import { ScriptHost, type ScriptComponent } from "./scripts";
 import type {
   AnimDef,
   ProjectData,
@@ -29,6 +31,8 @@ export interface BuiltScene {
   groups: Map<string, Phaser.Physics.Arcade.Group>;
   /** Pairs wired from the project collision matrix, for debugging/inspection. */
   pairs: { a: string; b: string; rule: string }[];
+  /** Set when script classes were supplied and something was attached. */
+  scripts: ScriptHost | null;
 }
 
 export function preloadProject(
@@ -90,9 +94,19 @@ export function buildScene(
   scene: Phaser.Scene,
   project: ProjectData,
   data: SceneData,
-  options: { physics?: boolean } = {},
+  options: {
+    physics?: boolean;
+    /**
+     * Script classes by name. Behaviour is your code, so the loader cannot
+     * import it — hand it the classes and the scene's script references are
+     * constructed, given their authored values and run. Omit it and scripts
+     * are inert, which is what the editor's play-test does.
+     */
+    scripts?: Record<string, new () => ScriptComponent>;
+  } = {},
 ): BuiltScene {
   const withPhysics = options.physics !== false && !!scene.physics;
+  const host = options.scripts ? new ScriptHost(scene) : null;
   registerAtlasFrames(scene, project);
   registerAnimations(scene, project.anims);
 
@@ -122,6 +136,7 @@ export function buildScene(
       const sprite = createSprite(scene, resolved, index, depth, withPhysics);
       if (!sprite) continue;
       objectsByIdMap.set(obj.id, sprite);
+      if (host && options.scripts) attachScripts(host, sprite, resolved, options.scripts);
 
       const groupName = resolved.group;
       if (withPhysics && groupName && resolved.body) {
@@ -137,7 +152,32 @@ export function buildScene(
 
   const pairs = withPhysics ? wireCollisions(scene, project, groups, tileLayers) : [];
 
-  return { objectsById: objectsByIdMap, tileLayers, groups, pairs };
+  return { objectsById: objectsByIdMap, tileLayers, groups, pairs, scripts: host };
+}
+
+/**
+ * Attaches an object's scripts in list order — the order the editor shows,
+ * because that order is what update() is called in.
+ *
+ * A reference whose class was not supplied is skipped with a warning rather
+ * than throwing: one missing behaviour should not take the scene down.
+ */
+function attachScripts(
+  host: ScriptHost,
+  sprite: Phaser.GameObjects.Sprite,
+  obj: SceneObject,
+  classes: Record<string, new () => ScriptComponent>,
+): void {
+  for (const ref of scriptsOf(obj)) {
+    // Keyed by path first, so two classes of one name stay apart; a game that
+    // supplies a plain name -> class map still resolves.
+    const Ctor = classes[`${ref.src}::${ref.class}`] ?? classes[ref.class];
+    if (!Ctor) {
+      console.warn(`[mosaic] ${obj.name}: no class supplied for script "${ref.class}"`);
+      continue;
+    }
+    host.add(sprite, new Ctor(), ref.props ?? {}, ref.enabled);
+  }
 }
 
 function createTileLayer(

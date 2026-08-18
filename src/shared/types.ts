@@ -98,6 +98,25 @@ export interface BodyDef {
   bounce: number;
 }
 
+/**
+ * A script component attached to an object.
+ *
+ * The class lives in the project's own source tree; the scene file stores only
+ * the reference and the values authored in the editor. `src` is what makes the
+ * reference resolvable when two classes share a name, and it is kept even when
+ * the class cannot be found, so an unresolved script is never silently dropped.
+ */
+export interface ScriptRef {
+  /** Exported class name, e.g. "PlayerController". */
+  class: string;
+  /** Project-relative source path, e.g. "src/scripts/PlayerController.ts". */
+  src: string;
+  /** Disabled scripts are still constructed; create/update are skipped. */
+  enabled: boolean;
+  /** Values for the class's @property fields. Undeclared keys are stale. */
+  props: Record<string, unknown>;
+}
+
 export interface SceneObject {
   id: string;
   name: string;
@@ -122,6 +141,10 @@ export interface SceneObject {
   body?: BodyDef;
   /** Animation key played in create(). */
   playOnSpawn?: string;
+  /**
+   * Attached behaviour, in execution order: update() is called in list order.
+   */
+  scripts?: ScriptRef[];
   /** Set when this object is a prefab instance. */
   prefab?: string;
   /** Property path -> value, for the fields this instance overrides. */
