@@ -1,6 +1,6 @@
 import { collectLoaderManifest } from "../../shared/manifest";
 import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
-import { findPrefab, resolveObject, resolvedIndex } from "../../shared/prefabs";
+import { resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
 import { worldTransform } from "../../shared/transform";
 import type { ProjectData, SceneData, SceneObject, TileLayer } from "../../shared/types";
 import { MANIFEST_PATH, toManifest } from "../project/serialize";
@@ -102,6 +102,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   const used = new Set<string>();
   const varsById = new Map<string, string>();
   const groupVars = new Map<string, string>();
+  /** Overlap pairs the matrix asked for, so the class can declare their hooks. */
+  const overlapHandlers: { name: string; a: string; b: string }[] = [];
   const usedPrefabClasses = new Set<string>();
   const objectKeys = new Set<string>();
   /** Script classes this scene constructs, keyed by src::class. */
@@ -217,7 +219,7 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
       // hand-written behaviour on that class actually runs. Everything the
       // definition owns is applied by the constructor; only what THIS instance
       // overrides is emitted after it.
-      const prefab = findPrefab(project, raw.prefab);
+      const prefab = resolvePrefab(project, raw.prefab);
       if (prefab) {
         usedPrefabClasses.add(prefab.name);
         L.push(
@@ -271,7 +273,9 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
         if (emitted.has(key)) continue;
         emitted.add(key);
         const fn = rule === "overlap" ? "overlap" : "collider";
-        const handler = rule === "overlap" ? `, this.on${className(a)}${className(b)}` : "";
+        const name = `on${className(a)}${className(b)}`;
+        if (rule === "overlap") overlapHandlers.push({ name, a, b });
+        const handler = rule === "overlap" ? `, this.${name}` : "";
         pairLines.push(
           `    this.physics.add.${fn}(${groupVars.get(a)}, ${groupVars.get(b)}${handler});`,
         );
@@ -332,6 +336,22 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   L.push(`    // </keep>`);
   L.push(`  }`);
   L.push(``);
+  for (const handler of overlapHandlers) {
+    L.push(`  /** ${handler.a} × ${handler.b} — authored as "overlap" in the collision matrix. */`);
+    // Phaser's own alias, rather than spelled-out parameters: it has widened
+    // between versions, and the emitted class has to compile against whichever
+    // one the project depends on.
+    L.push(`  ${handler.name}: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (`);
+    L.push(`    ${handler.a},`);
+    L.push(`    ${handler.b},`);
+    L.push(`  ) => {`);
+    L.push(`    void ${handler.a};`);
+    L.push(`    void ${handler.b};`);
+    L.push(`    // <keep id="${handler.name}">`);
+    L.push(`    // </keep>`);
+    L.push(`  };`);
+    L.push(``);
+  }
   if (sceneHasScripts(project, scene)) L.push(`  scripts!: ScriptHost;`);
   L.push(`  objects: Record<string, Phaser.GameObjects.Sprite> = {};`);
   L.push(`  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer> = {};`);
@@ -506,7 +526,9 @@ function usedAnims(project: ProjectData, scene: SceneData) {
 }
 
 export function generatePrefabClass(project: ProjectData, name: string): string {
-  const prefab = project.prefabs.find((p) => p.name === name)!;
+  // Resolved: a variant has no tree of its own, and the class it becomes has
+  // to hold the values it actually resolves to.
+  const prefab = resolvePrefab(project, name)!;
   const cls = className(name);
   const node = prefab.root;
   const L: string[] = [];
@@ -532,13 +554,17 @@ export function generatePrefabClass(project: ProjectData, name: string): string 
   }
   if (node.body) {
     const b = node.body;
-    if (b.shape === "circle") L.push(`    this.body!.setCircle(${b.radius}, ${b.offsetX}, ${b.offsetY});`);
+    // `this.body` on an Arcade.Sprite is Body | StaticBody, and only Body has
+    // the setters below. Narrowing once here is what keeps the emitted class
+    // compiling under the strict tsconfig the scaffold writes.
+    L.push(`    const body = this.body as Phaser.Physics.Arcade.Body;`);
+    if (b.shape === "circle") L.push(`    body.setCircle(${b.radius}, ${b.offsetX}, ${b.offsetY});`);
     else {
-      L.push(`    this.body!.setSize(${b.width}, ${b.height}, false);`);
-      L.push(`    this.body!.setOffset(${b.offsetX}, ${b.offsetY});`);
+      L.push(`    body.setSize(${b.width}, ${b.height}, false);`);
+      L.push(`    body.setOffset(${b.offsetX}, ${b.offsetY});`);
     }
-    if (b.immovable) L.push(`    this.body!.setImmovable(true);`);
-    if (!b.allowGravity) L.push(`    this.body!.setAllowGravity(false);`);
+    if (b.immovable) L.push(`    body.setImmovable(true);`);
+    if (!b.allowGravity) L.push(`    body.setAllowGravity(false);`);
   }
   for (const [k, v] of Object.entries(node.data ?? {})) {
     L.push(`    this.setData(${q(k)}, ${JSON.stringify(v)});`);

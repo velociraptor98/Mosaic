@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { CollisionRule } from "../../../shared/types";
 import { Dialog } from "./Dialog";
 import { useEditor } from "../context";
@@ -47,7 +47,18 @@ export function CollisionDialog({ onClose }: { onClose: () => void }) {
         <tbody>
           {groups.map((a) => (
             <tr key={a}>
-              <th>{a}</th>
+              {/* The row header is where a group is renamed or removed: the
+                  taxonomy belongs to the project, so editing it lives with it. */}
+              <th className="group-head">
+                <GroupName name={a} onRename={(next) => store.renameGroup(a, next)} />
+                <button
+                  className="mini danger"
+                  title={`Remove "${a}" — objects using it become ungrouped`}
+                  onClick={() => store.removeGroup(a)}
+                >
+                  ×
+                </button>
+              </th>
               {groups.map((b) => {
                 const r = rule(a, b);
                 return (
@@ -101,5 +112,29 @@ export function CollisionDialog({ onClose }: { onClose: () => void }) {
         </button>
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * Renaming commits on blur or ⏎, not per keystroke: a rename rewrites every
+ * object that names the group, and doing that once per character would be one
+ * undo entry per letter.
+ */
+function GroupName({ name, onRename }: { name: string; onRename: (next: string) => void }) {
+  const [text, setText] = useState(name);
+  useEffect(() => setText(name), [name]);
+  const commit = () => {
+    const clean = text.trim();
+    if (!clean || clean === name) setText(name);
+    else onRename(clean);
+  };
+  return (
+    <input
+      value={text}
+      aria-label={`Rename group ${name}`}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+    />
   );
 }

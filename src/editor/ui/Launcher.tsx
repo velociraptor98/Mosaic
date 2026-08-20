@@ -84,8 +84,11 @@ export function Launcher({
 
         <div className="launcher-recents">
           <div className="section-title">Recent</div>
-          {recents.length === 0 && <div className="empty">Nothing yet.</div>}
-          {recents.map((entry) => (
+          {/* The list scrolls; the window does not grow. However many folders
+              someone has opened, the launcher is the same size. */}
+          <div className="recent-list">
+            {recents.length === 0 && <div className="empty">Nothing yet.</div>}
+            {recents.map((entry) => (
             <div key={entry.root} className={`recent-card ${entry.missing ? "missing" : ""}`}>
               <button
                 className="recent-open"
@@ -123,8 +126,8 @@ export function Launcher({
                 ×
               </button>
             </div>
-          ))}
-          <div className="launcher-spacer" />
+            ))}
+          </div>
           <div className="hint mono">missing folders are greyed, never silently dropped</div>
         </div>
       </div>

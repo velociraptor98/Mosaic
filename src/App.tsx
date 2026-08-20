@@ -9,13 +9,14 @@ import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
 import { isTrusted, revokeRoot, trustRoot } from "./editor/scripts/runtime";
 import { BottomDock } from "./editor/ui/BottomDock";
-import { EditorContext, useWorkspace } from "./editor/ui/context";
+import { EditorContext, useStoreVersion, useWorkspace } from "./editor/ui/context";
 import { FirstRunChecklist } from "./editor/ui/FirstRunChecklist";
 import { Launcher } from "./editor/ui/Launcher";
 import { NewProjectFlow, type FirstRunInfo } from "./editor/ui/newproject/NewProjectFlow";
 import { Inspector } from "./editor/ui/Inspector";
 import { LeftDock } from "./editor/ui/LeftDock";
 import { MenuBar } from "./editor/ui/MenuBar";
+import { PrefabBar, ReviewBar } from "./editor/ui/PrefabBar";
 import { SourceDrawer } from "./editor/ui/SourceDrawer";
 import { StatusBar } from "./editor/ui/StatusBar";
 import { Toolbar } from "./editor/ui/Toolbar";
@@ -29,6 +30,7 @@ import { ImportDialog } from "./editor/ui/dialogs/ImportDialog";
 import { NewSceneDialog } from "./editor/ui/dialogs/NewSceneDialog";
 import { PrefabDialog } from "./editor/ui/dialogs/PrefabDialog";
 import { PromoteDialog } from "./editor/ui/dialogs/PromoteDialog";
+import { PropagateDialog } from "./editor/ui/dialogs/PropagateDialog";
 
 const store = new ProjectStore();
 const bridge = new EditorBridge();
@@ -59,6 +61,10 @@ export default function App() {
   const openDialog = useCallback((name: DialogName) => setDialog(name), []);
 
   const workspaceRevision = useWorkspace(workspace);
+  // The propagation panel is opened by the store, not by a menu, so the shell
+  // has to be listening to it.
+  const storeVersion = useStoreVersion(store);
+  void storeVersion;
 
   const ctx = useMemo(
     () => ({ store, bridge, playtest, workspace, dialog, openDialog }),
@@ -113,6 +119,15 @@ export default function App() {
         <div className="app-body">
           <LeftDock />
           <main className="stage">
+            {/* One wrapper, always present: the stage's rows are fixed, and a
+                bar that comes and goes must not shift the canvas into a
+                different one. */}
+            <div className="stage-bars">
+              {/* Prefab edit mode announces itself above the tools: you are
+                  editing the definition, and every instance is downstream. */}
+              <PrefabBar />
+              <ReviewBar />
+            </div>
             <Toolbar />
             {/* Registration marks: the reference brackets its blueprint
                 frames this way, and the canvas is the one real drawing here. */}
@@ -144,6 +159,7 @@ export default function App() {
         {dialog === "scripttrust" && <ScriptTrustDialog onClose={() => setDialog(null)} />}
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
         {dialog === "promote" && <PromoteDialog onClose={() => setDialog(null)} />}
+        {store.ui.prefabPlan && <PropagateDialog onClose={() => setDialog(null)} />}
       </div>
     </EditorContext.Provider>
   );
@@ -201,6 +217,9 @@ function useKeyboardShortcuts(ctx: {
             return run("edit.redo");
           case "d":
             return run("edit.duplicate");
+          case "p":
+            if (e.shiftKey) return run("prefab.create");
+            return;
           case "g":
             return run("edit.group");
           case "n":

@@ -144,16 +144,28 @@ export class Patrol extends ScriptComponent {
     ok("a class written into src/ is indexed by the watcher", indexed?.name === "Patrol", JSON.stringify(indexed));
     ok("its @property declarations come with it", indexed?.props === 2, JSON.stringify(indexed));
 
-    const attachedRef = await evaluate<{ class: string; src: string; enabled: boolean } | null>(
+    // A PLAIN object: attaching to a prefab instance is a different path —
+    // the reference lands in the instance's overrides — and that is covered by
+    // the headless suite. This is the "script on an ordinary object" case.
+    const attachedRef = await evaluate<{
+      id: string;
+      class: string;
+      src: string;
+      enabled: boolean;
+    } | null>(
       win,
       `(() => {
          const s = window.mosaicDebug.store;
-         const obj = s.scene.objects[0];
+         const id = s.addObject({
+           type: "sprite", name: "Patroller", x: 64, y: 64,
+           texture: s.project.assets.find(a => a.generated && a.key.startsWith("shape-")).key,
+           data: {},
+         });
          const cls = s.scriptIndex.attachable().find(c => c.name === "Patrol");
-         s.attachScript([obj.id], cls);
-         s.setScriptProp(obj.id, 0, "speed", 120);
-         const ref = s.scriptsFor(s.scene.objects.find(o => o.id === obj.id))[0];
-         return { class: ref.class, src: ref.src, enabled: ref.enabled };
+         s.attachScript([id], cls);
+         s.setScriptProp(id, 0, "speed", 120);
+         const ref = s.scriptsFor(s.scene.objects.find(o => o.id === id))[0];
+         return { id, class: ref.class, src: ref.src, enabled: ref.enabled };
        })()`,
     );
     ok("attaching records the class and the file it was found in",
@@ -162,10 +174,13 @@ export class Patrol extends ScriptComponent {
 
     await wait(1200);
     const savedScene = JSON.parse(await fs.readFile(scenePath, "utf8"));
+    const savedPatroller = savedScene.objects?.find(
+      (o: { id: string }) => o.id === attachedRef?.id,
+    );
     ok("the reference and its value are saved into the scene file", (() => {
-      const script = savedScene.objects?.[0]?.scripts?.[0];
+      const script = savedPatroller?.scripts?.[0];
       return script?.class === "Patrol" && script.props.speed === 120;
-    })(), JSON.stringify(savedScene.objects?.[0]?.scripts));
+    })(), JSON.stringify(savedPatroller?.scripts));
 
     // An external edit to the class re-indexes; it must not touch the values.
     await fs.writeFile(
@@ -194,7 +209,7 @@ export class Patrol extends ScriptComponent {
          const s = window.mosaicDebug.store;
          return {
            props: props.length,
-           speed: s.scriptsFor(s.scene.objects[0])[0].props.speed,
+           speed: s.scriptsFor(s.scene.objects.find(o => o.name === "Patroller"))[0].props.speed,
            label: props.find(p => p.name === "dwellMs")?.label ?? null,
          };
        })()`,
@@ -326,7 +341,7 @@ export class Patrol extends ScriptComponent {
       win,
       `(async () => {
          const s = window.mosaicDebug.store;
-         s.setSelection([s.scene.objects[0].id]);
+         s.setSelection([s.scene.objects.find(o => o.name === "Patroller").id]);
          s.setUi({ inspectorTab: "scripts", leftTab: "outliner" });
          await new Promise(r => setTimeout(r, 150));
          const row = document.querySelector(".script-row");
@@ -397,6 +412,234 @@ export class Patrol extends ScriptComponent {
     );
     ok("+ Add opens the attach picker", picker.open, JSON.stringify(picker));
     ok("and it offers the classes the project actually has", picker.offers >= 2, JSON.stringify(picker));
+
+    // --- prefabs: promote, isolate, expose, propagate ---
+    // The whole point of this flow is that it reaches files nobody is looking
+    // at, so it is checked against the FOLDER as well as against the store.
+    const promoted = await evaluate<{
+      wrote: boolean;
+      instances: number;
+      barText: string;
+      docTab: string | null;
+      onDisk: string | null;
+    }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         // Promotion starts from a PLAIN object, so this makes one rather than
+         // reaching for whatever the template happened to place.
+         const id = s.addObject({
+           type: "sprite", name: "TurretSeed", x: 128, y: 128,
+           texture: s.project.assets.find(a => a.generated && a.key.startsWith("shape-")).key,
+           data: {},
+         });
+         const obj = s.scene.objects.find(o => o.id === id);
+         s.setSelection([obj.id]);
+         const made = s.createPrefab({
+           name: "Turret",
+           objectId: obj.id,
+           exposed: ["data.value", "scaleX"],
+         });
+         s.openPrefab("Turret");
+         await new Promise(r => setTimeout(r, 200));
+         await window.mosaicDebug.workspace.saveNow();
+         return {
+           wrote: !!made,
+           instances: window.mosaicDebug.store.project.scenes
+             .flatMap(sc => sc.objects).filter(o => o.prefab === "Turret").length,
+           barText: document.querySelector(".prefab-bar")?.textContent ?? "",
+           docTab: document.querySelector(".doc-tab")?.textContent ?? null,
+           onDisk: await window.mosaic.readText(
+             window.mosaicDebug.workspace.location.root,
+             "src/prefabs/Turret.prefab.json",
+           ),
+         };
+       })()`,
+    );
+    ok("promoting a selection writes a definition", promoted.wrote);
+    ok("and the object it was made from becomes its instance", promoted.instances === 1,
+       String(promoted.instances));
+    ok("the prefab is a real file in src/prefabs/", !!promoted.onDisk, String(promoted.onDisk));
+    ok("the definition on disk carries the tree and the contract", (() => {
+      if (!promoted.onDisk) return false;
+      const def = JSON.parse(promoted.onDisk) as { root?: unknown; exposed?: string[]; };
+      return !!def.root && (def.exposed ?? []).includes("data.value");
+    })(), String(promoted.onDisk));
+    ok("prefab edit mode says which document you are in",
+       promoted.barText.includes("prefab edit mode") && promoted.barText.includes("Turret"),
+       promoted.barText);
+    ok("and the scene it was opened from is still a tab beside it",
+       (promoted.docTab ?? "").includes("Turret.prefab"), String(promoted.docTab));
+
+    const isolated = await evaluate<{ parts: number; exposed: number; locked: number }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         s.setUi({ inspectorTab: "prefab" });
+         await new Promise(r => setTimeout(r, 200));
+         const seg = [...document.querySelectorAll(".segmented button")];
+         const parts = document.querySelectorAll(".part-row").length;
+         seg.find(b => b.textContent.startsWith("Expose"))?.click();
+         await new Promise(r => setTimeout(r, 200));
+         const exposed = document.querySelectorAll(".expose-row.on").length;
+         s.closePrefab(true);
+         s.setSelection([s.scene.objects.find(o => o.prefab === "Turret").id]);
+         s.setUi({ inspectorTab: "object" });
+         await new Promise(r => setTimeout(r, 200));
+         return { parts, exposed, locked: document.querySelectorAll(".field.locked").length };
+       })()`,
+    );
+    ok("the isolated stage holds the prefab and nothing else", isolated.parts >= 1,
+       String(isolated.parts));
+    ok("the Expose list shows the published fields as checked", isolated.exposed >= 2,
+       String(isolated.exposed));
+    ok("and a field the definition owns is locked on the instance, not hidden",
+       isolated.locked > 0, String(isolated.locked));
+
+    const pushed = await evaluate<{
+      planned: boolean;
+      rows: number;
+      moved: number;
+      kept: number;
+      resolvedBefore: number;
+      resolvedAfter: number;
+      instanceValue: number;
+    }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         const inst = s.scene.objects.find(o => o.prefab === "Turret");
+         s.setObjectProp(inst.id, "data.value", 7);
+
+         s.openPrefab("Turret");
+         s.setObjectProp(s.prefabDoc.rootId, "scaleX", 2.5, "Set scale");
+         // Change the very field the instance claimed, so the panel has to
+         // decide between the definition's value and the instance's.
+         s.setObjectProp(s.prefabDoc.rootId, "data.value", 99, "Set value");
+         const read = () => {
+           const o = window.mosaicDebug.store.project.scenes
+             .flatMap(sc => sc.objects).find(x => x.prefab === "Turret");
+           return window.mosaicDebug.store.resolvePrefab("Turret") ? o.scaleX : -1;
+         };
+         const resolvedBefore = s.resolvePrefab("Turret").root.scaleX;
+
+         s.planPrefabSave(window.mosaicDebug.workspace.writeBlockedReason);
+         await new Promise(r => setTimeout(r, 200));
+         const planned = !!document.querySelector(".propagate-rows");
+         const rows = document.querySelectorAll(".propagate-row").length;
+         const moved = s.ui.prefabPlan.totals.moved;
+         const kept = s.ui.prefabPlan.totals.kept;
+
+         [...document.querySelectorAll(".dialog footer button")]
+           .find(b => b.textContent.trim() === "Push").click();
+         await new Promise(r => setTimeout(r, 200));
+         const resolvedAfter = s.resolvePrefab("Turret").root.scaleX;
+         s.closePrefab(true);
+         const after = s.scene.objects.find(o => o.prefab === "Turret");
+         void read;
+         return {
+           planned, rows, moved, kept, resolvedBefore, resolvedAfter,
+           instanceValue: after.overrides["data.value"],
+         };
+       })()`,
+    );
+    ok("saving a prefab shows what it costs before it writes", pushed.planned);
+    ok("the panel lists every consequence", pushed.rows > 0, String(pushed.rows));
+    ok("a value with no override moves", pushed.moved >= 1, String(pushed.moved));
+    ok("and an override the instance set for itself is listed as kept, not overwritten",
+       pushed.kept >= 1, String(pushed.kept));
+    ok("the kept override still stands after the push", pushed.instanceValue === 7,
+       String(pushed.instanceValue));
+    ok("nothing moved until Push", pushed.resolvedBefore !== pushed.resolvedAfter,
+       `${pushed.resolvedBefore} -> ${pushed.resolvedAfter}`);
+    ok("and the definition holds the new value afterwards", pushed.resolvedAfter === 2.5,
+       String(pushed.resolvedAfter));
+
+    const variant = await evaluate<{ made: boolean; file: string | null; inherits: number }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         const made = !!s.createVariant("Turret", "Turret_Heavy");
+         s.openPrefab("Turret_Heavy");
+         s.setObjectProp(s.prefabDoc.rootId, "scaleY", 3, "Set scale");
+         s.pushPrefabSave();
+         s.closePrefab(true);
+         await window.mosaicDebug.workspace.saveNow();
+         return {
+           made,
+           file: await window.mosaic.readText(
+             window.mosaicDebug.workspace.location.root,
+             "src/prefabs/Turret_Heavy.prefab.json",
+           ),
+           inherits: s.resolvePrefab("Turret_Heavy").root.scaleX,
+         };
+       })()`,
+    );
+    ok("a variant is created as its own file", variant.made && !!variant.file);
+    ok("and it stores a base and a diff rather than a second copy", (() => {
+      if (!variant.file) return false;
+      const def = JSON.parse(variant.file) as { root?: unknown; base?: string; diff?: Record<string, unknown> };
+      return !def.root && def.base === "Turret" && Object.keys(def.diff ?? {}).join() === "scaleY";
+    })(), String(variant.file));
+    ok("everything it did not claim still comes from the base", variant.inherits === 2.5,
+       String(variant.inherits));
+
+    // --- the stage keeps its shape whether or not a bar is showing ---
+    // The prefab bar appears above the toolbar and disappears again. The dock
+    // is a fixed height and the canvas takes the rest; a bar coming and going
+    // must not resize either of them.
+    const shape = await evaluate<{
+      scene: Record<string, number>;
+      doc: Record<string, number>;
+      back: Record<string, number>;
+      barInDoc: boolean;
+      barInScene: boolean;
+      docSurvivedReload: string | null;
+    }>(
+      win,
+      `(async () => {
+         const s = window.mosaicDebug.store;
+         const h = (sel) => {
+           const el = document.querySelector(sel);
+           return el ? Math.round(el.getBoundingClientRect().height) : 0;
+         };
+         const probe = () => ({ toolbar: h(".toolbar"), canvas: h(".canvas-frame"), dock: h(".dock"), dockBody: h(".dock .panel-body") });
+
+         const scene = probe();
+         const barInScene = !!document.querySelector(".prefab-bar");
+
+         s.openPrefab("Turret");
+         await new Promise(r => setTimeout(r, 300));
+         const doc = probe();
+         const barInDoc = !!document.querySelector(".prefab-bar");
+
+         // An external reload must put you back in the document you were in.
+         await window.mosaicDebug.workspace.reload();
+         await new Promise(r => setTimeout(r, 300));
+         const docSurvivedReload = s.prefabDoc ? s.prefabDoc.name : null;
+
+         s.closePrefab(true);
+         await new Promise(r => setTimeout(r, 300));
+         const back = probe();
+         return { scene, doc, back, barInDoc, barInScene, docSurvivedReload };
+       })()`,
+    );
+    ok("no prefab bar while a scene is the document", !shape.barInScene);
+    ok("and one appears in prefab edit mode", shape.barInDoc);
+    ok("the asset dock keeps its full height in a scene", shape.scene.dock === 232,
+       JSON.stringify(shape.scene));
+    ok("and the same height with the prefab bar showing", shape.doc.dock === 232,
+       JSON.stringify(shape.doc));
+    ok("the dock's body is the dock, minus its tabs — not collapsed",
+       shape.scene.dockBody > 150, JSON.stringify(shape.scene));
+    ok("the canvas takes the space the bar does not",
+       shape.doc.canvas < shape.scene.canvas && shape.doc.canvas > 300,
+       `${shape.scene.canvas} -> ${shape.doc.canvas}`);
+    ok("and the stage returns to its original shape on the way out",
+       shape.back.canvas === shape.scene.canvas && shape.back.dock === shape.scene.dock,
+       JSON.stringify(shape.back));
+    ok("reopening the folder puts you back in the prefab you were editing",
+       shape.docSurvivedReload === "Turret", String(shape.docSurvivedReload));
 
     // --- window chrome: traffic lights and dragging ---
     const chrome = await evaluate<{
@@ -620,6 +863,68 @@ async function newProjectFlow(win: BrowserWindow): Promise<void> {
        })()`));
     ok("the launcher shows recents with metadata",
        await evaluate(win, '!!document.querySelector(".recent-tags .tag-outline")'));
+
+    // --- a long recents list scrolls; the window does not stretch ---
+    // Someone who has opened forty folders should get the same launcher as
+    // someone who has opened two.
+    const longList = await evaluate<{
+      added: number;
+      cards: number;
+      viewport: number;
+      windowH: number;
+      listH: number;
+      listScrolls: boolean;
+      overflowsViewport: boolean;
+      actionsVisible: boolean;
+      footnoteVisible: boolean;
+    }>(
+      win,
+      `(async () => {
+         // Stretch the list without touching the recents store: what is under
+         // test is the layout under many cards, not how they got there.
+         const list = document.querySelector(".recent-list");
+         const seed = list.querySelector(".recent-card");
+         const before = list.querySelectorAll(".recent-card").length;
+         const clones = [];
+         for (let i = 0; i < 39; i++) {
+           const c = seed.cloneNode(true);
+           c.dataset.clone = "1";
+           list.appendChild(c);
+           clones.push(c);
+         }
+         await new Promise(r => setTimeout(r, 200));
+
+         const win_ = document.querySelector(".launcher-window");
+         const actions = document.querySelector(".launcher-actions");
+         const foot = document.querySelector(".launcher-recents .hint.mono");
+         const winRect = win_.getBoundingClientRect();
+         const listRect = list.getBoundingClientRect();
+         const result = {
+           added: document.querySelectorAll(".recent-card").length - before,
+           cards: document.querySelectorAll(".recent-card").length,
+           viewport: window.innerHeight,
+           windowH: Math.round(winRect.height),
+           listH: Math.round(listRect.height),
+           listScrolls: list.scrollHeight > list.clientHeight + 1,
+           overflowsViewport: Math.round(winRect.bottom) > window.innerHeight + 1,
+           // The things that must stay reachable however long the list is.
+           actionsVisible: actions.getBoundingClientRect().bottom <= window.innerHeight,
+           footnoteVisible: foot.getBoundingClientRect().bottom <= window.innerHeight + 1,
+         };
+         for (const c of clones) c.remove();
+         return result;
+       })()`,
+    );
+    ok("a long recents list renders in full", longList.added === 39 && longList.cards >= 40,
+       JSON.stringify(longList));
+    ok("the list is taller than the space it has, so scrolling is what is being tested",
+       longList.listH < longList.viewport, JSON.stringify(longList));
+    ok("the launcher window still fits the viewport", !longList.overflowsViewport,
+       JSON.stringify(longList));
+    ok("the recents list is what scrolls", longList.listScrolls, JSON.stringify(longList));
+    ok("New project… stays on screen", longList.actionsVisible, JSON.stringify(longList));
+    ok("and so does the footnote under the list", longList.footnoteVisible,
+       JSON.stringify(longList));
 
     await evaluate(win, 'document.querySelector(".launcher-actions button.primary").click()');
     await wait(300);

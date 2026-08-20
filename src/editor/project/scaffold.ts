@@ -6,6 +6,7 @@ import {
 import { DEFAULT_CONFIG, type ProjectConfig, type ProjectData } from "../../shared/types";
 import {
   createSceneFromTemplate,
+  defaultMatrix,
   placeholderObjectAssets,
   placeholderTilesetAsset,
   type TemplateId,
@@ -13,7 +14,7 @@ import {
 import { DEFAULT_GROUPS } from "../../shared/definitions";
 import { SCRIPT_BASE_FILE, newScriptRef, scriptFilePath } from "../../shared/scripts";
 import { samplePlayerController, scriptBaseSource } from "../scripts/stub";
-import { CONFIG_PATH } from "./serialize";
+import { CONFIG_PATH, prefabPath } from "./serialize";
 
 /**
  * Plans a new project without touching the disk.
@@ -100,15 +101,21 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   // will not build.
   const typed = opts.language === "ts";
   const e = typed ? "ts" : "js";
-  const scene = createSceneFromTemplate("Level_01", "Level 01", opts.template, opts.config);
+  const { scene, prefabs } = createSceneFromTemplate(
+    "Level_01",
+    "Level 01",
+    opts.template,
+    opts.config,
+  );
 
   const sampleScript = typed && (opts.template === "platformer" || opts.template === "runner");
   if (sampleScript) {
-    // The template's player comes with behaviour attached, so a new project
-    // opens on a worked example of the whole loop: class -> inspector -> file.
-    const player = scene.objects.find((o) => o.type === "player");
-    if (player) {
-      player.scripts = [newScriptRef("PlayerController", scriptFilePath("PlayerController"))];
+    // Behaviour goes on the Player PREFAB, not on the one object in this
+    // scene: that is how it would be authored, and it means the sample script
+    // reaches every Player the project ever places.
+    const player = prefabs.find((p) => p.name === "Player");
+    if (player?.root) {
+      player.root.scripts = [newScriptRef("PlayerController", scriptFilePath("PlayerController"))];
     }
   }
 
@@ -116,7 +123,7 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     name: opts.name.trim() || slug,
     config: opts.config,
     scenes: [scene],
-    prefabs: [],
+    prefabs,
     assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],
     anims: [],
     groups: [...DEFAULT_GROUPS],
@@ -163,6 +170,13 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     "generated",
   );
   add("src/scenes/Level_01.scene.json", sceneJson?.contents ?? "{}\n", "editor source of truth");
+  for (const prefab of prefabs) {
+    add(
+      prefabPath(prefab.name),
+      JSON.stringify(prefab, null, 2) + "\n",
+      "starter prefab — yours to rename or delete",
+    );
+  }
   add(
     `src/prefabs/Player.${e}`,
     hasPlayer ? playerPrefab(e, opts) : "",
@@ -220,23 +234,6 @@ function renameScene(contents: string, ext: string): string {
     .replace(/from "\.\/Level_01\.scene\.json"/, `from "./Level_01.scene.json"${ext === "js" ? " with { type: \"json\" }" : ""}`);
 }
 
-function defaultMatrix() {
-  const matrix: Record<string, Record<string, "collide" | "overlap" | "ignore">> = {};
-  for (const a of DEFAULT_GROUPS) {
-    matrix[a] = {};
-    for (const b of DEFAULT_GROUPS) matrix[a][b] = "ignore";
-  }
-  const set = (a: string, b: string, rule: "collide" | "overlap") => {
-    matrix[a][b] = rule;
-    matrix[b][a] = rule;
-  };
-  set("player", "solid", "collide");
-  set("player", "enemy", "overlap");
-  set("player", "pickup", "overlap");
-  set("player", "trigger", "overlap");
-  set("enemy", "solid", "collide");
-  return matrix;
-}
 
 function packageJson(slug: string, opts: NewProjectOptions): string {
   const scripts: Record<string, string> =

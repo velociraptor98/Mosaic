@@ -3,7 +3,8 @@ import { childrenOf } from "../../shared/transform";
 import type { LeftTab } from "../store/project";
 import type { SceneObject, TileLayer } from "../../shared/types";
 import { platform } from "../platform";
-import { MANIFEST_PATH, scenePath } from "../project/serialize";
+import { prefabUsage } from "../../shared/propagate";
+import { MANIFEST_PATH, prefabPath, scenePath } from "../project/serialize";
 import { useEditor, useScripts, useStoreVersion, useWorkspace } from "./context";
 
 const TABS: { id: LeftTab; label: string }[] = [
@@ -131,25 +132,51 @@ function ProjectTree() {
         </div>
       )}
 
-      <div className="tree-group">prefabs</div>
+      <div className="tree-group">src/prefabs</div>
       {store.project.prefabs.length === 0 && <div className="empty">No prefabs yet.</div>}
-      {store.project.prefabs.map((prefab) => (
-        <div key={prefab.name} className="tree-row-wrap">
-          <button
-            className="tree-row"
-            onClick={() =>
-              store.setUi({ tool: "place", placement: { kind: "prefab", id: prefab.name } })
-            }
-            title={`Exposed: ${prefab.exposed.join(", ") || "nothing"}`}
-          >
-            <span className="glyph">⬡</span>
-            {prefab.name}.prefab.json
-          </button>
-          <button className="mini danger" onClick={() => store.deletePrefab(prefab.name)}>
-            ×
-          </button>
-        </div>
-      ))}
+      {/* Bases first, each with the variants that resolve from it indented
+          underneath: the file list is also the inheritance. */}
+      {store.project.prefabs
+        .filter((p) => !p.base)
+        .flatMap((base) => [base, ...store.variantsOf(base.name)])
+        .map((prefab) => {
+          const count = prefabUsage(store.project, prefab.name).reduce((n, u) => n + u.count, 0);
+          const open = store.prefabDoc?.name === prefab.name;
+          return (
+            <div key={prefab.name} className="tree-row-wrap">
+              <button
+                className={`tree-row ${open ? "active" : ""}`}
+                style={prefab.base ? { paddingLeft: 22 } : undefined}
+                onClick={() =>
+                  store.setUi({ tool: "place", placement: { kind: "prefab", id: prefab.name } })
+                }
+                title={
+                  prefab.base
+                    ? `Variant of ${prefab.base} · ${Object.keys(prefab.diff ?? {}).length} field(s) differ`
+                    : `Exposed: ${prefab.exposed.join(", ") || "nothing"}`
+                }
+              >
+                <span className="glyph">{prefab.base ? "◈" : "◆"}</span>
+                {prefab.name}.prefab.json
+                <GitBadge code={git[prefabPath(prefab.name)]} />
+                <span className="meta">
+                  {prefab.base ? `→ ${prefab.base}` : `${prefab.exposed.length} exposed`}
+                  {count > 0 ? ` · ${count}×` : ""}
+                </span>
+              </button>
+              <button
+                className="mini"
+                title="Open the definition on an isolated stage"
+                onClick={() => store.openPrefab(prefab.name)}
+              >
+                ◆
+              </button>
+              <button className="mini danger" onClick={() => store.deletePrefab(prefab.name)}>
+                ×
+              </button>
+            </div>
+          );
+        })}
 
       {/* The editor indexes these, so the folder view has to show them: a
           class the project has is as much a part of it as a scene is. */}
@@ -268,7 +295,7 @@ function Outliner() {
             e.shiftKey ? store.toggleSelection(obj.id) : store.setSelection([obj.id])
           }
         >
-          <span className="glyph">{obj.type === "container" ? "▣" : obj.prefab ? "⬡" : "◻"}</span>
+          <span className="glyph">{glyphFor(obj, store, doc?.rootId)}</span>
           <span className="name">{obj.name}</span>
           {obj.prefab && <span className="meta">{obj.prefab}</span>}
           {/* The badge is the script count: the canvas should say an object
@@ -294,17 +321,21 @@ function Outliner() {
     );
   };
 
+  const doc = store.prefabDoc;
+
   return (
     <div className="tree">
       <div
         className="tree-heading"
         onDragOver={(e) => e.preventDefault()}
         onDrop={() => {
-          if (dragId) store.reparent([dragId], null);
+          // On the isolated stage there is no "outside the prefab" to drop
+          // onto: everything on it is part of the definition.
+          if (dragId && !doc) store.reparent([dragId], null);
           setDragId(null);
         }}
       >
-        <span>{scene.name}</span>
+        <span>{doc ? "PREFAB CONTENTS" : scene.name}</span>
         <button className="mini" onClick={() => store.groupSelection()} title="Group selection (Ctrl/⌘G)">
           group
         </button>
@@ -329,9 +360,24 @@ function Outliner() {
             )}
           </div>
         ))}
-      <div className="hint">Drag a row onto another to reparent — world position is preserved, cycles are rejected.</div>
+      <div className="hint">
+        {doc
+          ? "◆ prefab root · ⬡ nested instance (sealed) · everything here is part of the definition"
+          : "◆ instance · ◈ variant instance · drag a row onto another to reparent — world position is preserved, cycles are rejected."}
+      </div>
     </div>
   );
+}
+
+/** ◆ the definition's root · ⬡ a nested instance · ◈ an instance of a variant. */
+function glyphFor(
+  obj: SceneObject,
+  store: { resolvePrefab: (name: string | undefined) => { base?: string } | undefined },
+  rootId?: string,
+): string {
+  if (rootId && obj.id === rootId) return "◆";
+  if (obj.prefab) return store.resolvePrefab(obj.prefab)?.base ? "◈" : "⬡";
+  return obj.type === "container" ? "▣" : "◻";
 }
 
 /**

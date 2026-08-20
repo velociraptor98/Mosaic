@@ -2,18 +2,22 @@ import {
   BUILTIN_TILESET_ID,
   BUILTIN_TILESET_KEY,
   DEFAULT_GROUPS,
-  OBJECT_DEFS,
+  SHAPE_DEFS,
   TILE_DEFS,
   TILE_SIZE,
-  objectDef,
-  objectTextureKey,
+  shapeDef,
+  shapeTextureKey,
 } from "../../shared/definitions";
+import { newLid } from "../../shared/prefabs";
+import { bodyForSize, type Size } from "../../shared/size";
 import { placeholderTilesetDataUrl } from "../../shared/tilesetImage";
 import {
   DEFAULT_CONFIG,
   type AssetDef,
   type CollisionRule,
   type ProjectConfig,
+  type PrefabDef,
+  type PrefabNode,
   type ProjectData,
   type SceneData,
   type SceneObject,
@@ -85,18 +89,25 @@ export function makeTileLayer(
   };
 }
 
+/**
+ * A plain sprite of one placeholder shape.
+ *
+ * There is no "type" to choose any more: an object is art plus components, so
+ * what you pass is the art. Templates use this to build their starter prefabs;
+ * everything a user places comes from an asset or a prefab.
+ */
 export function makeObject(
-  type: string,
+  shape: string,
   layerId: string,
   x: number,
   y: number,
   overrides: Partial<SceneObject> = {},
 ): SceneObject {
-  const def = objectDef(type);
+  const def = shapeDef(shape);
   const base: SceneObject = {
-    id: uid(type),
-    name: def?.label ?? type,
-    type,
+    id: uid("obj"),
+    name: def?.label ?? "Sprite",
+    type: "sprite",
     layerId,
     parentId: null,
     x,
@@ -107,28 +118,109 @@ export function makeObject(
     originX: 0.5,
     originY: 0.5,
     visible: true,
-    texture: objectTextureKey(type),
-    group: def?.group,
-    data: structuredClone(def?.data ?? {}),
+    texture: shapeTextureKey(shape),
+    data: {},
   };
   return { ...base, ...overrides };
 }
 
-export function defaultBody(type: string): SceneObject["body"] {
-  const def = objectDef(type);
-  const w = def?.width ?? 32;
-  const h = def?.height ?? 32;
-  return {
-    shape: "box",
-    width: w,
-    height: h,
-    radius: Math.min(w, h) / 2,
-    offsetX: 0,
-    offsetY: 0,
-    immovable: type === "crate",
-    allowGravity: type !== "coin" && type !== "spawn" && type !== "exit",
-    bounce: 0,
+export function shapeSize(shape: string): Size {
+  const def = shapeDef(shape);
+  return { width: def?.width ?? 32, height: def?.height ?? 32 };
+}
+
+/** A body matching a placeholder shape's art. */
+export function defaultBody(shape: string, patch: Partial<SceneObject["body"]> = {}): SceneObject["body"] {
+  return bodyForSize(shapeSize(shape), patch);
+}
+
+/**
+ * What a STARTER prefab publishes to its instances.
+ *
+ * Deliberately permissive. A real prefab should expose as little as possible —
+ * that is the contract that stops fifty copies drifting apart — but a prefab
+ * that ships with a project and publishes nothing greets a new user with a
+ * column of locked fields and no explanation. These are the per-copy values
+ * anyway; anything structural still belongs to the definition.
+ */
+export const STARTER_EXPOSED = [
+  "scaleX",
+  "scaleY",
+  "rotation",
+  "visible",
+  "group",
+  "playOnSpawn",
+  "body.width",
+  "body.height",
+];
+
+/**
+ * A starter prefab: one shape, a body, a group, and nothing else.
+ *
+ * These are written INTO the project as ordinary prefab files. They are not
+ * engine types and nothing downstream knows their names — rename them, edit
+ * them, throw them away. They exist so a new project has something to place
+ * before you have imported any art of your own.
+ */
+export function makePrefab(
+  name: string,
+  shape: string,
+  opts: { group?: string; body?: Partial<SceneObject["body"]>; noBody?: boolean } = {},
+): PrefabDef {
+  const size = shapeSize(shape);
+  const root: PrefabNode = {
+    name,
+    type: "sprite",
+    x: 0,
+    y: 0,
+    rotation: 0,
+    scaleX: 1,
+    scaleY: 1,
+    originX: 0.5,
+    originY: 0.5,
+    visible: true,
+    texture: shapeTextureKey(shape),
+    group: opts.group,
+    body: opts.noBody ? undefined : bodyForSize(size, opts.body),
+    data: {},
+    lid: newLid(),
+    children: [],
   };
+  return { name, exposed: [...STARTER_EXPOSED], root };
+}
+
+/** An instance of a starter prefab, placed in a template scene. */
+function placePrefab(
+  prefab: PrefabDef,
+  layerId: string,
+  x: number,
+  y: number,
+  name = prefab.name,
+): SceneObject {
+  const { children: _children, lid: _lid, ...rest } = structuredClone(prefab.root!);
+  return {
+    ...(rest as unknown as SceneObject),
+    id: uid("obj"),
+    name,
+    layerId,
+    parentId: null,
+    x,
+    y,
+    prefab: prefab.name,
+    overrides: {},
+    data: {},
+  };
+}
+
+/**
+ * A template is a runnable scene plus the PREFABS it is built from — not a
+ * scene of hardcoded engine types. The prefabs are written into the project as
+ * ordinary files, so the first thing a new project contains is content the
+ * author owns rather than nouns the editor insisted on.
+ */
+export interface TemplateResult {
+  scene: SceneData;
+  prefabs: PrefabDef[];
 }
 
 export function createSceneFromTemplate(
@@ -136,7 +228,7 @@ export function createSceneFromTemplate(
   name: string,
   template: TemplateId,
   config: ProjectConfig = DEFAULT_CONFIG,
-): SceneData {
+): TemplateResult {
   const tile = config.tile;
   const cols = Math.max(4, Math.round(config.canvas.width / tile));
   const rows = Math.max(4, Math.round(config.canvas.height / tile));
@@ -160,8 +252,20 @@ export function createSceneFromTemplate(
   });
 
   if (template === "empty") {
-    return { key, name, settings, layers: [objectLayer()], objects: [] };
+    // Nothing at all. Someone porting a game wants an empty folder, not a
+    // starter set they have to delete first.
+    return { scene: { key, name, settings, layers: [objectLayer()], objects: [] }, prefabs: [] };
   }
+
+  const gravity = settings.gravityY > 0;
+  const player = makePrefab("Player", "capsule", {
+    group: "player",
+    body: { allowGravity: gravity },
+  });
+  const pickup = makePrefab("Pickup", "star", {
+    group: "pickup",
+    body: { allowGravity: false },
+  });
 
   if (template === "platformer") {
     const data = grid();
@@ -173,11 +277,16 @@ export function createSceneFromTemplate(
     for (let c = 13; c <= Math.min(18, cols - 2); c++) data[rows - 8][c] = 1;
     const tiles = makeTileLayer("Terrain", data, dims);
     const objects = objectLayer();
-    const player = makeObject("player", objects.id, 3 * tile, (rows - 4) * tile, {
-      body: defaultBody("player"),
-    });
-    const spawn = makeObject("spawn", objects.id, 3 * tile, (rows - 4) * tile);
-    return { key, name, settings, layers: [tiles, objects], objects: [spawn, player] };
+    return {
+      scene: {
+        key,
+        name,
+        settings,
+        layers: [tiles, objects],
+        objects: [placePrefab(player, objects.id, 3 * tile, (rows - 4) * tile)],
+      },
+      prefabs: [player, pickup],
+    };
   }
 
   if (template === "runner") {
@@ -187,16 +296,19 @@ export function createSceneFromTemplate(
     for (let c = 15; c <= 18 && c < cols; c++) data[rows - 7][c] = 1;
     const tiles = makeTileLayer("Chunks", data, dims);
     const objects = objectLayer();
-    const player = makeObject("player", objects.id, 2 * tile, (rows - 4) * tile, {
-      body: defaultBody("player"),
-    });
     const coins = [0, 1, 2].map((i) =>
-      makeObject("coin", objects.id, (16 + i) * tile, (rows - 9) * tile, {
-        name: `Coin ${i + 1}`,
-        body: { ...defaultBody("coin")!, allowGravity: false },
-      }),
+      placePrefab(pickup, objects.id, (16 + i) * tile, (rows - 9) * tile, `Pickup ${i + 1}`),
     );
-    return { key, name, settings, layers: [tiles, objects], objects: [player, ...coins] };
+    return {
+      scene: {
+        key,
+        name,
+        settings,
+        layers: [tiles, objects],
+        objects: [placePrefab(player, objects.id, 2 * tile, (rows - 4) * tile), ...coins],
+      },
+      prefabs: [player, pickup],
+    };
   }
 
   // top-down: walls around a room, zero gravity
@@ -214,10 +326,16 @@ export function createSceneFromTemplate(
   }
   const tiles = makeTileLayer("Walls", data, dims);
   const objects = objectLayer();
-  const player = makeObject("player", objects.id, 6 * tile, Math.floor(rows / 2) * tile, {
-    body: { ...defaultBody("player")!, allowGravity: false },
-  });
-  return { key, name, settings, layers: [tiles, objects], objects: [player] };
+  return {
+    scene: {
+      key,
+      name,
+      settings,
+      layers: [tiles, objects],
+      objects: [placePrefab(player, objects.id, 6 * tile, Math.floor(rows / 2) * tile)],
+    },
+    prefabs: [player, pickup],
+  };
 }
 
 export function placeholderTilesetAsset(): AssetDef {
@@ -240,11 +358,11 @@ export function placeholderTilesetAsset(): AssetDef {
 
 /** Placeholder object art registered as assets so the dock has something real. */
 export function placeholderObjectAssets(): AssetDef[] {
-  return OBJECT_DEFS.map((def) => ({
-    id: `asset-${def.type}`,
-    key: objectTextureKey(def.type),
+  return SHAPE_DEFS.map((def) => ({
+    id: `asset-shape-${def.shape}`,
+    key: shapeTextureKey(def.shape),
     kind: "image" as const,
-    path: `assets/${def.type}.png`,
+    path: `assets/shape-${def.shape}.png`,
     url: "",
     width: def.width,
     height: def.height,
@@ -252,50 +370,60 @@ export function placeholderObjectAssets(): AssetDef[] {
   }));
 }
 
-function defaultMatrix(groups: string[]): Record<string, Record<string, CollisionRule>> {
+/**
+ * Starting rules for the starting groups. Exported because the scaffold needs
+ * the same table — it had its own copy, which drifted the moment the default
+ * groups changed and crashed on a name that no longer existed.
+ */
+export function defaultMatrix(groups: string[] = DEFAULT_GROUPS): Record<string, Record<string, CollisionRule>> {
   const matrix: Record<string, Record<string, CollisionRule>> = {};
   for (const a of groups) {
     matrix[a] = {};
     for (const b of groups) matrix[a][b] = "ignore";
   }
   const set = (a: string, b: string, rule: CollisionRule) => {
+    if (!matrix[a] || !matrix[b]) return;
     matrix[a][b] = rule;
     matrix[b][a] = rule;
   };
+  // Sensible starting rules for the starting groups. Both are project data:
+  // rename a group or delete it and the matrix follows.
   set("player", "solid", "collide");
-  set("player", "enemy", "overlap");
   set("player", "pickup", "overlap");
+  set("player", "hazard", "overlap");
   set("player", "trigger", "overlap");
-  set("enemy", "solid", "collide");
   set("solid", "solid", "collide");
   return matrix;
 }
 
 export function createStarterProject(): ProjectData {
-  const level = createSceneFromTemplate("Level_01", "Level 01", "platformer");
+  const { scene: level, prefabs } = createSceneFromTemplate(
+    "Level_01",
+    "Level 01",
+    "platformer",
+  );
   const objLayer = level.layers.find((l) => l.kind === "object")!;
+  const pickup = prefabs.find((p) => p.name === "Pickup")!;
 
-  // A row of coins, deliberately repeated — workflow 5 turns these into a
-  // prefab. Names stay unique: they key the generated scene's objects map.
+  // A row of pickups, deliberately repeated, so the prefab workflow has
+  // something to be demonstrated on. Names stay unique: they key the generated
+  // scene's objects map.
   for (let i = 0; i < 4; i++) {
-    const coin = makeObject("coin", objLayer.id, (13 + i) * TILE_SIZE + 16, (ROWS - 9) * TILE_SIZE, {
-      body: { ...defaultBody("coin")!, allowGravity: false },
-    });
+    const coin = placePrefab(
+      pickup,
+      objLayer.id,
+      (13 + i) * TILE_SIZE + 16,
+      (ROWS - 9) * TILE_SIZE,
+    );
     coin.name = uniqueName(coin.name, level.objects.map((o) => o.name));
     level.objects.push(coin);
   }
-  level.objects.push(
-    makeObject("enemy", objLayer.id, 18 * TILE_SIZE, (ROWS - 4) * TILE_SIZE, {
-      body: defaultBody("enemy"),
-    }),
-  );
-  level.objects.push(makeObject("exit", objLayer.id, 23 * TILE_SIZE, (ROWS - 4) * TILE_SIZE));
 
   return {
     name: "Starter Project",
     config: structuredClone(DEFAULT_CONFIG),
     scenes: [level],
-    prefabs: [],
+    prefabs,
     assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],
     anims: [],
     groups: [...DEFAULT_GROUPS],

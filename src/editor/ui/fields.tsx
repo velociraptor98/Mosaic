@@ -1,6 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
+ * The label of a field, with its two prefab markers: the revert arrow when the
+ * instance has claimed the value, and the lock when the definition owns it.
+ *
+ * A locked field is SHOWN rather than hidden. Hiding it would leave a level
+ * designer wondering where the value went; showing it locked says who owns it
+ * and where to go to change that.
+ */
+function FieldLabel({
+  label,
+  marked,
+  onRevert,
+  locked,
+}: {
+  label: string;
+  marked?: boolean;
+  onRevert?: () => void;
+  locked?: string;
+}) {
+  return (
+    <span className="field-label">
+      {label}
+      {locked && (
+        <span className="lock" title={locked}>
+          🔒
+        </span>
+      )}
+      {marked && !locked && (
+        <button
+          className="revert"
+          title="Revert this override to the prefab's value"
+          onClick={(e) => {
+            e.preventDefault();
+            onRevert?.();
+          }}
+        >
+          ⟲
+        </button>
+      )}
+    </span>
+  );
+}
+
+/**
  * Numeric field that commits on blur or ⏎ and never clobbers what you are
  * typing when the canvas pushes a new value mid-drag.
  */
@@ -13,6 +56,7 @@ export function NumberField({
   marked,
   onRevert,
   disabled,
+  locked,
 }: {
   label: string;
   value: number;
@@ -22,6 +66,8 @@ export function NumberField({
   marked?: boolean;
   onRevert?: () => void;
   disabled?: boolean;
+  /** Why the definition owns this value, when it does. */
+  locked?: string;
 }) {
   const [text, setText] = useState(String(value));
   const focused = useRef(false);
@@ -40,27 +86,13 @@ export function NumberField({
   };
 
   return (
-    <label className={`field ${marked ? "overridden" : ""}`}>
-      <span className="field-label">
-        {label}
-        {marked && (
-          <button
-            className="revert"
-            title="Revert this override to the prefab's value"
-            onClick={(e) => {
-              e.preventDefault();
-              onRevert?.();
-            }}
-          >
-            ⟲
-          </button>
-        )}
-      </span>
+    <label className={`field ${marked ? "overridden" : ""} ${locked ? "locked" : ""}`}>
+      <FieldLabel label={label} marked={marked} onRevert={onRevert} locked={locked} />
       <input
         type="number"
         step={step}
         value={text}
-        disabled={disabled}
+        disabled={disabled || !!locked}
         onFocus={() => (focused.current = true)}
         onBlur={() => {
           focused.current = false;
@@ -89,6 +121,7 @@ export function TextField({
   placeholder,
   marked,
   onRevert,
+  locked,
 }: {
   label: string;
   value: string;
@@ -96,6 +129,7 @@ export function TextField({
   placeholder?: string;
   marked?: boolean;
   onRevert?: () => void;
+  locked?: string;
 }) {
   const [text, setText] = useState(value);
   const focused = useRef(false);
@@ -103,24 +137,11 @@ export function TextField({
     if (!focused.current) setText(value);
   }, [value]);
   return (
-    <label className={`field ${marked ? "overridden" : ""}`}>
-      <span className="field-label">
-        {label}
-        {marked && (
-          <button
-            className="revert"
-            title="Revert to the inherited value"
-            onClick={(e) => {
-              e.preventDefault();
-              onRevert?.();
-            }}
-          >
-            ⟲
-          </button>
-        )}
-      </span>
+    <label className={`field ${marked ? "overridden" : ""} ${locked ? "locked" : ""}`}>
+      <FieldLabel label={label} marked={marked} onRevert={onRevert} locked={locked} />
       <input
         value={text}
+        disabled={!!locked}
         placeholder={placeholder}
         onFocus={() => (focused.current = true)}
         onBlur={() => {
@@ -140,24 +161,24 @@ export function CheckField({
   onCommit,
   marked,
   onRevert,
+  locked,
 }: {
   label: string;
   value: boolean;
   onCommit: (v: boolean) => void;
   marked?: boolean;
   onRevert?: () => void;
+  locked?: string;
 }) {
   return (
-    <label className={`field check ${marked ? "overridden" : ""}`}>
-      <input type="checkbox" checked={value} onChange={(e) => onCommit(e.target.checked)} />
-      <span className="field-label">
-        {label}
-        {marked && (
-          <button className="revert" onClick={(e) => (e.preventDefault(), onRevert?.())}>
-            ⟲
-          </button>
-        )}
-      </span>
+    <label className={`field check ${marked ? "overridden" : ""} ${locked ? "locked" : ""}`}>
+      <input
+        type="checkbox"
+        checked={value}
+        disabled={!!locked}
+        onChange={(e) => onCommit(e.target.checked)}
+      />
+      <FieldLabel label={label} marked={marked} onRevert={onRevert} locked={locked} />
     </label>
   );
 }
@@ -169,6 +190,7 @@ export function SelectField({
   onCommit,
   marked,
   onRevert,
+  locked,
 }: {
   label: string;
   value: string;
@@ -176,18 +198,12 @@ export function SelectField({
   onCommit: (v: string) => void;
   marked?: boolean;
   onRevert?: () => void;
+  locked?: string;
 }) {
   return (
-    <label className={`field ${marked ? "overridden" : ""}`}>
-      <span className="field-label">
-        {label}
-        {marked && (
-          <button className="revert" onClick={(e) => (e.preventDefault(), onRevert?.())}>
-            ⟲
-          </button>
-        )}
-      </span>
-      <select value={value} onChange={(e) => onCommit(e.target.value)}>
+    <label className={`field ${marked ? "overridden" : ""} ${locked ? "locked" : ""}`}>
+      <FieldLabel label={label} marked={marked} onRevert={onRevert} locked={locked} />
+      <select value={value} disabled={!!locked} onChange={(e) => onCommit(e.target.value)}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -202,10 +218,12 @@ export function JsonField({
   label,
   value,
   onCommit,
+  locked,
 }: {
   label: string;
   value: unknown;
   onCommit: (v: unknown) => void;
+  locked?: string;
 }) {
   const [text, setText] = useState(() => JSON.stringify(value ?? {}, null, 2));
   const [error, setError] = useState<string | null>(null);
@@ -216,11 +234,12 @@ export function JsonField({
   }, [value]);
 
   return (
-    <div className="field json">
-      <span className="field-label">{label}</span>
+    <div className={`field json ${locked ? "locked" : ""}`}>
+      <FieldLabel label={label} locked={locked} />
       <textarea
         rows={6}
         value={text}
+        disabled={!!locked}
         onFocus={() => (focused.current = true)}
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {

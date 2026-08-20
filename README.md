@@ -93,17 +93,61 @@ real frame boundaries over the art before you commit. Names come from a
 `{i}` pattern with optional zero padding; pivots are per sheet, and both the
 place tool and the body editor read them.
 
-### 5. Prefabs & instancing — `shared/prefabs.ts`
-Creating a prefab replaces each selected object with `{prefab, transform,
-overrides}` and writes the definition. You choose which property paths
-instances may override; fields that already differ across the selection become
-overrides automatically rather than being flattened.
+### 5. Prefabs & instancing — `shared/prefabs.ts`, `shared/propagate.ts`
+Making one object into many, in seven steps: **promote, isolate, compose,
+expose, vary, place, propagate.**
 
-Resolution is `definition ← overrides`, shallow per property path. Overridden
-fields are marked in the Inspector and revertible; editing an unexposed field
-is refused with a message rather than silently written. Editing the definition
-propagates to every instance in every scene *except* the fields an instance
-overrides.
+**There are no engine object types.** An object is art plus the components put
+on it: a texture, maybe a body, maybe scripts. `type` is a rendering hint
+(`sprite` or `container`) and nothing downstream branches on it. The editor
+ships six *placeholder shapes* — capsule, box, circle, triangle, star, diamond
+— so a new project has something to place before you import art, and a new
+project's starter content is written into your folder as ordinary prefab files
+you can rename, edit or delete. What you place is an **asset** or a **prefab**;
+there is no third, fixed palette of somebody else's game nouns.
+
+**Promote.** A prefab starts as something already on screen. You build it in
+the scene, then promote it — the dialog names the file and says what happens to
+the thing you selected: it becomes the first instance rather than being
+replaced by a copy. The scene node is rewritten in place, **keeping its id**, so
+anything referencing it still resolves. A selection spanning two parents has no
+single root and is refused with the reason; siblings of one parent are relinked
+as instances together.
+
+**Isolate.** `src/prefabs/<Name>.prefab.json` opens as its **own document** on
+an empty stage, with its own undo stack, so nothing you drag can land in a
+level. Scene documents stay open and their instances go on rendering from the
+last *saved* definition until you push. The stage draws the prefab's bounds and
+its origin, because those are the two things an instance cannot fix later.
+
+**Compose.** The definition is a node tree with the same shape as a scene
+subtree, so nothing new has to be learned to author one. Parts are addressed by
+a stable **local id**, which is what lets an override survive a rename.
+
+**Expose.** `exposed[]` is the contract with the levels: a checked field is
+published to instances, an unchecked one never appears in a level inspector at
+all. Fields the definition owns are shown **locked**, not hidden — a level
+designer should see that the value exists and read who owns it. Unexposing a
+field that instances override asks first, and names the count and the scenes.
+
+**Vary.** A variant stores `{ base, diff }` and nothing else — three fields,
+not a second copy of the object. Fixing the base fixes every variant except
+where one deliberately disagreed. A variant of a variant is allowed; a third
+level is refused, as is a cycle.
+
+**Place.** Instances come from the asset browser onto the canvas, named for the
+prefab and showing how many are already placed. Resolution is
+`definition ← overrides`, shallow per property path, with the inheritance chain
+resolved first. An instance whose definition has gone keeps its position and
+its overrides and draws as a placeholder.
+
+**Propagate.** Saving a prefab is the one edit that reaches into files you are
+not looking at, so it is the one edit that lists its consequences first: which
+scenes, which instances, which values **move**, which overrides are **kept**
+because an instance claimed them, which are **dropped** because the field is no
+longer published, and which scenes are **skipped** because they changed on disk
+under you. Nothing is written until Push. *Push + review each* then walks the
+affected scenes one at a time with the touched instances already selected.
 
 ### 6. Animation timeline — `ui/BottomDock.tsx`, `ui/AnimPreview.tsx`
 The timeline takes over the asset dock so the canvas stays full size. Frames
@@ -420,14 +464,18 @@ from the mark.
 src/
   shared/          imported by BOTH the editor and your game — no React, no UI
     types.ts        Project / Scene / Layer / Object / Prefab / Anim schema
-    definitions.ts  Built-in tileset + object types
+    definitions.ts  Placeholder tileset + placeholder SHAPES (not game roles)
+    size.ts         How big a thing is drawn — read from its art, not its type
     textures.ts     Procedural placeholder art (Phaser)
     tilesetImage.ts The placeholder tileset as a PNG data URL (no Phaser)
     logoGeometry.ts The mark's 3x3 grid — drawn by the UI, the app icon and the
                     headless suite, so there is one set of numbers
     logoBitmap.ts   That geometry rasterised: the app icon, with no bitmap
                     checked into the repo
-    prefabs.ts      Resolution: definition <- overrides, per property path
+    prefabs.ts      Resolution: base <- variant diff, then definition <-
+                    instance overrides; local ids, bounds, tree diffing
+    propagate.ts    What a definition change costs, worked out before it
+                    happens: moved / kept / dropped / skipped, by scene
     transform.ts    Hierarchy maths, cycle rejection, world<->local
     manifest.ts     Derives the Phaser loader manifest from a scene
 
@@ -467,8 +515,12 @@ scripts/smoke.ts   headless pass over every workflow's logic
 
 A transaction records only the slices it changed (`scene:<key>`, `prefabs`,
 `assets`, `anims`, `groups`, `collision`, `meta`) and pushes one entry onto the
-**active scene's** stack. Undoing an edit in one scene therefore cannot rewind a
-later edit in another — `npm run smoke` asserts exactly that. Asset payloads are
+**active document's** stack. Undoing an edit in one scene therefore cannot
+rewind a later edit in another — `npm run smoke` asserts exactly that. An open
+prefab is a document too: it gets a `doc` slice and a stack of its own, and its
+modified marker compares the definition against what was stored rather than
+counting undo depth, so editing an asset while it is open does not make it read
+as unsaved. Asset payloads are
 compared by length + prefix, so a transaction never walks megabytes of base64.
 
 ### Using an exported scene in your game
@@ -508,8 +560,15 @@ inside the keep markers survives every regeneration.
   Matter concern and are not modelled.
 - Play-test ships a default player controller (arrows/WASD, jump on gravity
   scenes) so RUN does something; real behaviour belongs in your exported code.
-- Prefabs are single-node: a prefab's child objects are stored in the
-  definition but neither rendered nor exported as children.
+- Collision groups and the starter prefabs are project data with genre-ish
+  names (`player`, `pickup`, `Player`, `Pickup`). They are a starting point,
+  not a fixed set — rename or delete them and nothing in the editor cares.
+- A prefab's child objects are stored in the definition and edited on the
+  isolated stage, but the exporter still emits the root node only — child parts
+  are not yet constructed in the generated class.
+- A variant claims structure whole: if it changes its children, it stores the
+  child list rather than a per-child diff, so later structural changes on the
+  base do not flow into it. Property changes on the base still do.
 - Play-test compiles scripts with **rolldown**, which is therefore a runtime
   dependency of the desktop build, and it runs them with `new Function` in the
   renderer. That is the user's own code by construction — but it is not a

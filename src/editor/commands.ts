@@ -69,7 +69,11 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "scene.export", title: "Export scene…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },
     { id: "asset.import", title: "Import assets…", category: "Assets", binding: `${mod}I`, run: () => openDialog("import") },
     { id: "asset.atlas", title: "Slice atlas…", category: "Assets", run: () => openDialog("atlas") },
-    { id: "prefab.create", title: "Create prefab from selection…", category: "Prefabs", run: () => openDialog("prefab") },
+    { id: "prefab.create", title: "Create prefab from selection…", category: "Prefabs", binding: `${mod}⇧P`, run: () => openDialog("prefab") },
+    { id: "prefab.edit", title: "Edit the selected instance's prefab…", category: "Prefabs", run: () => { const name = store.selection[0]?.prefab; if (name) store.openPrefab(name); else store.setStatus("Select a prefab instance first"); } },
+    { id: "prefab.save", title: "Save prefab (show what it costs)…", category: "Prefabs", run: () => { if (store.prefabDoc) store.planPrefabSave(workspace.writeBlockedReason); else store.setStatus("No prefab document is open"); } },
+    { id: "prefab.close", title: "Back to scene (leave prefab edit mode)", category: "Prefabs", run: () => store.closePrefab() },
+    { id: "prefab.expose", title: "Show the prefab's exposed fields", category: "Prefabs", run: () => store.setUi({ inspectorTab: "prefab" }) },
     { id: "physics.matrix", title: "Edit collision matrix…", category: "Physics", run: () => openDialog("collision") },
     { id: "script.attach", title: "Attach script to selection…", category: "Scripts", run: () => openDialog("attachscript") },
     { id: "script.inspect", title: "Show scripts on selection", category: "Scripts", run: () => store.setUi({ inspectorTab: "scripts" }) },
@@ -190,10 +194,19 @@ export function searchPalette(query: string, ctx: CommandContext): PaletteEntry[
       entries.push({
         id: `prefab:${prefab.name}`,
         title: prefab.name,
-        subtitle: `Prefab · ${prefab.exposed.length} exposed`,
+        subtitle: prefab.base
+          ? `Variant of ${prefab.base} · ${Object.keys(prefab.diff ?? {}).length} field(s) differ`
+          : `Prefab · ${prefab.exposed.length} exposed`,
         kind: "prefab",
         run: () =>
           store.setUi({ tool: "place", placement: { kind: "prefab", id: prefab.name } }),
+      });
+      entries.push({
+        id: `prefab:edit:${prefab.name}`,
+        title: `Edit ${prefab.name} definition`,
+        subtitle: "Opens the prefab alone on an isolated stage",
+        kind: "prefab",
+        run: () => store.openPrefab(prefab.name),
       });
     }
   }

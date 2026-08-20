@@ -1,10 +1,10 @@
 import Phaser from "phaser";
 import {
   BUILTIN_TILESET_KEY,
-  OBJECT_DEFS,
+  SHAPE_DEFS,
   TILE_DEFS,
   TILE_SIZE,
-  objectTextureKey,
+  shapeTextureKey,
   type ObjectShape,
 } from "./definitions";
 
@@ -13,7 +13,7 @@ import {
  *
  *  - one real tileset *image* (tiles laid out left-to-right in a strip) so
  *    Phaser's native Tilemap API can be used unmodified, and
- *  - one texture per built-in object type.
+ *  - one texture per placeholder SHAPE.
  *
  * Safe to call repeatedly — existing keys are skipped.
  */
@@ -21,12 +21,12 @@ export function ensurePlaceholderTextures(scene: Phaser.Scene): void {
   ensurePlaceholderTileset(scene);
 
   const gfx = scene.make.graphics({ x: 0, y: 0 }, false);
-  for (const obj of OBJECT_DEFS) {
-    const key = objectTextureKey(obj.type);
+  for (const def of SHAPE_DEFS) {
+    const key = shapeTextureKey(def.shape);
     if (scene.textures.exists(key)) continue;
     gfx.clear();
-    drawObjectShape(gfx, obj.shape, obj.color, obj.width, obj.height);
-    gfx.generateTexture(key, obj.width, obj.height);
+    drawObjectShape(gfx, def.shape, def.color, def.width, def.height);
+    gfx.generateTexture(key, def.width, def.height);
   }
   gfx.destroy();
 }
@@ -91,6 +91,11 @@ function drawObjectShape(
       ];
       gfx.fillPoints(pts, true);
       gfx.strokePoints(pts, true);
+      break;
+    }
+    case "box": {
+      gfx.fillRect(2, 2, w - 4, h - 4);
+      gfx.strokeRect(2, 2, w - 4, h - 4);
       break;
     }
     case "star": {

@@ -6,7 +6,13 @@ import { ScriptRegistry } from "../scripts/registry";
 import { ScriptRuntime } from "../scripts/runtime";
 import { SCRIPT_EXT } from "../../shared/scripts";
 import type { ProjectStore } from "../store/project";
-import { CONFIG_PATH, MANIFEST_PATH, projectFromSource, projectToFiles, scenePath } from "./serialize";
+import {
+  CONFIG_PATH,
+  MANIFEST_PATH,
+  projectFromSource,
+  projectToFiles,
+  scenePath,
+} from "./serialize";
 
 /**
  * Assets discovered on disk arrive without dimensions — the main process only
@@ -68,6 +74,12 @@ export class Workspace {
   scriptRuntime = new ScriptRuntime();
   /** Set by the play-test, so a source edit can reach a running scene. */
   onScriptsChanged: ((rels: string[]) => void) | null = null;
+  /**
+   * Scene files that changed on disk under unsaved edits of ours. Writing one
+   * would throw away whatever the other change was, so a prefab push marks
+   * them SKIPPED instead of overwriting them behind someone's back.
+   */
+  conflicts = new Set<string>();
 
   private store: ProjectStore;
   private stopWatch: (() => void) | null = null;
@@ -78,7 +90,7 @@ export class Workspace {
    * CONTENT rather than by a time window — a window races any edit made
    * shortly after a save, and silently swallows it.
    */
-  private selfWrites = new Map<string, string>();
+  private selfWrites = new Map<string, string[]>();
   private listeners = new Set<() => void>();
 
   constructor(store: ProjectStore) {
@@ -222,7 +234,15 @@ export class Workspace {
     this.saving = true;
     this.emit();
     const files = projectToFiles(project);
-    for (const file of files) this.selfWrites.set(file.rel, file.contents);
+    // Remember the last few payloads per path, not just the newest. Two saves
+    // in quick succession race their own watcher events: the event for the
+    // first arrives after the second has been recorded but before its bytes
+    // have landed, and comparing against one payload reads that as somebody
+    // else's edit.
+    for (const file of files) {
+      const seen = this.selfWrites.get(file.rel) ?? [];
+      this.selfWrites.set(file.rel, [file.contents, ...seen].slice(0, 4));
+    }
 
     const result = await platform.writeFiles(this.location.root, files);
     this.saving = false;
@@ -260,17 +280,21 @@ export class Workspace {
         external.push(change);
         continue;
       }
-      // We wrote this path. If what is there now is byte-identical, the event
-      // is our own echo; if it differs, someone else changed it.
+      // We wrote this path. If what is there now is something WE wrote, the
+      // event is our own echo; if it is anything else, someone else changed it.
       const current = await platform.readText(root, change.rel);
-      if (current === written) continue;
+      if (current !== null && written.includes(current)) continue;
       this.selfWrites.delete(change.rel);
       external.push(change);
     }
     if (!external.length) return;
 
     const touchedProject = external.some(
-      (c) => c.rel === MANIFEST_PATH || c.rel === CONFIG_PATH || c.rel.endsWith(".scene.json"),
+      (c) =>
+        c.rel === MANIFEST_PATH ||
+        c.rel === CONFIG_PATH ||
+        c.rel.endsWith(".scene.json") ||
+        c.rel.endsWith(".prefab.json"),
     );
     const touchedAssets = external.some((c) => c.rel.startsWith("assets/"));
 
@@ -285,8 +309,13 @@ export class Workspace {
       this.onScriptsChanged?.(touchedScripts);
     }
 
-    if (this.store.stack().canUndo && touchedProject && this.store.isDirty(this.store.activeSceneKey)) {
-      // Do not silently overwrite unsaved work with what is on disk.
+    if (this.store.stack().canUndo && touchedProject && this.store.isDirty(this.store.docKey)) {
+      // Do not silently overwrite unsaved work with what is on disk. Record
+      // which scenes are in that state: a prefab push has to be able to say
+      // "skipped, and why" rather than clobbering one of the two edits.
+      for (const change of external) {
+        if (change.rel.endsWith(".scene.json")) this.conflicts.add(change.rel);
+      }
       this.store.setStatus(
         `${external[0].rel} changed on disk — save or undo your edits, then reopen the project to pick it up`,
       );
@@ -304,9 +333,18 @@ export class Workspace {
     void this.refreshGit();
   }
 
+  /**
+   * Why a scene cannot be written right now, or null when it can. The prefab
+   * propagation panel asks this before it plans a push.
+   */
+  writeBlockedReason = (sceneKey: string): string | null => {
+    return this.conflicts.has(scenePath(sceneKey)) ? "changed on disk since load" : null;
+  };
+
   /** Re-read the folder without touching the watcher or window title. */
   async reload(): Promise<void> {
     if (!this.location) return;
+    this.conflicts.clear();
     void this.scripts.load(this.location.root);
     const source = await platform.readProject(this.location.root);
     if (!source) return;
@@ -316,8 +354,15 @@ export class Workspace {
     await measureAssets(project);
     this.issues = issues;
     const activeKey = this.store.activeSceneKey;
+    // An open prefab is a document like a scene is, and reopening the folder
+    // must put you back in the one you were in. Unsaved definition work never
+    // reaches here — the guard above refuses to reload over it.
+    const openPrefab = this.store.prefabDoc?.name;
     this.store.loadProject(project);
     if (project.scenes.some((s) => s.key === activeKey)) this.store.activateScene(activeKey);
+    if (openPrefab && project.prefabs.some((p) => p.name === openPrefab)) {
+      this.store.openPrefab(openPrefab);
+    }
     this.store.setPersister((next) => this.scheduleSave(next));
     this.emit();
   }

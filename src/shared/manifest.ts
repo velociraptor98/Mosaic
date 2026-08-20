@@ -1,5 +1,5 @@
 import type { AssetDef, LoaderEntry, ProjectData, SceneData, TileLayer } from "./types";
-import { resolveObject } from "./prefabs";
+import { resolvePrefab, resolveObject, walkNodes } from "./prefabs";
 
 /**
  * The loader manifest is derived, never hand-maintained: it is exactly the
@@ -24,16 +24,13 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
     }
   }
 
-  // Prefab definitions used by this scene pull in their own art.
+  // Prefab definitions used by this scene pull in their own art — resolved,
+  // so a variant that swapped its texture loads the one it actually draws.
   for (const obj of scene.objects) {
     if (!obj.prefab) continue;
-    const prefab = project.prefabs.find((p) => p.name === obj.prefab);
+    const prefab = resolvePrefab(project, obj.prefab);
     if (!prefab) continue;
-    const walk = (node: { texture?: string; children: typeof prefab.root.children }) => {
-      if (node.texture) needed.add(node.texture);
-      node.children.forEach(walk);
-    };
-    walk(prefab.root);
+    for (const node of walkNodes(prefab.root)) if (node.texture) needed.add(node.texture);
   }
 
   return project.assets.filter((a) => needed.has(a.key)).map(loaderEntry);

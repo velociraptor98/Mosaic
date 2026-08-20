@@ -29,45 +29,70 @@ export const TILE_DEFS: TileDef[] = [
   { index: 7, name: "Lava", color: 0xa6595e, collides: false },  // danger
 ];
 
-export type ObjectShape = "circle" | "star" | "triangle" | "diamond" | "capsule";
+export type ObjectShape = "circle" | "star" | "triangle" | "diamond" | "capsule" | "box";
 
-export interface ObjectDef {
-  type: string;
+/**
+ * A procedural placeholder sprite.
+ *
+ * These are SHAPES, not roles. A previous version of this file listed six game
+ * nouns — player, coin, enemy, crate — which read as engine types the format
+ * cared about. It never did: nothing downstream branches on an object's type.
+ * All they ever supplied was a sprite, a size and some defaults, and a project
+ * that is not a platformer should not have to start from another game's nouns.
+ *
+ * What you place is an ASSET or a PREFAB. These are the assets a new project
+ * has before you import any art of your own.
+ */
+export interface ShapeDef {
+  shape: ObjectShape;
   label: string;
   color: number;
-  shape: ObjectShape;
-  /** Default collision group for newly placed objects of this type. */
-  group: string;
-  /** Default per-instance data written when one is placed. */
-  data: Record<string, unknown>;
   width: number;
   height: number;
 }
 
-/** Same ramps as the tiles, so a scene reads as one drawing. */
-export const OBJECT_DEFS: ObjectDef[] = [
-  { type: "player", label: "Player", color: 0x416180, shape: "capsule", group: "player", data: { speed: 220, jump: 420 }, width: 28, height: 40 },
-  { type: "coin", label: "Coin", color: 0x94bce3, shape: "star", group: "pickup", data: { value: 10 }, width: 24, height: 24 },
-  { type: "enemy", label: "Enemy", color: 0xa6595e, shape: "triangle", group: "enemy", data: { patrolRange: 80, speed: 60 }, width: 28, height: 36 },
-  { type: "spawn", label: "Spawn Point", color: 0x7e9cb8, shape: "diamond", group: "trigger", data: {}, width: 24, height: 24 },
-  { type: "crate", label: "Crate", color: 0x7a7a7d, shape: "circle", group: "solid", data: { mass: 1 }, width: 32, height: 32 },
-  { type: "exit", label: "Exit Zone", color: 0x2c455d, shape: "diamond", group: "trigger", data: { nextScene: "" }, width: 40, height: 56 },
+/** Same tonal ramps as the tiles, so a scene reads as one drawing. */
+export const SHAPE_DEFS: ShapeDef[] = [
+  { shape: "capsule", label: "Capsule", color: 0x416180, width: 28, height: 40 },
+  { shape: "box", label: "Box", color: 0x7a7a7d, width: 32, height: 32 },
+  { shape: "circle", label: "Circle", color: 0x749dc4, width: 32, height: 32 },
+  { shape: "triangle", label: "Triangle", color: 0xa6595e, width: 28, height: 36 },
+  { shape: "star", label: "Star", color: 0x94bce3, width: 24, height: 24 },
+  { shape: "diamond", label: "Diamond", color: 0x7e9cb8, width: 24, height: 24 },
 ];
 
-/** Collision groups a fresh project knows about. */
-export const DEFAULT_GROUPS = ["player", "enemy", "pickup", "solid", "trigger"];
+/**
+ * Collision groups a fresh project starts with. Groups are project data and
+ * always were — these are a starting point, not a fixed set, and the project
+ * panel can add, rename and remove them.
+ */
+export const DEFAULT_GROUPS = ["player", "solid", "pickup", "hazard", "trigger"];
 
 export const BUILTIN_TILESET_ID = "tileset-placeholder";
 export const BUILTIN_TILESET_KEY = "placeholder-tiles";
 export const TILE_SIZE = 32;
 
-export function objectDef(type: string): ObjectDef | undefined {
-  return OBJECT_DEFS.find((d) => d.type === type);
+export function shapeDef(shape: string): ShapeDef | undefined {
+  return SHAPE_DEFS.find((d) => d.shape === shape);
 }
 
-export function objectTextureKey(type: string): string {
-  return `obj-${type}`;
+export function shapeTextureKey(shape: string): string {
+  return `shape-${shape}`;
 }
+
+/**
+ * Texture keys written by builds that named their placeholders after game
+ * roles, mapped to the shape each one drew. Read on project load so a folder
+ * written before the rename still opens with its art attached.
+ */
+export const LEGACY_OBJECT_TEXTURES: Record<string, string> = {
+  "obj-player": shapeTextureKey("capsule"),
+  "obj-crate": shapeTextureKey("box"),
+  "obj-enemy": shapeTextureKey("triangle"),
+  "obj-coin": shapeTextureKey("star"),
+  "obj-spawn": shapeTextureKey("diamond"),
+  "obj-exit": shapeTextureKey("diamond"),
+};
 
 export function tileDef(index: number): TileDef | undefined {
   return TILE_DEFS.find((t) => t.index === index);

@@ -22,6 +22,7 @@ export function MenuBar() {
   }, [bridge]);
 
   const scene = store.scene;
+  const doc = store.prefabDoc;
   const stack = store.stack();
 
   return (
@@ -49,6 +50,17 @@ export function MenuBar() {
             </option>
           ))}
         </select>
+        {/* The prefab document sits ABOVE the scene it was opened from: the
+            scene stays open, and this says which document you are in. */}
+        {doc && (
+          <>
+            <span className="menubar-slash">/</span>
+            <span className="doc-tab" title={`Editing the definition ${doc.name}.prefab`}>
+              ◆ {doc.name}.prefab
+              {store.isDirty(doc.scene.key) ? " ●" : ""}
+            </span>
+          </>
+        )}
         <button className="ghost" onClick={() => openDialog("newscene")} title="New scene (Ctrl/⌘N)">
           + Scene
         </button>

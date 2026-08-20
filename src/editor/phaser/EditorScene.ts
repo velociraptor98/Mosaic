@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { resolveObject, resolvedIndex } from "../../shared/prefabs";
+import { resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
 import { worldTransform } from "../../shared/transform";
 import type { Layer, SceneObject, TileLayer } from "../../shared/types";
 import type { EditorBridge } from "../bridge";
@@ -357,6 +357,9 @@ export class EditorScene extends Phaser.Scene {
     if (!scene) return;
     const zoom = this.cameras.main.zoom || 1;
 
+    this.drawPrefabStage(g, zoom);
+    this.drawMissingPrefabs(g, zoom);
+
     if (this.store.ui.showBodies) {
       g.lineStyle(1 / zoom, INK.body, 0.85);
       for (const obj of scene.objects) {
@@ -436,6 +439,51 @@ export class EditorScene extends Phaser.Scene {
         g.fillRect(c0 * tw, r0 * th, (c1 - c0 + 1) * tw, (r1 - r0 + 1) * th);
         g.strokeRect(c0 * tw, r0 * th, (c1 - c0 + 1) * tw, (r1 - r0 + 1) * th);
       }
+    }
+  }
+
+  /**
+   * The isolated stage's own drawing: the box the prefab occupies and the
+   * origin it will be placed by. Both are drawn here because they are the two
+   * things an instance CANNOT fix later — a level can move a slime, but it
+   * cannot move where the slime's feet are.
+   */
+  private drawPrefabStage(g: Phaser.GameObjects.Graphics, zoom: number): void {
+    const doc = this.store.prefabDoc;
+    if (!doc) return;
+    const stage = this.store.prefabStage();
+    if (!stage) return;
+
+    const x = stage.anchorX + stage.bounds.x;
+    const y = stage.anchorY + stage.bounds.y;
+    if (stage.bounds.width > 0 && stage.bounds.height > 0) {
+      g.lineStyle(1 / zoom, INK.bounds, 0.6);
+      dashedRect(g, x, y, stage.bounds.width, stage.bounds.height, 6 / zoom);
+    }
+
+    // The origin, as a cross on the anchor: 0.5 / 1.0 means "placed by its
+    // feet", and that is worth seeing rather than reading.
+    const arm = 10 / zoom;
+    g.lineStyle(1.5 / zoom, INK.handle, 0.9);
+    g.lineBetween(stage.anchorX - arm, stage.anchorY, stage.anchorX + arm, stage.anchorY);
+    g.lineBetween(stage.anchorX, stage.anchorY - arm, stage.anchorX, stage.anchorY + arm);
+  }
+
+  /**
+   * An instance whose definition is gone keeps its position and its overrides,
+   * and says so with a box. Silently drawing nothing would look like the
+   * object had been deleted, which is the one thing that did not happen.
+   */
+  private drawMissingPrefabs(g: Phaser.GameObjects.Graphics, zoom: number): void {
+    const scene = this.store.scene;
+    if (!scene) return;
+    for (const obj of scene.objects) {
+      if (!obj.prefab || this.store.resolvePrefab(obj.prefab)) continue;
+      const world = worldTransform(obj, this.selectionIndex(scene));
+      g.lineStyle(1.5 / zoom, INK.body, 0.9);
+      dashedRect(g, world.x - 16, world.y - 16, 32, 32, 5 / zoom);
+      g.lineBetween(world.x - 16, world.y - 16, world.x + 16, world.y + 16);
+      g.lineBetween(world.x + 16, world.y - 16, world.x - 16, world.y + 16);
     }
   }
 
@@ -760,8 +808,24 @@ export class EditorScene extends Phaser.Scene {
     this.guides = { x: null, y: null };
 
     if (placement.kind === "prefab") {
-      const prefab = this.store.project.prefabs.find((pf) => pf.name === placement.id);
-      if (!prefab) return;
+      // Dragging the DEFINITION in: the node references the prefab and starts
+      // with an empty overrides map, so it is a link and not a copy. It is
+      // named for the prefab, because "what is this" is the first question a
+      // level designer asks of a box on a canvas.
+      const prefab = resolvePrefab(this.store.project, placement.id);
+      if (!prefab) {
+        this.store.setStatus(`Prefab "${placement.id}" has no definition to place`);
+        return;
+      }
+      // A prefab cannot contain itself, directly or through a variant: the
+      // definition would have no bottom to resolve from.
+      const doc = this.store.prefabDoc;
+      if (doc && prefab.chain.includes(doc.name)) {
+        this.store.setStatus(
+          `${placement.id} resolves from ${doc.name} — a prefab cannot contain itself`,
+        );
+        return;
+      }
       this.store.addObject({
         type: prefab.root.type,
         name: prefab.name,
@@ -776,27 +840,17 @@ export class EditorScene extends Phaser.Scene {
       return;
     }
 
-    if (placement.kind === "asset") {
-      const asset = this.store.project.assets.find((a) => a.id === placement.id);
-      if (!asset) return;
-      this.store.addObject({
-        type: "sprite",
-        name: asset.key,
-        x: point.x,
-        y: point.y,
-        texture: asset.key,
-        frame: placement.frame,
-        data: {},
-      });
-      return;
-    }
-
-    const def = this.store.project.assets.find((a) => a.key === `obj-${placement.id}`);
+    const asset = this.store.project.assets.find((a) => a.id === placement.id);
+    if (!asset) return;
+    // A plain sprite of an imported (or placeholder) image. It has no "type":
+    // an object is art plus the components put on it.
     this.store.addObject({
-      type: placement.id,
+      type: "sprite",
+      name: asset.key,
       x: point.x,
       y: point.y,
-      texture: def?.key ?? `obj-${placement.id}`,
+      texture: asset.key,
+      frame: placement.frame,
       data: {},
     });
   }

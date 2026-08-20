@@ -1,4 +1,4 @@
-import { DEFAULT_GROUPS } from "../../shared/definitions";
+import { DEFAULT_GROUPS, LEGACY_OBJECT_TEXTURES } from "../../shared/definitions";
 import {
   DEFAULT_CONFIG,
   type AnimDef,
@@ -9,6 +9,7 @@ import {
   type ProjectData,
   type SceneData,
 } from "../../shared/types";
+import { ensureLids, walkNodes } from "../../shared/prefabs";
 import type { DiskFile, ProjectSource } from "../platform/types";
 import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset } from "../store/templates";
 
@@ -24,12 +25,23 @@ import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset 
 export const MANIFEST_PATH = "phaser.editor.json";
 export const CONFIG_PATH = "mosaic.config.json";
 export const scenePath = (key: string) => `src/scenes/${key}.scene.json`;
+/**
+ * A prefab is a file, not a row in the manifest. It has its own history, its
+ * own diff and its own line in a review — which is the whole point of an
+ * object being reusable across scenes several people are editing.
+ */
+export const prefabPath = (name: string) => `src/prefabs/${name}.prefab.json`;
 
 export interface ProjectManifest {
   name: string;
   scenes: { key: string; name: string; file: string }[];
   assets: Omit<AssetDef, "url">[];
-  prefabs: PrefabDef[];
+  /**
+   * The prefab index: names and files. The definitions themselves live in
+   * their own files. Folders written by an older build inlined whole
+   * definitions here, and are still read that way on the way in.
+   */
+  prefabs: { name: string; file: string; base?: string }[] | PrefabDef[];
   anims: AnimDef[];
   groups: string[];
   collision: Record<string, Record<string, CollisionRule>>;
@@ -41,7 +53,7 @@ export function toManifest(project: ProjectData): ProjectManifest {
     name: project.name,
     scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: scenePath(s.key) })),
     assets: project.assets.map(({ url: _url, ...rest }) => rest),
-    prefabs: project.prefabs,
+    prefabs: project.prefabs.map((p) => ({ name: p.name, file: prefabPath(p.name), base: p.base })),
     anims: project.anims,
     groups: project.groups,
     collision: project.collision,
@@ -57,6 +69,10 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
     ...project.scenes.map((scene) => ({
       rel: scenePath(scene.key),
       contents: JSON.stringify(scene, null, 2) + "\n",
+    })),
+    ...project.prefabs.map((prefab) => ({
+      rel: prefabPath(prefab.name),
+      contents: JSON.stringify(prefab, null, 2) + "\n",
     })),
   ];
 }
@@ -138,7 +154,7 @@ export function projectFromSource(
     name: manifest?.name ?? folderName,
     config: readConfig(source.config, issues),
     scenes: scenes.length ? scenes : createStarterProject().scenes,
-    prefabs: manifest?.prefabs ?? [],
+    prefabs: readPrefabs(source.prefabs, manifest, issues),
     anims: manifest?.anims ?? [],
     groups: manifest?.groups?.length ? manifest.groups : [...DEFAULT_GROUPS],
     collision: manifest?.collision ?? {},
@@ -146,8 +162,98 @@ export function projectFromSource(
   };
 
   if (!scenes.length) issues.push("No scene files found — started you on a fresh scene.");
+  migrateLegacyTextures(project, issues);
   orderScenes(project, manifest);
   return { project, issues, scaffolded: false };
+}
+
+/**
+ * Placeholder textures used to be named after six built-in game roles
+ * (`obj-player`, `obj-crate`). They are named after the SHAPE they draw now,
+ * because a project that is not a platformer should not carry another game's
+ * nouns. A folder written before that rename is repointed on the way in, so it
+ * opens with its art attached rather than with six missing textures.
+ */
+function migrateLegacyTextures(project: ProjectData, issues: string[]): void {
+  let moved = 0;
+  const repoint = (holder: { texture?: string }) => {
+    const next = holder.texture ? LEGACY_OBJECT_TEXTURES[holder.texture] : undefined;
+    if (!next) return;
+    holder.texture = next;
+    moved += 1;
+  };
+
+  for (const scene of project.scenes) for (const obj of scene.objects) repoint(obj);
+  for (const prefab of project.prefabs) {
+    if (prefab.root) for (const node of walkNodes(prefab.root)) repoint(node);
+  }
+  for (const anim of project.anims) {
+    for (const frame of anim.frames) {
+      const next = LEGACY_OBJECT_TEXTURES[frame.textureKey];
+      if (next) {
+        frame.textureKey = next;
+        moved += 1;
+      }
+    }
+  }
+  // The old generated assets are replaced wholesale by the shape set, so any
+  // still declared in the manifest would be a second, dead copy.
+  project.assets = project.assets.filter(
+    (a) => !(a.generated && LEGACY_OBJECT_TEXTURES[a.key]),
+  );
+
+  if (moved) {
+    issues.push(
+      `Repointed ${moved} placeholder texture reference(s) to the shape they draw — save to write it back`,
+    );
+  }
+}
+
+function isPrefab(value: unknown): value is PrefabDef {
+  const p = value as PrefabDef | null;
+  if (!p || typeof p.name !== "string") return false;
+  // A base owns a tree; a variant owns a base to inherit from. Anything with
+  // neither is not a definition, however well-formed the JSON is.
+  return !!p.root || !!p.base;
+}
+
+/**
+ * Definitions come from src/prefabs/. A folder written by an older build has
+ * them inlined in the manifest instead, and is read that way — otherwise
+ * opening it would silently unpack every instance in the project.
+ */
+function readPrefabs(
+  files: DiskFile[],
+  manifest: ProjectManifest | null,
+  issues: string[],
+): PrefabDef[] {
+  const out: PrefabDef[] = [];
+  const seen = new Set<string>();
+
+  for (const file of files) {
+    const parsed = parse<PrefabDef>(file.contents, file.rel, issues);
+    if (!parsed) continue;
+    if (!isPrefab(parsed)) {
+      issues.push(`${file.rel}: not a prefab file (needs a root, or a base to inherit from)`);
+      continue;
+    }
+    if (parsed.root) ensureLids(parsed.root);
+    parsed.exposed = parsed.exposed ?? [];
+    seen.add(parsed.name);
+    out.push(parsed);
+  }
+
+  for (const entry of manifest?.prefabs ?? []) {
+    if (!isPrefab(entry) || seen.has(entry.name)) continue;
+    if (entry.root) ensureLids(entry.root);
+    entry.exposed = entry.exposed ?? [];
+    issues.push(
+      `Prefab "${entry.name}" was read from the manifest — it gets its own file on the next save`,
+    );
+    out.push(entry);
+  }
+
+  return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**

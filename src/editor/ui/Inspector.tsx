@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { TILE_DEFS } from "../../shared/definitions";
-import { findPrefab, getPath, isOverridden, resolveObject } from "../../shared/prefabs";
+import {
+  getPath,
+  isExposed,
+  isOverridden,
+  resolveObject,
+  resolvePrefab,
+} from "../../shared/prefabs";
 import type { InspectorTab } from "../store/project";
-import { defaultBody } from "../store/templates";
+import { bodyForSize, objectSize } from "../../shared/size";
 import type { AssetDef, SceneObject, TileLayer } from "../../shared/types";
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
+import { PrefabPanel } from "./PrefabPanel";
 import { ScriptsTab } from "./ScriptsTab";
 import { useEditor, useStoreVersion } from "./context";
 
@@ -45,7 +52,7 @@ export function Inspector() {
         {store.ui.inspectorTab === "tile" && <TileTab />}
         {store.ui.inspectorTab === "physics" && <PhysicsTab />}
         {store.ui.inspectorTab === "scripts" && <ScriptsTab />}
-        {store.ui.inspectorTab === "prefab" && <PrefabTab />}
+        {store.ui.inspectorTab === "prefab" && <PrefabPanel />}
         {store.ui.inspectorTab === "anim" && <AnimTab />}
         {store.ui.inspectorTab === "scene" && <SceneTab />}
       </div>
@@ -86,9 +93,27 @@ function ObjectTab() {
 
   const multi = selection.length > 1;
   const obj = selection[0];
-  const prefab = findPrefab(store.project, obj.prefab);
+  const prefab = resolvePrefab(store.project, obj.prefab);
   const resolved = resolveObject(store.project, obj);
   const runtime = playtest.playing ? playtest.readRuntime(obj.id) : null;
+  const owners = selection
+    .map((o) => resolvePrefab(store.project, o.prefab))
+    .filter((p): p is NonNullable<typeof p> => !!p);
+
+  /**
+   * Why a field cannot be edited here, when it cannot.
+   *
+   * Only exposed fields are editable in a level — that is the contract the
+   * prefab wrote. A multi-selection of mixed prefabs offers only what ALL of
+   * them expose, because a field one of them owns is not editable for the set.
+   */
+  const lockedBy = (path: string): string | undefined => {
+    if (playtest.playing || !owners.length) return undefined;
+    const blocking = owners.filter((p) => !isExposed(p, path));
+    if (!blocking.length) return undefined;
+    const names = [...new Set(blocking.map((p) => p.name))].join(", ");
+    return `Owned by ${names} — expose it in prefab edit mode to change it per instance.`;
+  };
 
   const commit = (path: string, value: unknown, label?: string) => {
     if (playtest.playing) {
@@ -114,6 +139,7 @@ function ObjectTab() {
         value={value}
         step={step}
         marked={marked(path)}
+        locked={lockedBy(path)}
         onRevert={() => revert(path)}
         onCommit={(v) => commit(path, v, `Set ${label}`)}
       />
@@ -163,6 +189,9 @@ function ObjectTab() {
       <CheckField
         label="Visible"
         value={sharedValue<boolean>(selection, "visible") ?? true}
+        marked={marked("visible")}
+        locked={lockedBy("visible")}
+        onRevert={() => revert("visible")}
         onCommit={(v) => commit("visible", v, "Toggle visibility")}
       />
 
@@ -180,7 +209,13 @@ function ObjectTab() {
       {!multi && (
         <>
           <div className="section-title">Appearance</div>
-          <TextureFields obj={obj} resolved={resolved} onCommit={commit} marked={marked} />
+          <TextureFields
+            obj={obj}
+            resolved={resolved}
+            onCommit={commit}
+            marked={marked}
+            locked={lockedBy}
+          />
         </>
       )}
 
@@ -189,6 +224,7 @@ function ObjectTab() {
         label="Collision group"
         value={sharedValue<string>(selection, "group") ?? ""}
         marked={marked("group")}
+        locked={lockedBy("group")}
         onRevert={() => revert("group")}
         options={[
           { value: "", label: "(none)" },
@@ -200,7 +236,12 @@ function ObjectTab() {
       {!multi && (
         <>
           <div className="section-title">Data</div>
-          <JsonField label="Per-instance properties" value={resolved.data} onCommit={(v) => commit("data", v, "Edit data")} />
+          <JsonField
+            label="Per-instance properties"
+            value={resolved.data}
+            locked={lockedBy("data")}
+            onCommit={(v) => commit("data", v, "Edit data")}
+          />
         </>
       )}
 
@@ -221,11 +262,13 @@ function TextureFields({
   resolved,
   onCommit,
   marked,
+  locked,
 }: {
   obj: SceneObject;
   resolved: SceneObject;
   onCommit: (path: string, value: unknown, label?: string) => void;
   marked: (path: string) => boolean;
+  locked: (path: string) => string | undefined;
 }) {
   const { store } = useEditor();
   const textures = store.project.assets.filter((a) => a.kind !== "audio");
@@ -239,6 +282,7 @@ function TextureFields({
         label="Texture"
         value={resolved.texture ?? ""}
         marked={marked("texture")}
+        locked={locked("texture")}
         options={[
           { value: "", label: "(none)" },
           ...textures.map((a) => ({ value: a.key, label: a.key })),
@@ -250,6 +294,7 @@ function TextureFields({
           label="Frame"
           value={resolved.frame ?? ""}
           marked={marked("frame")}
+          locked={locked("frame")}
           options={[
             { value: "", label: "(base)" },
             ...frames.map((f) => ({ value: f.name, label: f.name })),
@@ -389,12 +434,15 @@ function PhysicsTab() {
       <CheckField
         label="Body enabled"
         value={!!body}
-        onCommit={(on) => set("body", on ? defaultBody(resolved.type) : undefined)}
+        onCommit={(on) =>
+          set("body", on ? bodyForSize(objectSize(store.project, resolved)) : undefined)
+        }
       />
       {!body && (
         <div className="hint">
-          Defaults derive from the frame's trimmed bounds. Box or circle covers the common cases;
-          arbitrary polygons are a Matter-only concern.
+          Defaults come from the object's own art — the atlas frame, the spritesheet cell, or the
+          whole image. Box or circle covers the common cases; arbitrary polygons are a Matter-only
+          concern.
         </div>
       )}
       {body && (
@@ -439,98 +487,6 @@ function PhysicsTab() {
       <button className="ghost" onClick={() => openDialog("collision")}>
         Edit collision matrix…
       </button>
-    </div>
-  );
-}
-
-function PrefabTab() {
-  const { store, openDialog } = useEditor();
-  const selection = store.selection;
-  if (!selection.length) {
-    return (
-      <div className="empty">
-        Select the repeated objects, then create a prefab from them.
-        <button className="ghost" onClick={() => openDialog("prefab")}>
-          Create prefab…
-        </button>
-      </div>
-    );
-  }
-
-  const obj = selection[0];
-  const prefab = findPrefab(store.project, obj.prefab);
-
-  if (!prefab) {
-    return (
-      <div className="stack">
-        <div className="empty">
-          {selection.length} plain object(s) selected. Turning them into a prefab replaces each
-          with {"{prefab, transform, overrides}"}.
-        </div>
-        <button className="primary" onClick={() => openDialog("prefab")}>
-          Create prefab from selection…
-        </button>
-      </div>
-    );
-  }
-
-  const overrides = Object.entries(obj.overrides ?? {});
-  const instances = store.project.scenes.flatMap((s) =>
-    s.objects.filter((o) => o.prefab === prefab.name).map((o) => ({ scene: s.key, obj: o })),
-  );
-
-  return (
-    <div className="stack">
-      <div className="section-title">Prefab instance</div>
-      <div className="kv">
-        <span>Definition</span>
-        <code>prefabs/{prefab.name}.prefab.json</code>
-      </div>
-      <div className="kv">
-        <span>Instances</span>
-        <code>{instances.length} across {new Set(instances.map((i) => i.scene)).size} scene(s)</code>
-      </div>
-
-      <div className="section-title">Exposed properties</div>
-      <div className="chips">
-        {prefab.exposed.length === 0 && <span className="empty">Nothing is overridable.</span>}
-        {prefab.exposed.map((path) => (
-          <span key={path} className={`chip ${isOverridden(obj, path) ? "on" : ""}`}>
-            {path}
-          </span>
-        ))}
-      </div>
-
-      <div className="section-title">Overrides on {obj.name}</div>
-      {overrides.length === 0 && (
-        <div className="hint">
-          Every field is linked to the definition. Editing an exposed field here records an
-          override; untouched fields keep updating with the prefab.
-        </div>
-      )}
-      {overrides.map(([path, value]) => (
-        <div key={path} className="override-row">
-          <code>{path}</code>
-          <span>{JSON.stringify(value)}</span>
-          <span className="muted">was {JSON.stringify(getPath(prefab.root, path))}</span>
-          <button className="mini" title="Revert to definition" onClick={() => store.revertOverride(obj.id, path)}>
-            ⟲
-          </button>
-        </div>
-      ))}
-
-      <div className="row">
-        <button className="ghost" onClick={() => store.applyInstanceToPrefab(obj.id)}>
-          Apply to prefab
-        </button>
-        <button className="ghost" onClick={() => store.unpackInstance(obj.id)}>
-          Unpack instance
-        </button>
-      </div>
-      <div className="hint">
-        Applying pushes this instance's overrides into the definition; every other instance picks
-        them up except where it overrides the same field.
-      </div>
     </div>
   );
 }

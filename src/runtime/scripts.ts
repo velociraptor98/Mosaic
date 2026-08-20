@@ -70,7 +70,12 @@ function declare(owner: unknown, name: string, options: PropertyOptions): void {
  * project should not have to pick one for the editor to read its properties.
  */
 export function property(options: PropertyOptions = {}) {
-  return function decorate(a: unknown, b: unknown): unknown {
+  // The return type is `any` on purpose. TypeScript's legacy decorators
+  // require a property decorator to return void or any and reject `unknown`
+  // outright, while the standard dialect wants the field's initialiser back —
+  // one signature has to satisfy both, and this is the only one that does.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function decorate(a: unknown, b: unknown): any {
     // Standard decorators: (value, context).
     if (b && typeof b === "object" && "kind" in (b as Record<string, unknown>)) {
       const ctx = b as {

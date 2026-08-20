@@ -375,11 +375,32 @@ kbd {
 
 /* ------------------------------------------------------------------ stage */
 
+/*
+ * A column, not a grid: the bar above the toolbar comes and goes, and a grid
+ * reserves every row it declares whether or not anything is in it — so a
+ * disappearing child slid the canvas and the dock each into the wrong row.
+ * Flex sizes what is actually there.
+ */
 .stage {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 232px;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
+}
+
+.stage > .toolbar,
+.stage > .stage-bars {
+  flex: none;
+}
+
+.stage > .canvas-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.stage > .dock {
+  flex: none;
+  height: 232px;
 }
 
 .toolbar {
@@ -598,6 +619,8 @@ kbd {
   font-family: var(--font-mono);
   font-size: 11px;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
   border-left: 2px solid transparent;
 }
 
@@ -617,6 +640,10 @@ kbd {
   margin-left: auto;
   color: var(--text-dim);
   font-size: 10px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .glyph {
@@ -685,6 +712,9 @@ kbd {
 }
 
 .section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   font-family: var(--font-heading);
   font-size: 10.5px;
   letter-spacing: 0.1em;
@@ -1021,7 +1051,8 @@ kbd {
   flex: 1;
 }
 
-.asset-tile-wrap .replace {
+.asset-tile-wrap .replace,
+.asset-tile-wrap .edit-def {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -1029,7 +1060,8 @@ kbd {
   background: var(--color-bg);
 }
 
-.asset-tile-wrap:hover .replace {
+.asset-tile-wrap:hover .replace,
+.asset-tile-wrap:hover .edit-def {
   opacity: 1;
 }
 
@@ -1768,6 +1800,11 @@ kbd {
   overflow: auto;
 }
 
+/*
+ * A fixed window, whatever it holds. The recents list is the only part that
+ * can grow without limit, so it is the part that scrolls — the launcher must
+ * not stretch past the screen because someone has opened forty folders.
+ */
 .launcher-window {
   width: min(1020px, 100%);
   display: grid;
@@ -1775,6 +1812,11 @@ kbd {
   background: var(--color-bg);
   box-shadow: var(--shadow-md);
   min-height: 520px;
+  max-height: 100%;
+  /* An implicit `auto` row grows to its content and spills straight past
+     max-height. Bounding the row is what makes the columns inside it
+     scrollable rather than overflowing. */
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .launcher-main {
@@ -1783,6 +1825,8 @@ kbd {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  min-height: 0;
+  overflow: auto;
 }
 
 .launcher-lockup {
@@ -1826,6 +1870,19 @@ button.block {
   flex-direction: column;
   gap: var(--space-2);
   min-width: 0;
+  min-height: 0;
+}
+
+/* The heading and the footnote stay put; the folders scroll between them. */
+.recent-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  /* Room for the scrollbar, so a card's × never sits under it. */
+  padding-right: var(--space-1);
 }
 
 .launcher-recents .section-title {
@@ -2402,13 +2459,7 @@ button.block {
    nothing else. Source is shown, never edited: the drawer is monospace and
    read-only, with the declarations the inspector renders tinted in accent. */
 
-.scripts-panel .section-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.scripts-panel .section-title .count,
+.section-title .count,
 .tabs .tab-count {
   font-family: var(--font-mono);
   font-size: 9.5px;
@@ -2689,4 +2740,485 @@ button.block {
   max-height: 140px;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------- prefab authoring */
+
+/* The bar across the top of prefab edit mode. It is not a toolbar: it holds
+   no tools, and exists only so nobody edits a definition thinking they are
+   editing one copy of it. The accent wash is the whole signal. */
+.prefab-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-accent);
+  background: var(--tint-accent);
+}
+
+.prefab-bar.review {
+  border-bottom-color: var(--color-accent-2);
+  background: var(--color-accent-2-100);
+}
+
+.prefab-bar .glyph {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-accent-800);
+}
+
+.prefab-bar strong {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-accent-800);
+}
+
+.prefab-bar code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-accent-900);
+}
+
+.prefab-bar-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.prefab-bar button {
+  flex: none;
+}
+
+/* The document tab in the menu bar: the prefab sits above the scene it was
+   opened from, and the scene is still there. */
+.doc-tab {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--color-accent);
+  background: var(--tint-accent);
+  color: var(--color-accent-800);
+}
+
+/* Contents — the parts list. */
+.kicker {
+  font-family: var(--font-heading);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel-title {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 18px;
+  line-height: 1.1;
+  margin-bottom: var(--space-1);
+}
+
+.parts-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-divider);
+}
+
+.part-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-content: flex-start;
+  padding: 4px var(--space-2);
+  border: none;
+  border-bottom: 1px solid var(--color-divider);
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 11.5px;
+  text-align: left;
+}
+
+.part-row:last-child {
+  border-bottom: none;
+}
+
+.part-row:hover {
+  background: var(--wash-hover);
+}
+
+.part-row.active {
+  background: var(--tint-accent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.part-row .glyph {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-accent-800);
+  flex: none;
+}
+
+.part-row .name {
+  flex: none;
+}
+
+.part-row .meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Expose — the contract. Every row reads as a field NAME and its source, so
+   the list can be read as a promise to level designers rather than as JSON. */
+.expose-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.expose-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: 5px var(--space-2);
+  border: 1px solid var(--color-divider);
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.expose-row.on {
+  opacity: 1;
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+
+.expose-row.orphaned {
+  opacity: 0.5;
+  border-style: dashed;
+  border-color: var(--color-caution);
+}
+
+.expose-row input {
+  accent-color: var(--color-accent);
+  margin-top: 3px;
+}
+
+.expose-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.expose-name strong {
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.expose-name em {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.expose-value {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--color-divider);
+  white-space: nowrap;
+  opacity: 0.65;
+}
+
+.expose-value.on {
+  border-color: var(--color-accent);
+  color: var(--color-accent-800);
+  opacity: 1;
+}
+
+.banner.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Variants — one row per file, named by what it claims. */
+.variant-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11.5px;
+  padding: 3px var(--space-2);
+  border-left: 2px solid var(--color-accent-2);
+  background: var(--wash-1);
+}
+
+.variant-row .glyph {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-accent-800);
+}
+
+.variant-row .meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+/* A field the definition owns is shown, not hidden: a level designer should
+   see that the value exists and read who owns it. */
+.field.locked input,
+.field.locked select,
+.field.locked textarea {
+  background: var(--wash-2);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.field-label .lock {
+  margin-left: 4px;
+  font-size: 9px;
+  cursor: help;
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+/* Promote — the options are decisions, so each states its consequence. */
+.promote-option {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  padding: var(--space-2);
+  border: 1px solid var(--color-divider);
+  cursor: pointer;
+}
+
+.promote-option.on {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: var(--wash-1);
+}
+
+.promote-option.disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.promote-option input {
+  accent-color: var(--color-accent);
+  margin-top: 3px;
+}
+
+.promote-option span {
+  display: flex;
+  flex-direction: column;
+}
+
+.promote-option strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.promote-option em {
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+.tight-list {
+  margin: var(--space-1) 0 0 var(--space-4);
+  font-size: 11px;
+}
+
+button.link {
+  padding: 0;
+  border: none;
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: inherit;
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.dialog-foot-note {
+  margin-right: auto;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+/* Propagate — the consequences of a definition change, before it happens.
+   Kinds are told apart by a mono tag and a left rule rather than by colour
+   alone, so the panel still reads as one list. */
+.propagate-totals {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+}
+
+.propagate-total {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border: 1px solid var(--color-divider);
+  border-top: 2px solid var(--color-accent);
+}
+
+.propagate-total.kept {
+  border-top-color: var(--color-accent-2);
+}
+
+.propagate-total.dropped {
+  border-top-color: var(--color-danger);
+}
+
+.propagate-total.skipped {
+  border-top-color: var(--color-neutral-500);
+}
+
+.propagate-total.zero {
+  opacity: 0.45;
+}
+
+.propagate-total strong {
+  font-family: var(--font-heading);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.propagate-total span {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.propagate-rows {
+  border: 1px solid var(--color-divider);
+  max-height: 260px;
+  overflow: auto;
+}
+
+.propagate-row {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 5px var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  border-left: 2px solid transparent;
+  font-size: 11.5px;
+}
+
+.propagate-row:last-child {
+  border-bottom: none;
+}
+
+.propagate-row.moved {
+  border-left-color: var(--color-accent);
+  background: var(--tint-accent);
+}
+
+.propagate-row.added,
+.propagate-row.removed {
+  border-left-color: var(--color-accent-600);
+}
+
+.propagate-row.kept {
+  border-left-color: var(--color-accent-2);
+}
+
+.propagate-row.dropped {
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-100);
+}
+
+.propagate-row.skipped {
+  border-left-color: var(--color-neutral-500);
+  opacity: 0.7;
+}
+
+.propagate-row .kind {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--color-accent-800);
+}
+
+.propagate-row .what {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.propagate-row .where {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.propagate-scenes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.propagate-scene {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 4px var(--space-2);
+  border: 1px solid var(--color-divider);
+  font-size: 11px;
+}
+
+.propagate-scene .meta {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--text-muted);
+}
+
+.propagate-scene .meta:last-child {
+  margin-left: auto;
+}
+
+.propagate-scene.skipped {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.tag-outline.warn {
+  margin-left: auto;
+  border-color: var(--color-caution);
+  color: var(--color-caution-800);
+}
+
+/* The collision matrix's row headers double as the group editor: renaming a
+   group is a text field, removing one is the × beside it. */
+.matrix .group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.matrix .group-head input {
+  width: 84px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+.matrix .group-head input:hover,
+.matrix .group-head input:focus {
+  border-color: var(--color-divider);
+  background: var(--color-bg);
 }

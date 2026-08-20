@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { OBJECT_DEFS } from "../../shared/definitions";
+import { prefabUsage } from "../../shared/propagate";
 import { imageSize, readFileAsDataUrl } from "../assets/slice";
 import type { AnimDef, AssetDef } from "../../shared/types";
 import { AnimPreview } from "./AnimPreview";
@@ -67,35 +67,42 @@ function AssetBrowser() {
       </div>
 
       <div className="asset-grid">
-        {OBJECT_DEFS.map((def) => (
-          <button
-            key={def.type}
-            className={`asset-tile ${placement?.kind === "object" && placement.id === def.type ? "active" : ""}`}
-            onClick={() =>
-              store.setUi({ tool: "place", placement: { kind: "object", id: def.type } })
-            }
-          >
-            <span className="swatch" style={{ background: `#${def.color.toString(16).padStart(6, "0")}` }} />
-            <span className="asset-name">{def.label}</span>
-            <span className="asset-meta">
-              {def.width}×{def.height} · built-in
-            </span>
-          </button>
-        ))}
-
-        {store.project.prefabs.map((prefab) => (
-          <button
-            key={prefab.name}
-            className={`asset-tile prefab ${placement?.kind === "prefab" && placement.id === prefab.name ? "active" : ""}`}
-            onClick={() =>
-              store.setUi({ tool: "place", placement: { kind: "prefab", id: prefab.name } })
-            }
-          >
-            <span className="swatch prefab-swatch">⬡</span>
-            <span className="asset-name">{prefab.name}</span>
-            <span className="asset-meta">prefab · {prefab.exposed.length} exposed</span>
-          </button>
-        ))}
+        {/* Instances come from here onto the canvas. The count is how you know
+            what a change to the definition is about to touch. */}
+        {store.project.prefabs.map((prefab) => {
+          const count = prefabUsage(store.project, prefab.name).reduce((n, u) => n + u.count, 0);
+          return (
+            <div key={prefab.name} className="asset-tile-wrap">
+              <button
+                className={`asset-tile prefab ${placement?.kind === "prefab" && placement.id === prefab.name ? "active" : ""}`}
+                onClick={() =>
+                  store.setUi({ tool: "place", placement: { kind: "prefab", id: prefab.name } })
+                }
+                title={
+                  prefab.base
+                    ? `Variant of ${prefab.base} — inherits everything it does not state`
+                    : `Drag onto the canvas to place an instance · ${prefab.exposed.length} field(s) editable per instance`
+                }
+              >
+                <span className="swatch prefab-swatch">{prefab.base ? "◈" : "◆"}</span>
+                <span className="asset-name">{prefab.name}</span>
+                <span className="asset-meta">
+                  {prefab.base
+                    ? `variant · ${Object.keys(prefab.diff ?? {}).length} differ`
+                    : `${prefab.exposed.length} exposed`}
+                  {count > 0 ? ` · ${count}×` : ""}
+                </span>
+              </button>
+              <button
+                className="mini edit-def"
+                title="Edit the definition on an isolated stage"
+                onClick={() => store.openPrefab(prefab.name)}
+              >
+                ◆
+              </button>
+            </div>
+          );
+        })}
 
         {assets.map((asset) => (
           <div key={asset.id} className="asset-tile-wrap">

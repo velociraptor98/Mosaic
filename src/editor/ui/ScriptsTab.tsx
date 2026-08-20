@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { findPrefab, isOverridden } from "../../shared/prefabs";
+import { isExposed, isOverridden, resolvePrefab } from "../../shared/prefabs";
 import {
   SCRIPT_LIST_PATH,
   convertValue,
@@ -8,7 +8,12 @@ import {
   scriptPropPath,
   scriptsOf,
 } from "../../shared/scripts";
-import type { ProjectData, SceneObject, ScriptRef } from "../../shared/types";
+import type {
+  ProjectData,
+  ResolvedPrefab,
+  SceneObject,
+  ScriptRef,
+} from "../../shared/types";
 import { platform } from "../platform";
 import type { ScriptProperty } from "../scripts/parse";
 import type { ScriptResolution } from "../scripts/registry";
@@ -53,7 +58,7 @@ export function ScriptsTab() {
   const obj = selection[0];
   const scripts = store.scriptsFor(obj);
   const registry = workspace.scripts;
-  const prefab = findPrefab(store.project, obj.prefab);
+  const prefab = resolvePrefab(store.project, obj.prefab);
   const ownsList = !!obj.overrides && SCRIPT_LIST_PATH in obj.overrides;
   const inherited = !!prefab && !ownsList;
 
@@ -101,7 +106,7 @@ export function ScriptsTab() {
           row={row}
           duplicate={duplicates.has(row.ref.class)}
           inherited={inherited}
-          prefabName={prefab?.name}
+          prefab={prefab}
         />
       ))}
 
@@ -184,13 +189,13 @@ function ScriptRow({
   row,
   duplicate,
   inherited,
-  prefabName,
+  prefab,
 }: {
   obj: SceneObject;
   row: Row;
   duplicate: boolean;
   inherited: boolean;
-  prefabName: string | undefined;
+  prefab: ResolvedPrefab | undefined;
 }) {
   const { store, workspace, openDialog } = useEditor();
   const [open, setOpen] = useState(false);
@@ -202,7 +207,7 @@ function ScriptRow({
 
   const enabledOverridden = isOverridden(obj, scriptEnabledPath(index));
   const overriddenCount = properties.filter(
-    (p) => overrideState(obj, index, p.name, prefabName ? store.project : null).marked,
+    (p) => overrideState(obj, index, p.name, prefab ? store.project : null).marked,
   ).length;
 
   const note = !ref.enabled
@@ -344,7 +349,7 @@ function ScriptRow({
               index={index}
               script={ref}
               property={property}
-              prefabName={prefabName}
+              prefab={prefab}
             />
           ))}
 
@@ -385,7 +390,7 @@ function overrideState(
   project: ProjectData | null,
 ): { marked: boolean; upstream: unknown } {
   if (!project) return { marked: false, upstream: undefined };
-  const prefab = findPrefab(project, obj.prefab);
+  const prefab = resolvePrefab(project, obj.prefab);
   if (!prefab) return { marked: false, upstream: undefined };
   const upstream = scriptsOf(prefab.root)[index]?.props?.[name];
   if (isOverridden(obj, scriptPropPath(index, name))) return { marked: true, upstream };
@@ -402,13 +407,13 @@ function PropertyField({
   index,
   script,
   property,
-  prefabName,
+  prefab,
 }: {
   obj: SceneObject;
   index: number;
   script: ScriptRef;
   property: ScriptProperty;
-  prefabName: string | undefined;
+  prefab: ResolvedPrefab | undefined;
 }) {
   const { store } = useEditor();
   const label = property.label ?? property.name;
@@ -416,7 +421,16 @@ function PropertyField({
   const has = Object.prototype.hasOwnProperty.call(script.props, property.name);
   const value = has ? script.props[property.name] : property.default;
 
-  const state = overrideState(obj, index, property.name, prefabName ? store.project : null);
+  const state = overrideState(obj, index, property.name, prefab ? store.project : null);
+  /**
+   * A script value on an instance is editable only if the prefab published it.
+   * The field is shown locked rather than hidden, so it is clear that the
+   * value exists and where it is owned.
+   */
+  const locked =
+    prefab && !isExposed(prefab, scriptPropPath(index, property.name))
+      ? `Owned by ${prefab.name} — expose ${script.class}.${property.name} in prefab edit mode to set it per instance.`
+      : undefined;
   const revert = () => {
     if (isOverridden(obj, scriptPropPath(index, property.name))) {
       store.revertOverride(obj.id, scriptPropPath(index, property.name));
@@ -460,8 +474,9 @@ function PropertyField({
     label,
     // On a plain object a value set in the scene is still "not the default",
     // and the same revert affordance takes it back to the class's value.
-    marked: state.marked || (has && !prefabName),
+    marked: state.marked || (has && !prefab),
     onRevert: revert,
+    locked,
   };
 
   switch (property.type) {

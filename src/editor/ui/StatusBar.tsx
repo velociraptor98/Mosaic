@@ -14,6 +14,7 @@ export function StatusBar() {
   const stack = store.stack();
   const errors = store.validate().filter((i) => i.level === "error").length;
   const scene = store.scene;
+  const doc = store.prefabDoc;
 
   return (
     <footer className="statusbar">
@@ -22,11 +23,13 @@ export function StatusBar() {
       <div className="toolbar-spacer" />
       {errors > 0 && <span className="warn">{errors} validation error(s)</span>}
       <span>
-        {scene?.objects.length ?? 0} objects · {scene?.layers.length ?? 0} layers
+        {doc
+          ? `${scene?.objects.length ?? 0} parts · ${doc.exposed.length} exposed`
+          : `${scene?.objects.length ?? 0} objects · ${scene?.layers.length ?? 0} layers`}
       </span>
-      <span title="Undo depth on this scene's own stack">
+      <span title={doc ? "Undo depth on this prefab's own stack" : "Undo depth on this scene's own stack"}>
         undo {stack.depth}
-        {store.isDirty(store.activeSceneKey) ? " · modified" : ""}
+        {store.isDirty(store.docKey) ? " · modified" : ""}
       </span>
       {desktop && workspace.install?.running && (
         <span className="warn" title="Dependency install is running in the background">

@@ -157,17 +157,52 @@ export interface SceneObject {
 // Prefabs
 // ---------------------------------------------------------------------------
 
-/** A prefab node is an object template: no id, no layer, no scene position. */
-export type PrefabNode = Omit<
-  SceneObject,
-  "id" | "layerId" | "parentId" | "prefab" | "overrides"
-> & { children: PrefabNode[] };
+/**
+ * A prefab node is an object template: no scene id, no layer, no scene
+ * position. `prefab` and `overrides` survive, because a prefab may contain
+ * another prefab's instance — which stays sealed rather than being copied in.
+ */
+export type PrefabNode = Omit<SceneObject, "id" | "layerId" | "parentId"> & {
+  /**
+   * Stable local id. Overrides, the exposure list and the propagation plan all
+   * address a part by this rather than by name, so renaming a child does not
+   * silently orphan what pointed at it.
+   */
+  lid: string;
+  children: PrefabNode[];
+};
 
+/**
+ * A prefab as it is STORED.
+ *
+ * A base prefab owns its whole tree in `root`. A variant owns nothing but a
+ * `base` and a `diff`: it inherits everything and states only its differences,
+ * so fixing the base fixes every variant except where one deliberately
+ * disagreed. Read one through `resolvePrefab`, never straight off the field.
+ */
 export interface PrefabDef {
   name: string;
   /** Property paths instances are allowed to override, e.g. "data.value". */
   exposed: string[];
+  /** The definition tree. Absent on a variant. */
+  root?: PrefabNode;
+  /** Variant: the prefab this one inherits from. */
+  base?: string;
+  /** Variant: property path -> value, for what this variant claims for itself. */
+  diff?: Record<string, unknown>;
+}
+
+/**
+ * A prefab with its inheritance applied — what an instance resolves against
+ * and what the canvas draws. Never stored; always derived.
+ */
+export interface ResolvedPrefab {
+  name: string;
+  exposed: string[];
   root: PrefabNode;
+  base?: string;
+  /** Base first, this prefab last. A base prefab's chain is just its name. */
+  chain: string[];
 }
 
 // ---------------------------------------------------------------------------
