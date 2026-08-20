@@ -257,6 +257,8 @@ function useKeyboardShortcuts(ctx: {
           return run("view.snap");
         case "g":
           return run("view.grid");
+        case "t":
+          return run("object.text");
         case "F2":
           return run("view.bodies");
         case "F5":

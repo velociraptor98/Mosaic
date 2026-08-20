@@ -117,10 +117,53 @@ export interface ScriptRef {
   props: Record<string, unknown>;
 }
 
+/**
+ * A text object's own settings.
+ *
+ * Text is CONTENT — a score readout, a label, a title — so it is authored here
+ * rather than built in create(). Before this existed, every visible thing in a
+ * Mosaic scene could be authored except the words on it.
+ */
+export interface TextDef {
+  content: string;
+  fontFamily: string;
+  /** px */
+  fontSize: number;
+  color: string;
+  align: "left" | "center" | "right";
+  /** Wrap width in px; 0 leaves it unwrapped. */
+  wrapWidth: number;
+  stroke?: string;
+  strokeThickness?: number;
+  backgroundColor?: string;
+  /**
+   * Pinned to the camera rather than to the world — a HUD stays put while the
+   * level scrolls under it.
+   */
+  fixed?: boolean;
+}
+
+/**
+ * Sounds an object plays for itself.
+ *
+ * Audio assets used to load and then never play: the loader emitted them and
+ * nothing referenced them. These are the two cues that are content rather than
+ * behaviour — anything conditional still belongs in a script.
+ */
+export interface SoundRefs {
+  /** Played once, when the object is created. */
+  spawn?: string;
+  /**
+   * Played when this object overlaps something the collision matrix pairs it
+   * with. Either participant's cue fires.
+   */
+  overlap?: string;
+}
+
 export interface SceneObject {
   id: string;
   name: string;
-  /** "sprite" | "container" | any key in OBJECT_DEFS. */
+  /** A rendering hint: "sprite", "text" or "container". Nothing branches on it. */
   type: string;
   layerId: string;
   parentId: string | null;
@@ -141,6 +184,10 @@ export interface SceneObject {
   body?: BodyDef;
   /** Animation key played in create(). */
   playOnSpawn?: string;
+  /** Set when this object is text rather than a sprite. */
+  text?: TextDef;
+  /** Audio cues the object plays for itself. */
+  sounds?: SoundRefs;
   /**
    * Attached behaviour, in execution order: update() is called in list order.
    */
@@ -227,12 +274,47 @@ export interface AnimDef {
 // Scenes + project
 // ---------------------------------------------------------------------------
 
+/**
+ * The camera, as scene data.
+ *
+ * A level that scrolls is the normal case, and it used to be unauthorable: the
+ * exporter set a background colour and world bounds and nothing else, so
+ * following the player meant hand-written code in every scene.
+ */
+export interface CameraDef {
+  /** Name of the object to follow. Empty means a fixed camera. */
+  follow: string;
+  /** 0..1 per axis. 1 is rigid; lower trails behind the target. */
+  lerpX: number;
+  lerpY: number;
+  zoom: number;
+  /** Clamp the camera to the scene's bounds so it never shows past the edge. */
+  clampToBounds: boolean;
+  /** A box in the middle the target can move inside before the camera follows. */
+  deadzoneWidth: number;
+  deadzoneHeight: number;
+}
+
+export const DEFAULT_CAMERA: CameraDef = {
+  follow: "",
+  lerpX: 1,
+  lerpY: 1,
+  zoom: 1,
+  clampToBounds: true,
+  deadzoneWidth: 0,
+  deadzoneHeight: 0,
+};
+
 export interface SceneSettings {
   width: number;
   height: number;
   backgroundColor: string;
   gravityY: number;
   gridSize: number;
+  /** Absent on scenes written before the camera was authorable. */
+  camera?: CameraDef;
+  /** Looping background music for the scene. */
+  music?: { key: string; volume: number; loop: boolean };
 }
 
 export interface SceneData {

@@ -152,6 +152,8 @@ export const STARTER_EXPOSED = [
   "playOnSpawn",
   "body.width",
   "body.height",
+  "sounds.spawn",
+  "sounds.overlap",
 ];
 
 /**

@@ -75,6 +75,17 @@ export function Toolbar() {
         </button>
       </div>
 
+      <div className="tool-group">
+        <button
+          className="tool"
+          onClick={() => store.addText()}
+          title="Add a text object — a HUD readout, a label, a title  (T)"
+        >
+          Text
+          <kbd>T</kbd>
+        </button>
+      </div>
+
       <div className="toolbar-spacer" />
 
       <div className="toolbar-readout">

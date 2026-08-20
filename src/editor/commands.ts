@@ -97,6 +97,8 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "edit.delete", title: "Delete selection", category: "Edit", binding: "⌫", run: () => store.deleteObjects(store.view.selection) },
     { id: "edit.group", title: "Group selection", category: "Edit", binding: `${mod}G`, run: () => store.groupSelection() },
 
+    { id: "object.text", title: "Add text object…", category: "Objects", binding: "T", run: () => store.addText() },
+
     { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
     { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
 

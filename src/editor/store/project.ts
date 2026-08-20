@@ -795,6 +795,8 @@ export class ProjectStore {
       group: partial.group,
       body: partial.body,
       playOnSpawn: partial.playOnSpawn,
+      text: partial.text,
+      sounds: partial.sounds,
       prefab: partial.prefab,
       overrides: partial.overrides,
       data: partial.data ?? {},
@@ -803,6 +805,32 @@ export class ProjectStore {
       scene.objects.push(obj);
       this.view.selection = [id];
     });
+    return id;
+  }
+
+  /**
+   * Adds a text object. Text is content — a score readout, a label, a title —
+   * so it is authored here rather than built in the exported create().
+   */
+  addText(content = "Text", at?: { x: number; y: number }): string | null {
+    const scene = this.scene;
+    if (!scene) return null;
+    const id = this.addObject({
+      type: "text",
+      name: content.split("\n")[0].slice(0, 24) || "Text",
+      x: at?.x ?? Math.round(scene.settings.width / 2),
+      y: at?.y ?? Math.round(scene.settings.height / 2),
+      text: {
+        content,
+        fontFamily: "monospace",
+        fontSize: 20,
+        color: "#1d2d3d",
+        align: "left",
+        wrapWidth: 0,
+      },
+      data: {},
+    });
+    if (id) this.setUi({ inspectorTab: "object" });
     return id;
   }
 
@@ -1828,7 +1856,24 @@ export class ProjectStore {
     const issues: { level: "error" | "warn"; message: string }[] = [];
     const animKeys = new Set(this.project.anims.map((a) => a.key));
     const textureKeys = new Set(this.project.assets.map((a) => a.key));
+    const audioKeys = new Set(
+      this.project.assets.filter((a) => a.kind === "audio").map((a) => a.key),
+    );
     for (const scene of this.project.scenes) {
+      const music = scene.settings.music;
+      if (music?.key && !audioKeys.has(music.key)) {
+        issues.push({
+          level: "error",
+          message: `${scene.key}: music "${music.key}" is not an audio asset`,
+        });
+      }
+      const follow = scene.settings.camera?.follow;
+      if (follow && !scene.objects.some((o) => o.name === follow)) {
+        issues.push({
+          level: "error",
+          message: `${scene.key}: the camera follows "${follow}", which this scene does not contain`,
+        });
+      }
       for (const raw of scene.objects) {
         // Resolved, not raw: an instance keeps its own values in `overrides`,
         // so validating the raw node would never see what the game will draw.
@@ -1839,11 +1884,19 @@ export class ProjectStore {
             message: `${scene.key}/${obj.name}: animation "${obj.playOnSpawn}" does not exist`,
           });
         }
-        if (obj.texture && !textureKeys.has(obj.texture)) {
+        if (obj.texture && !obj.text && !textureKeys.has(obj.texture)) {
           issues.push({
             level: "error",
             message: `${scene.key}/${obj.name}: texture "${obj.texture}" is not in the manifest`,
           });
+        }
+        for (const [when, key] of Object.entries(obj.sounds ?? {})) {
+          if (key && !audioKeys.has(key)) {
+            issues.push({
+              level: "error",
+              message: `${scene.key}/${obj.name}: sound "${key}" (on ${when}) is not an audio asset`,
+            });
+          }
         }
         if (obj.prefab && !resolvePrefab(this.project, obj.prefab)) {
           issues.push({

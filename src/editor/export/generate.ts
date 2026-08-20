@@ -210,10 +210,17 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     for (const raw of members) {
       const obj = resolveObject(project, raw);
       if (obj.type === "container") continue;
-      if (!obj.texture) continue;
+      if (!obj.texture && !obj.text) continue;
       const world = worldTransform(index.get(raw.id) ?? raw, index);
       const v = varName(obj, used);
       varsById.set(obj.id, v);
+
+      if (obj.text) {
+        emitText(L, v, obj, world, depth);
+        emitScripts(L, v, obj, scriptImports, scriptAliases);
+        L.push(`    this.objects[${q(objectKey(obj.name, v))}] = ${v};`);
+        continue;
+      }
 
       // A prefab instance is constructed through its own class, so the
       // hand-written behaviour on that class actually runs. Everything the
@@ -231,10 +238,17 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
         const factory = obj.body ? "this.physics.add.sprite" : "this.add.sprite";
         const frameArg = obj.frame ? `, ${q(obj.frame)}` : "";
         L.push(
-          `    const ${v} = ${factory}(${round(world.x)}, ${round(world.y)}, ${q(obj.texture)}${frameArg});`,
+          `    const ${v} = ${factory}(${round(world.x)}, ${round(world.y)}, ${q(obj.texture ?? "")}${frameArg});`,
         );
         L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
         emitProperties(L, v, obj, null, world);
+      }
+
+      if (obj.sounds?.overlap) {
+        L.push(`    ${v}.setData("__sfxOverlap", ${q(obj.sounds.overlap)});`);
+      }
+      if (obj.sounds?.spawn) {
+        L.push(`    this.sound.play(${q(obj.sounds.spawn)});`);
       }
 
       emitScripts(L, v, obj, scriptImports, scriptAliases);
@@ -326,6 +340,10 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     L.push(``);
   }
 
+  // The camera comes last: a follow target has to exist before it is followed.
+  emitCamera(L, scene, varsById, index);
+  emitMusic(L, scene);
+
   L.push(`    // <keep id="create">`);
   L.push(`    // Your own wiring goes here — it survives regeneration.`);
   L.push(`    // </keep>`);
@@ -345,15 +363,30 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     L.push(`    ${handler.a},`);
     L.push(`    ${handler.b},`);
     L.push(`  ) => {`);
-    L.push(`    void ${handler.a};`);
-    L.push(`    void ${handler.b};`);
+    L.push(`    // Cues authored on either object. Anything conditional is`);
+    L.push(`    // behaviour and belongs below, or in a script.`);
+    L.push(`    this.playOverlapCues(${handler.a}, ${handler.b});`);
     L.push(`    // <keep id="${handler.name}">`);
     L.push(`    // </keep>`);
     L.push(`  };`);
     L.push(``);
   }
+  if (overlapHandlers.length) {
+    L.push(`  /** Plays the \`overlap\` cue either object declared, if it has one. */`);
+    L.push(`  private playOverlapCues(...parts: unknown[]): void {`);
+    L.push(`    for (const part of parts) {`);
+    L.push(`      const key = (part as Phaser.GameObjects.GameObject)?.getData?.("__sfxOverlap");`);
+    L.push(`      if (typeof key === "string" && this.cache.audio.exists(key)) this.sound.play(key);`);
+    L.push(`    }`);
+    L.push(`  }`);
+    L.push(``);
+  }
   if (sceneHasScripts(project, scene)) L.push(`  scripts!: ScriptHost;`);
-  L.push(`  objects: Record<string, Phaser.GameObjects.Sprite> = {};`);
+  // A scene holds sprites and text, so the map says so. Callers reaching for
+  // a body still cast — Sprite never had one either.
+  L.push(
+    `  objects: Record<string, Phaser.GameObjects.Sprite | Phaser.GameObjects.Text> = {};`,
+  );
   L.push(`  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer> = {};`);
   L.push(`  groups: Record<string, Phaser.Physics.Arcade.Group> = {};`);
   L.push(`}`);
@@ -441,6 +474,95 @@ function emitScripts(
  * the constructor already applied the rest, and re-emitting it would bake the
  * definition into the scene and break propagation.
  */
+/**
+ * Text is CONTENT, so it is emitted from the scene rather than left for
+ * create() to build by hand.
+ */
+function emitText(
+  L: string[],
+  v: string,
+  obj: SceneObject,
+  world: { x: number; y: number; rotation: number; scaleX: number; scaleY: number },
+  depth: number,
+): void {
+  const t = obj.text!;
+  const style: string[] = [
+    `fontFamily: ${q(t.fontFamily)}`,
+    `fontSize: ${q(`${t.fontSize}px`)}`,
+    `color: ${q(t.color)}`,
+    `align: ${q(t.align)}`,
+  ];
+  if (t.backgroundColor) style.push(`backgroundColor: ${q(t.backgroundColor)}`);
+  if (t.wrapWidth > 0) style.push(`wordWrap: { width: ${t.wrapWidth} }`);
+  L.push(
+    `    const ${v} = this.add.text(${round(world.x)}, ${round(world.y)}, ${q(t.content)}, { ${style.join(", ")} });`,
+  );
+  L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
+  if (t.stroke && t.strokeThickness) {
+    L.push(`    ${v}.setStroke(${q(t.stroke)}, ${t.strokeThickness});`);
+  }
+  if (obj.originX !== 0.5 || obj.originY !== 0.5) {
+    L.push(`    ${v}.setOrigin(${obj.originX}, ${obj.originY});`);
+  }
+  if (world.rotation !== 0) L.push(`    ${v}.setAngle(${round(world.rotation)});`);
+  if (world.scaleX !== 1 || world.scaleY !== 1) {
+    L.push(`    ${v}.setScale(${round(world.scaleX)}, ${round(world.scaleY)});`);
+  }
+  // A HUD does not scroll with the level it is drawn over.
+  if (t.fixed) L.push(`    ${v}.setScrollFactor(0);`);
+  if (!obj.visible) L.push(`    ${v}.setVisible(false);`);
+  for (const [k, val] of Object.entries(obj.data ?? {})) {
+    L.push(`    ${v}.setData(${q(k)}, ${JSON.stringify(val)});`);
+  }
+}
+
+/** The camera, from the scene's own settings rather than from hand-written code. */
+function emitCamera(
+  L: string[],
+  scene: SceneData,
+  varsById: Map<string, string>,
+  index: Map<string, SceneObject>,
+): void {
+  const def = scene.settings.camera;
+  if (!def) return;
+  const lines: string[] = [];
+  if (def.clampToBounds) {
+    lines.push(
+      `    this.cameras.main.setBounds(0, 0, ${scene.settings.width}, ${scene.settings.height});`,
+    );
+  }
+  if (def.zoom !== 1) lines.push(`    this.cameras.main.setZoom(${round(def.zoom)});`);
+  if (def.deadzoneWidth > 0 || def.deadzoneHeight > 0) {
+    lines.push(
+      `    this.cameras.main.setDeadzone(${def.deadzoneWidth}, ${def.deadzoneHeight});`,
+    );
+  }
+  if (def.follow) {
+    const target = [...index.values()].find((o) => o.name === def.follow);
+    const v = target ? varsById.get(target.id) : undefined;
+    if (v) {
+      lines.push(
+        `    this.cameras.main.startFollow(${v}, false, ${round(def.lerpX)}, ${round(def.lerpY)});`,
+      );
+    } else {
+      lines.push(`    // camera follows ${q(def.follow)}, which this scene does not contain`);
+    }
+  }
+  if (!lines.length) return;
+  L.push(`    // camera (scene settings)`);
+  L.push(...lines);
+  L.push(``);
+}
+
+function emitMusic(L: string[], scene: SceneData): void {
+  const music = scene.settings.music;
+  if (!music?.key) return;
+  L.push(
+    `    this.sound.play(${q(music.key)}, { volume: ${round(music.volume)}, loop: ${music.loop} });`,
+  );
+  L.push(``);
+}
+
 function emitProperties(
   L: string[],
   v: string,

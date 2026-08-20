@@ -300,6 +300,15 @@ export class EditorScene extends Phaser.Scene {
       const layer = scene.layers.find((l) => l.id === raw.layerId);
       if (!layer) return;
 
+      // Text is drawn on the canvas like anything else, so what you author is
+      // what you see. It is kept in the same map as the sprites: selection,
+      // handles and dragging all read from there and need no special case.
+      if (obj.text) {
+        seen.add(raw.id);
+        this.syncText(raw, obj, index, layer, layerDepth.get(raw.layerId) ?? 0, i);
+        return;
+      }
+
       const key = obj.texture;
       if (!key || !this.textures.exists(key)) return;
       seen.add(raw.id);
@@ -329,6 +338,49 @@ export class EditorScene extends Phaser.Scene {
       sprite.destroy();
       this.sprites.delete(id);
     }
+  }
+
+  /**
+   * A text object, created or updated in place. Restyling recreates it — a
+   * Phaser Text caches its own metrics, and setting a style on the old one
+   * leaves the bounds stale, which the selection box would then draw wrong.
+   */
+  private syncText(
+    raw: SceneObject,
+    obj: SceneObject,
+    index: Map<string, SceneObject>,
+    layer: Layer,
+    layerDepth: number,
+    order: number,
+  ): void {
+    const def = obj.text!;
+    const signature = JSON.stringify([def.content, def.fontFamily, def.fontSize, def.color, def.align, def.wrapWidth, def.stroke, def.strokeThickness, def.backgroundColor]);
+    let text = this.sprites.get(raw.id) as unknown as Phaser.GameObjects.Text | undefined;
+
+    if (!text || text.getData("textSignature") !== signature) {
+      text?.destroy();
+      text = this.add.text(0, 0, def.content, {
+        fontFamily: def.fontFamily,
+        fontSize: `${def.fontSize}px`,
+        color: def.color,
+        align: def.align,
+        ...(def.backgroundColor ? { backgroundColor: def.backgroundColor } : {}),
+        ...(def.wrapWidth > 0 ? { wordWrap: { width: def.wrapWidth } } : {}),
+      });
+      if (def.stroke && def.strokeThickness) text.setStroke(def.stroke, def.strokeThickness);
+      text.setData("id", raw.id);
+      text.setData("textSignature", signature);
+      this.sprites.set(raw.id, text as unknown as Phaser.GameObjects.Sprite);
+    }
+
+    const world = worldTransform(index.get(raw.id) ?? raw, index);
+    text.setPosition(world.x, world.y);
+    text.setRotation(Phaser.Math.DegToRad(world.rotation));
+    text.setScale(world.scaleX, world.scaleY);
+    text.setOrigin(obj.originX, obj.originY);
+    text.setVisible(obj.visible && layer.visible);
+    text.setAlpha(layer.locked ? 0.4 : 1);
+    text.setDepth(layerDepth * 100 + 1 + order * 0.01);
   }
 
   private drawGrid(): void {

@@ -9,7 +9,7 @@ import {
 } from "../../shared/prefabs";
 import type { InspectorTab } from "../store/project";
 import { bodyForSize, objectSize } from "../../shared/size";
-import type { AssetDef, SceneObject, TileLayer } from "../../shared/types";
+import { DEFAULT_CAMERA, type AssetDef, type SceneObject, type TileLayer } from "../../shared/types";
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
 import { PrefabPanel } from "./PrefabPanel";
 import { ScriptsTab } from "./ScriptsTab";
@@ -206,7 +206,14 @@ function ObjectTab() {
         </>
       )}
 
-      {!multi && (
+      {!multi && resolved.text && (
+        <>
+          <div className="section-title">Text</div>
+          <TextFields obj={obj} def={resolved.text} onCommit={commit} locked={lockedBy} />
+        </>
+      )}
+
+      {!multi && !resolved.text && (
         <>
           <div className="section-title">Appearance</div>
           <TextureFields
@@ -233,6 +240,8 @@ function ObjectTab() {
         onCommit={(v) => commit("group", v || undefined, "Set group")}
       />
 
+      {!multi && <SoundFields obj={obj} resolved={resolved} onCommit={commit} locked={lockedBy} />}
+
       {!multi && (
         <>
           <div className="section-title">Data</div>
@@ -254,6 +263,147 @@ function ObjectTab() {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Everything the editor can say about a piece of text. `fixed` is the one that
+ * makes a HUD a HUD: pinned to the camera, so it stays put while the level
+ * scrolls under it.
+ */
+function TextFields({
+  obj,
+  def,
+  onCommit,
+  locked,
+}: {
+  obj: SceneObject;
+  def: NonNullable<SceneObject["text"]>;
+  onCommit: (path: string, value: unknown, label?: string) => void;
+  locked: (path: string) => string | undefined;
+}) {
+  void obj;
+  return (
+    <>
+      <div className="field json">
+        <span className="field-label">Content</span>
+        <textarea
+          rows={3}
+          value={def.content}
+          disabled={!!locked("text.content")}
+          onChange={(e) => onCommit("text.content", e.target.value, "Edit text")}
+        />
+      </div>
+      <div className="grid2">
+        <TextField
+          label="Font"
+          value={def.fontFamily}
+          locked={locked("text.fontFamily")}
+          onCommit={(v) => onCommit("text.fontFamily", v, "Set font")}
+        />
+        <NumberField
+          label="Size"
+          value={def.fontSize}
+          locked={locked("text.fontSize")}
+          onCommit={(v) => onCommit("text.fontSize", v, "Set font size")}
+        />
+      </div>
+      <div className="grid2">
+        <TextField
+          label="Colour"
+          value={def.color}
+          locked={locked("text.color")}
+          onCommit={(v) => onCommit("text.color", v, "Set colour")}
+        />
+        <SelectField
+          label="Align"
+          value={def.align}
+          locked={locked("text.align")}
+          options={[
+            { value: "left", label: "Left" },
+            { value: "center", label: "Centre" },
+            { value: "right", label: "Right" },
+          ]}
+          onCommit={(v) => onCommit("text.align", v, "Set alignment")}
+        />
+      </div>
+      <NumberField
+        label="Wrap width (0 = none)"
+        value={def.wrapWidth}
+        locked={locked("text.wrapWidth")}
+        onCommit={(v) => onCommit("text.wrapWidth", v, "Set wrap width")}
+      />
+      <CheckField
+        label="Pin to camera (HUD)"
+        value={!!def.fixed}
+        locked={locked("text.fixed")}
+        onCommit={(v) => onCommit("text.fixed", v || undefined, "Pin to camera")}
+      />
+      <div className="hint">
+        Pinned text ignores the camera, so a score or a timer stays where you put it however far
+        the level scrolls.
+      </div>
+    </>
+  );
+}
+
+/**
+ * The two audio cues that are content rather than behaviour. Anything
+ * conditional — a sound only when the player is falling — is a script.
+ */
+function SoundFields({
+  obj,
+  resolved,
+  onCommit,
+  locked,
+}: {
+  obj: SceneObject;
+  resolved: SceneObject;
+  onCommit: (path: string, value: unknown, label?: string) => void;
+  locked: (path: string) => string | undefined;
+}) {
+  const { store } = useEditor();
+  const clips = store.project.assets.filter((a) => a.kind === "audio");
+  void obj;
+
+  if (!clips.length) {
+    return (
+      <>
+        <div className="section-title">Sound</div>
+        <div className="hint">
+          No audio in this project yet. Import a clip and it can be played on spawn, or when this
+          object overlaps something the collision matrix pairs it with.
+        </div>
+      </>
+    );
+  }
+
+  const options = [
+    { value: "", label: "(none)" },
+    ...clips.map((a) => ({ value: a.key, label: a.key })),
+  ];
+  return (
+    <>
+      <div className="section-title">Sound</div>
+      <SelectField
+        label="On spawn"
+        value={resolved.sounds?.spawn ?? ""}
+        locked={locked("sounds.spawn")}
+        options={options}
+        onCommit={(v) => onCommit("sounds.spawn", v || undefined, "Set spawn sound")}
+      />
+      <SelectField
+        label="On overlap"
+        value={resolved.sounds?.overlap ?? ""}
+        locked={locked("sounds.overlap")}
+        options={options}
+        onCommit={(v) => onCommit("sounds.overlap", v || undefined, "Set overlap sound")}
+      />
+      <div className="hint">
+        The overlap cue fires for any pair the collision matrix marks as overlapping. Anything
+        conditional belongs in a script.
+      </div>
+    </>
   );
 }
 
@@ -540,6 +690,116 @@ function AnimTab() {
   );
 }
 
+/**
+ * The camera, as scene data.
+ *
+ * A level that scrolls is the normal case, and it used to be unauthorable —
+ * the exporter set a background colour and world bounds and nothing else, so
+ * following the player meant hand-written code in every scene.
+ */
+function CameraFields() {
+  const { store } = useEditor();
+  const scene = store.scene!;
+  const cam = scene.settings.camera ?? DEFAULT_CAMERA;
+  const named = scene.objects.map((o) => o.name);
+
+  const set = (patch: Partial<typeof cam>) =>
+    store.transact("Camera settings", () => {
+      scene.settings.camera = { ...cam, ...patch };
+    });
+
+  return (
+    <>
+      <div className="section-title">Camera</div>
+      <SelectField
+        label="Follow"
+        value={cam.follow}
+        options={[
+          { value: "", label: "(fixed camera)" },
+          ...named.map((n) => ({ value: n, label: n })),
+        ]}
+        onCommit={(v) => set({ follow: v })}
+      />
+      {cam.follow && !named.includes(cam.follow) && (
+        <div className="banner error">
+          Nothing in this scene is called "{cam.follow}" — the camera will not follow anything.
+        </div>
+      )}
+      {cam.follow && (
+        <>
+          <div className="grid2">
+            <NumberField label="Lerp X" value={cam.lerpX} step={0.05} onCommit={(v) => set({ lerpX: v })} />
+            <NumberField label="Lerp Y" value={cam.lerpY} step={0.05} onCommit={(v) => set({ lerpY: v })} />
+          </div>
+          <div className="grid2">
+            <NumberField label="Deadzone W" value={cam.deadzoneWidth} onCommit={(v) => set({ deadzoneWidth: v })} />
+            <NumberField label="Deadzone H" value={cam.deadzoneHeight} onCommit={(v) => set({ deadzoneHeight: v })} />
+          </div>
+          <div className="hint">
+            Lerp 1 is rigid; lower values trail behind. A deadzone is a box in the middle the
+            target can move inside before the camera bothers to follow.
+          </div>
+        </>
+      )}
+      <NumberField label="Zoom" value={cam.zoom} step={0.1} onCommit={(v) => set({ zoom: v })} />
+      <CheckField
+        label="Clamp to scene bounds"
+        value={cam.clampToBounds}
+        onCommit={(v) => set({ clampToBounds: v })}
+      />
+    </>
+  );
+}
+
+/** Looping background music, which is content and not a line of create(). */
+function MusicFields() {
+  const { store } = useEditor();
+  const scene = store.scene!;
+  const clips = store.project.assets.filter((a) => a.kind === "audio");
+  const music = scene.settings.music;
+
+  const set = (patch: Partial<NonNullable<typeof music>> | null) =>
+    store.transact("Scene music", () => {
+      if (patch === null) delete scene.settings.music;
+      else scene.settings.music = { key: "", volume: 1, loop: true, ...music, ...patch };
+    });
+
+  return (
+    <>
+      <div className="section-title">Music</div>
+      {clips.length === 0 ? (
+        <div className="hint">
+          No audio in this project yet. Imported clips can be played here as looping background
+          music for the scene.
+        </div>
+      ) : (
+        <>
+          <SelectField
+            label="Track"
+            value={music?.key ?? ""}
+            options={[
+              { value: "", label: "(none)" },
+              ...clips.map((a) => ({ value: a.key, label: a.key })),
+            ]}
+            onCommit={(v) => (v ? set({ key: v }) : set(null))}
+          />
+          {music?.key && (
+            <div className="grid2">
+              <NumberField
+                label="Volume"
+                value={music.volume}
+                step={0.05}
+                onCommit={(v) => set({ volume: Math.max(0, Math.min(1, v)) })}
+              />
+              <CheckField label="Loop" value={music.loop} onCommit={(v) => set({ loop: v })} />
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 function SceneTab() {
   const { store } = useEditor();
   const scene = store.scene;
@@ -568,6 +828,9 @@ function SceneTab() {
         value={scene.settings.backgroundColor}
         onCommit={(v) => set({ backgroundColor: v })}
       />
+
+      <CameraFields />
+      <MusicFields />
 
       <div className="section-title">Validation</div>
       {issues.length === 0 ? (

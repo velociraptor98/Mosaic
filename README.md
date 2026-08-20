@@ -149,6 +149,30 @@ longer published, and which scenes are **skipped** because they changed on disk
 under you. Nothing is written until Push. *Push + review each* then walks the
 affected scenes one at a time with the touched instances already selected.
 
+### 5b. Text, camera and sound — content, not create()
+Three things used to be authorable only in code, and all three are content:
+
+**Text** is an object like any other — placed on the canvas, dragged, styled in
+the inspector, and drawn by the editor exactly as the game will draw it.
+`Pin to camera` is what makes a HUD a HUD: it ignores the camera, so a score
+stays where you put it however far the level scrolls.
+
+**The camera** is scene data: follow target, per-axis lerp, zoom, deadzone and
+whether to clamp to the scene's bounds. Before this the exporter set a
+background colour and world bounds and nothing else, so following the player
+meant hand-written code in every scene. The follow call is emitted *after* the
+objects, because a target has to exist before it can be followed, and a camera
+pointed at a name the scene does not contain is a validation error.
+
+**Sound** has two cues — `on spawn` and `on overlap` — plus looping scene
+music. The overlap cue fires for any pair the collision matrix marks as
+overlapping, and either participant's cue plays. Audio clips previously loaded
+and were then never referenced by anything in the format; a clip a scene names
+is now pulled into its loader manifest.
+
+The line stays where it was: these are the values, not the logic. Anything
+conditional — a sound only when the player is falling — is still a script.
+
 ### 6. Animation timeline — `ui/BottomDock.tsx`, `ui/AnimPreview.tsx`
 The timeline takes over the asset dock so the canvas stays full size. Frames
 are picked from a spritesheet or a sliced atlas, dragged to reorder, and can
@@ -509,6 +533,12 @@ src/
     bridge.ts       60fps canvas chatter (cursor, drag previews, transport)
 
 scripts/smoke.ts   headless pass over every workflow's logic
+scripts/verify-export.mjs
+                   compiles an EXPORTED project — the generator's output is
+                   the product, so it is built and typechecked in CI
+scripts/sample-game/
+                   builds the Coin Rush sample by driving the editor, and
+                   renders the build guide from the same pass
 ```
 
 ### Why undo is slice-based

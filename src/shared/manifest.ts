@@ -33,6 +33,15 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
     for (const node of walkNodes(prefab.root)) if (node.texture) needed.add(node.texture);
   }
 
+  // Audio the scene actually references. Clips used to load only if something
+  // else happened to pull them in, because nothing in the format named one.
+  for (const obj of scene.objects) {
+    const resolved = resolveObject(project, obj);
+    if (resolved.sounds?.spawn) needed.add(resolved.sounds.spawn);
+    if (resolved.sounds?.overlap) needed.add(resolved.sounds.overlap);
+  }
+  if (scene.settings.music?.key) needed.add(scene.settings.music.key);
+
   return project.assets.filter((a) => needed.has(a.key)).map(loaderEntry);
 }
 

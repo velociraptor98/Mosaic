@@ -133,9 +133,17 @@ export function buildScene(
       if (obj.layerId !== layer.id) continue;
       const resolved = resolveObject(project, obj);
       if (resolved.type === "container") continue;
-      const sprite = createSprite(scene, resolved, index, depth, withPhysics);
+      const sprite = resolved.text
+        ? (createText(scene, resolved, index, depth) as unknown as Phaser.GameObjects.Sprite | null)
+        : createSprite(scene, resolved, index, depth, withPhysics);
       if (!sprite) continue;
       objectsByIdMap.set(obj.id, sprite);
+
+      // The overlap cue is carried on the object so the wired pair callback
+      // can find it without knowing which object it belongs to.
+      if (resolved.sounds?.overlap) sprite.setData("__sfxOverlap", resolved.sounds.overlap);
+      if (resolved.sounds?.spawn) playCue(scene, resolved.sounds.spawn);
+
       if (host && options.scripts) attachScripts(host, sprite, resolved, options.scripts);
 
       const groupName = resolved.group;
@@ -151,6 +159,8 @@ export function buildScene(
   });
 
   const pairs = withPhysics ? wireCollisions(scene, project, groups, tileLayers) : [];
+  applyCamera(scene, data);
+  startMusic(scene, data);
 
   return { objectsById: objectsByIdMap, tileLayers, groups, pairs, scripts: host };
 }
@@ -213,6 +223,42 @@ function createTileLayer(
   return created;
 }
 
+/**
+ * Text is authored, not built in create(). Everything the editor can say about
+ * a piece of text is applied here, including whether it is pinned to the
+ * camera — which is what makes a HUD a HUD.
+ */
+function createText(
+  scene: Phaser.Scene,
+  obj: SceneObject,
+  index: Map<string, SceneObject>,
+  depth: number,
+): Phaser.GameObjects.Text | null {
+  const def = obj.text;
+  if (!def) return null;
+  const world = worldTransform(obj, index);
+  const text = scene.add.text(world.x, world.y, def.content, {
+    fontFamily: def.fontFamily,
+    fontSize: `${def.fontSize}px`,
+    color: def.color,
+    align: def.align,
+    ...(def.backgroundColor ? { backgroundColor: def.backgroundColor } : {}),
+    ...(def.wrapWidth > 0 ? { wordWrap: { width: def.wrapWidth } } : {}),
+  });
+  if (def.stroke && def.strokeThickness) text.setStroke(def.stroke, def.strokeThickness);
+  text.setName(obj.name);
+  text.setOrigin(obj.originX, obj.originY);
+  text.setRotation(Phaser.Math.DegToRad(world.rotation));
+  text.setScale(world.scaleX, world.scaleY);
+  text.setVisible(obj.visible);
+  text.setDepth(depth);
+  if (def.fixed) text.setScrollFactor(0);
+  text.setData("sceneObjectId", obj.id);
+  text.setData("sceneObject", obj);
+  for (const [k, v] of Object.entries(obj.data ?? {})) text.setData(k, v);
+  return text;
+}
+
 function createSprite(
   scene: Phaser.Scene,
   obj: SceneObject,
@@ -245,6 +291,45 @@ function createSprite(
   return sprite;
 }
 
+/** Plays a one-shot cue, if the project actually loaded it. */
+export function playCue(scene: Phaser.Scene, key: string, volume = 1): void {
+  if (!scene.sound || !scene.cache.audio.exists(key)) return;
+  scene.sound.play(key, { volume });
+}
+
+/**
+ * The camera, from the scene's own settings. Scenes written before the camera
+ * was authorable have none, and get the behaviour they had: bounds, and a
+ * camera that does not move.
+ */
+export function applyCamera(scene: Phaser.Scene, data: SceneData): void {
+  const cam = scene.cameras?.main;
+  if (!cam) return;
+  const def = data.settings.camera;
+  if (!def) {
+    cam.setBounds(0, 0, data.settings.width, data.settings.height);
+    return;
+  }
+  if (def.clampToBounds) cam.setBounds(0, 0, data.settings.width, data.settings.height);
+  else cam.removeBounds();
+  cam.setZoom(def.zoom || 1);
+  if (def.deadzoneWidth > 0 || def.deadzoneHeight > 0) {
+    cam.setDeadzone(def.deadzoneWidth, def.deadzoneHeight);
+  }
+  const target = def.follow ? scene.children.getByName(def.follow) : null;
+  if (target) {
+    cam.startFollow(target as Phaser.GameObjects.GameObject, false, def.lerpX, def.lerpY);
+  } else {
+    cam.stopFollow();
+  }
+}
+
+export function startMusic(scene: Phaser.Scene, data: SceneData): void {
+  const music = data.settings.music;
+  if (!music?.key || !scene.sound || !scene.cache.audio.exists(music.key)) return;
+  scene.sound.play(music.key, { volume: music.volume, loop: music.loop });
+}
+
 export function applyBody(sprite: Phaser.GameObjects.Sprite, obj: SceneObject): void {
   const body = sprite.body as Phaser.Physics.Arcade.Body | null;
   const def = obj.body;
@@ -259,6 +344,16 @@ export function applyBody(sprite: Phaser.GameObjects.Sprite, obj: SceneObject): 
   body.setAllowGravity(def.allowGravity);
   body.setBounce(def.bounce, def.bounce);
   body.setCollideWorldBounds(true);
+}
+
+/** Fires the `overlap` cue of either object in a wired pair. */
+function playOverlapCues(scene: Phaser.Scene): Phaser.Types.Physics.Arcade.ArcadePhysicsCallback {
+  return (a, b) => {
+    for (const side of [a, b]) {
+      const key = (side as Phaser.GameObjects.GameObject).getData?.("__sfxOverlap");
+      if (typeof key === "string") playCue(scene, key);
+    }
+  };
 }
 
 /**
@@ -283,7 +378,10 @@ function wireCollisions(
       const ga = groups.get(a);
       const gb = groups.get(b);
       if (!ga || !gb) continue;
-      if (rule === "overlap") scene.physics.add.overlap(ga, gb);
+      // An overlap plays whichever participant declared a cue. Anything
+      // conditional is behaviour and belongs in a script; "these two touching
+      // makes a sound" is content.
+      if (rule === "overlap") scene.physics.add.overlap(ga, gb, playOverlapCues(scene));
       else scene.physics.add.collider(ga, gb);
       pairs.push({ a, b, rule });
     }
