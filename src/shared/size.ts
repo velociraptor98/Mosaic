@@ -1,6 +1,9 @@
 import { shapeDef } from "./definitions";
 import type { BodyDef, ProjectData } from "./types";
 
+/** What a body does about the world edge when the field is absent. */
+export const DEFAULT_COLLIDE_WORLD_BOUNDS = true;
+
 /**
  * How big a thing is drawn.
  *
@@ -66,6 +69,7 @@ export function bodyForSize(size: Size, patch: Partial<BodyDef> = {}): BodyDef {
     immovable: false,
     allowGravity: true,
     bounce: 0,
+    collideWorldBounds: true,
     ...patch,
   };
 }

@@ -809,9 +809,24 @@ async function newProjectFlow(win: BrowserWindow): Promise<void> {
     const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
     ok("package.json is real JSON with the slug", pkg.name === "skyward");
 
-    const png = await fs.readFile(path.join(root, "assets/wire_32.png")).catch(() => null);
-    ok("placeholder art is written as real PNG bytes",
-       !!png && png.subarray(1, 4).toString() === "PNG", png ? png.subarray(0, 8).toString("hex") : "missing");
+    // Every texture the manifest declares has to exist on disk, or the
+    // exported game loads nothing and renders a blank screen.
+    const declared = JSON.parse(
+      await fs.readFile(path.join(root, "phaser.editor.json"), "utf8"),
+    ).assets.filter((a: { generated?: boolean }) => a.generated);
+    const art: { path: string; png: Buffer | null }[] = [];
+    for (const asset of declared) {
+      art.push({
+        path: asset.path,
+        png: await fs.readFile(path.join(root, asset.path)).catch(() => null),
+      });
+    }
+    ok("every placeholder the manifest declares exists on disk",
+       art.length > 0 && art.every((a) => !!a.png),
+       art.filter((a) => !a.png).map((a) => a.path).join() || "none missing");
+    ok("and each is real PNG bytes",
+       art.every((a) => a.png && a.png.subarray(1, 4).toString() === "PNG"),
+       art.map((a) => `${a.path}:${a.png ? a.png.subarray(1, 4).toString() : "?"}`).join(" "));
 
     // --- transactional: a second create over the same folder rolls back ---
     const again = await evaluate<{ ok: boolean; error?: string }>(

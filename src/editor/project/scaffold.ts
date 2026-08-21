@@ -1,8 +1,7 @@
 import { generateFiles, sceneClassName } from "../export/generate";
-import {
-  placeholderHeroSheetDataUrl,
-  placeholderTilesetDataUrl,
-} from "../../shared/tilesetImage";
+import { placeholderHeroSheetDataUrl } from "../../shared/tilesetImage";
+import { encodePngBase64 } from "../../shared/png";
+import { placeholderImages } from "../../shared/rasterise";
 import { DEFAULT_CONFIG, type ProjectConfig, type ProjectData } from "../../shared/types";
 import {
   createSceneFromTemplate,
@@ -183,18 +182,20 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     hasPlayer ? "" : "skipped",
     !hasPlayer,
   );
-  add(
-    "assets/wire_32.png",
-    opts.sampleArt ? stripDataUrl(placeholderTilesetDataUrl()) : "",
-    opts.sampleArt ? "placeholder art" : "skipped",
-    !opts.sampleArt,
-    "base64",
-  );
+  // The placeholder art the manifest declares, at the paths it declares. These
+  // used to be drawn by the editor and never written, so an exported game
+  // asked for five textures that did not exist and rendered nothing.
+  for (const image of placeholderImages()) {
+    add(image.path, encodePngBase64(image.bitmap), "placeholder art", false, "base64");
+  }
+  // The hero sheet still needs a DOM to draw, so a headless caller gets none
+  // rather than a zero-byte PNG that every image decoder then rejects.
+  const heroSheet = opts.sampleArt ? stripDataUrl(placeholderHeroSheetDataUrl()) : "";
   add(
     "assets/hero_sheet.png",
-    opts.sampleArt ? stripDataUrl(placeholderHeroSheetDataUrl()) : "",
-    opts.sampleArt ? "placeholder art" : "skipped",
-    !opts.sampleArt,
+    heroSheet,
+    heroSheet ? "sample spritesheet" : "skipped",
+    !heroSheet,
     "base64",
   );
   add(

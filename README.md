@@ -536,10 +536,28 @@ scripts/smoke.ts   headless pass over every workflow's logic
 scripts/verify-export.mjs
                    compiles an EXPORTED project — the generator's output is
                    the product, so it is built and typechecked in CI
+scripts/parity/    boots the SAME scene through the runtime loader and through
+                   the generated class, in one page, and diffs what each built.
+                   Scene semantics exist twice; this is what stops them drifting
 scripts/sample-game/
                    builds the Coin Rush sample by driving the editor, and
                    renders the build guide from the same pass
 ```
+
+### Why the play-test and the export are checked against each other
+
+Scene semantics are implemented twice: `runtime/loadScene.ts`, which the
+play-test runs, and `editor/export/generate.ts`, which is what ships. Only the
+first was ever executed — the generated code was typechecked and bundled but
+never run — so the two drifted apart without CI noticing, and every time the
+symptom was the same: **the editor showed behaviour the built game did not
+have.**
+
+`npm run verify:parity` boots the same scene both ways in one Electron page and
+diffs object positions, depths, visibility, text, and every arcade body field.
+Any disagreement fails the build and names the field. It asserts *agreement*,
+not correctness — a field both paths get wrong together still reads as parity,
+which is exactly how the arcade-group ordering bug below survived for so long.
 
 ### Why undo is slice-based
 
@@ -590,6 +608,11 @@ inside the keep markers survives every regeneration.
   Matter concern and are not modelled.
 - Play-test ships a default player controller (arrows/WASD, jump on gravity
   scenes) so RUN does something; real behaviour belongs in your exported code.
+- An arcade group applies its OWN defaults to every child it takes —
+  `collideWorldBounds` off, `allowGravity` on, drag, acceleration — so a body
+  has to be configured *after* it joins its group. Both the loader and the
+  generated scene do this now; both used to get it wrong, in the same
+  direction, which is why they agreed with each other and not with the author.
 - Collision groups and the starter prefabs are project data with genre-ish
   names (`player`, `pickup`, `Player`, `Pickup`). They are a starting point,
   not a fixed set — rename or delete them and nothing in the editor cares.

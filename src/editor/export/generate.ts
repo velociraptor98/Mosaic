@@ -1,6 +1,7 @@
 import { collectLoaderManifest } from "../../shared/manifest";
 import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
 import { resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
+import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../../shared/size";
 import { worldTransform } from "../../shared/transform";
 import type { ProjectData, SceneData, SceneObject, TileLayer } from "../../shared/types";
 import { MANIFEST_PATH, toManifest } from "../project/serialize";
@@ -104,6 +105,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   const groupVars = new Map<string, string>();
   /** Overlap pairs the matrix asked for, so the class can declare their hooks. */
   const overlapHandlers: { name: string; a: string; b: string }[] = [];
+  /** Body configuration, held back until every group exists. */
+  const bodyLines: string[] = [];
   const usedPrefabClasses = new Set<string>();
   const objectKeys = new Set<string>();
   /** Script classes this scene constructs, keyed by src::class. */
@@ -196,6 +199,9 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
         `    const ${v} = ${v}Map.createLayer(0, ${v}Tiles, 0, 0, false) as Phaser.Tilemaps.TilemapLayer;`,
       );
       L.push(`    ${v}.setDepth(${depth});`);
+      // Named for the same reason objects are: a script looking a layer up by
+      // name has to find it in the shipped game too.
+      L.push(`    ${v}.setName(${q(tile.name)});`);
       if (!layer.visible) L.push(`    ${v}.setVisible(false);`);
       const collides = tileset.tileCollides ?? [];
       if (collides.length) L.push(`    ${v}.setCollision([${collides.join(", ")}]);`);
@@ -233,7 +239,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
           `    const ${v} = new ${className(prefab.name)}(this, ${round(world.x)}, ${round(world.y)});`,
         );
         L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
-        emitProperties(L, v, obj, prefab.root as unknown as SceneObject, world);
+        if (prefab.root.body) bodyLines.push(`    ${v}.applyBody();`);
+        emitProperties(L, bodyLines, v, obj, prefab.root as unknown as SceneObject, world);
       } else {
         const factory = obj.body ? "this.physics.add.sprite" : "this.add.sprite";
         const frameArg = obj.frame ? `, ${q(obj.frame)}` : "";
@@ -241,7 +248,7 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
           `    const ${v} = ${factory}(${round(world.x)}, ${round(world.y)}, ${q(obj.texture ?? "")}${frameArg});`,
         );
         L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
-        emitProperties(L, v, obj, null, world);
+        emitProperties(L, bodyLines, v, obj, null, world);
       }
 
       if (obj.sounds?.overlap) {
@@ -277,6 +284,13 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
       L.push(`    this.groups[${q(group)}] = ${gv};`);
     }
     L.push(``);
+    if (bodyLines.length) {
+      L.push(`    // bodies, after their groups: a group applies its own defaults`);
+      L.push(`    // to every child it takes, and would overwrite these.`);
+      L.push(...bodyLines);
+      L.push(``);
+    }
+
     const emitted = new Set<string>();
     const pairLines: string[] = [];
     for (const [a, row] of Object.entries(project.collision ?? {})) {
@@ -565,6 +579,13 @@ function emitMusic(L: string[], scene: SceneData): void {
 
 function emitProperties(
   L: string[],
+  /**
+   * Body lines go here rather than into L. An arcade group applies its own
+   * defaults to every child it takes, so a body configured before the object
+   * joins its group is silently overwritten — these are emitted after the
+   * groups are built.
+   */
+  bodyOut: string[],
   v: string,
   obj: SceneObject,
   base: SceneObject | null,
@@ -598,7 +619,7 @@ function emitProperties(
   if (differs("visible") && !obj.visible) L.push(`    ${v}.setVisible(false);`);
   if (base && differs("visible") && obj.visible) L.push(`    ${v}.setVisible(true);`);
 
-  emitBody(L, v, obj, base);
+  emitBody(bodyOut, v, obj, base);
 
   const baseData = (base?.data ?? {}) as Record<string, unknown>;
   for (const [k, val] of Object.entries(obj.data ?? {})) {
@@ -635,6 +656,10 @@ function emitBody(
   }
   if (b.bounce !== (bb?.bounce ?? 0)) {
     L.push(`    ${body}.setBounce(${b.bounce}, ${b.bounce});`);
+  }
+  const walls = b.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS;
+  if (walls !== (bb ? (bb.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS) : false)) {
+    L.push(`    ${body}.setCollideWorldBounds(${walls});`);
   }
 }
 
@@ -674,20 +699,7 @@ export function generatePrefabClass(project: ProjectData, name: string): string 
   if (node.scaleX !== 1 || node.scaleY !== 1) {
     L.push(`    this.setScale(${node.scaleX}, ${node.scaleY});`);
   }
-  if (node.body) {
-    const b = node.body;
-    // `this.body` on an Arcade.Sprite is Body | StaticBody, and only Body has
-    // the setters below. Narrowing once here is what keeps the emitted class
-    // compiling under the strict tsconfig the scaffold writes.
-    L.push(`    const body = this.body as Phaser.Physics.Arcade.Body;`);
-    if (b.shape === "circle") L.push(`    body.setCircle(${b.radius}, ${b.offsetX}, ${b.offsetY});`);
-    else {
-      L.push(`    body.setSize(${b.width}, ${b.height}, false);`);
-      L.push(`    body.setOffset(${b.offsetX}, ${b.offsetY});`);
-    }
-    if (b.immovable) L.push(`    body.setImmovable(true);`);
-    if (!b.allowGravity) L.push(`    body.setAllowGravity(false);`);
-  }
+  if (node.body) L.push(`    this.applyBody();`);
   for (const [k, v] of Object.entries(node.data ?? {})) {
     L.push(`    this.setData(${q(k)}, ${JSON.stringify(v)});`);
   }
@@ -701,6 +713,31 @@ export function generatePrefabClass(project: ProjectData, name: string): string 
   L.push(`    // </keep>`);
   L.push(`  }`);
   L.push(``);
+  if (node.body) {
+    const b = node.body;
+    L.push(`  /**`);
+    L.push(`   * The definition's body. Public and idempotent because joining an`);
+    L.push(`   * arcade group overwrites a body with the GROUP's defaults, so the`);
+    L.push(`   * scene calls this again once the groups exist.`);
+    L.push(`   */`);
+    L.push(`  applyBody(): this {`);
+    // `this.body` on an Arcade.Sprite is Body | StaticBody, and only Body has
+    // the setters below. Narrowing once here keeps the emitted class compiling
+    // under the strict tsconfig the scaffold writes.
+    L.push(`    const body = this.body as Phaser.Physics.Arcade.Body;`);
+    if (b.shape === "circle") L.push(`    body.setCircle(${b.radius}, ${b.offsetX}, ${b.offsetY});`);
+    else {
+      L.push(`    body.setSize(${b.width}, ${b.height}, false);`);
+      L.push(`    body.setOffset(${b.offsetX}, ${b.offsetY});`);
+    }
+    L.push(`    body.setImmovable(${b.immovable});`);
+    L.push(`    body.setAllowGravity(${b.allowGravity});`);
+    L.push(`    body.setBounce(${b.bounce}, ${b.bounce});`);
+    L.push(`    body.setCollideWorldBounds(${b.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS});`);
+    L.push(`    return this;`);
+    L.push(`  }`);
+    L.push(``);
+  }
   L.push(`  // Exposed on instances: ${prefab.exposed.join(", ") || "(nothing)"}`);
   L.push(`  // <keep id="body">`);
   L.push(`  // </keep>`);

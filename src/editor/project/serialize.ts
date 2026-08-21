@@ -37,11 +37,16 @@ export interface ProjectManifest {
   scenes: { key: string; name: string; file: string }[];
   assets: Omit<AssetDef, "url">[];
   /**
-   * The prefab index: names and files. The definitions themselves live in
-   * their own files. Folders written by an older build inlined whole
-   * definitions here, and are still read that way on the way in.
+   * Prefab definitions, plus the file each one is authored in.
+   *
+   * The files are the source of truth and are what a reader prefers — that is
+   * what keeps two people editing two prefabs out of one file. The manifest
+   * carries the definitions anyway because it is also the RUNTIME's payload: a
+   * game that imports this and calls `buildScene` has no filesystem to go and
+   * read the other files with, and an index of filenames left every prefab
+   * instance in the scene unresolvable.
    */
-  prefabs: { name: string; file: string; base?: string }[] | PrefabDef[];
+  prefabs: (PrefabDef & { file?: string })[];
   anims: AnimDef[];
   groups: string[];
   collision: Record<string, Record<string, CollisionRule>>;
@@ -53,7 +58,7 @@ export function toManifest(project: ProjectData): ProjectManifest {
     name: project.name,
     scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: scenePath(s.key) })),
     assets: project.assets.map(({ url: _url, ...rest }) => rest),
-    prefabs: project.prefabs.map((p) => ({ name: p.name, file: prefabPath(p.name), base: p.base })),
+    prefabs: project.prefabs.map((p) => ({ ...p, file: prefabPath(p.name) })),
     anims: project.anims,
     groups: project.groups,
     collision: project.collision,
@@ -248,7 +253,7 @@ function readPrefabs(
     if (entry.root) ensureLids(entry.root);
     entry.exposed = entry.exposed ?? [];
     issues.push(
-      `Prefab "${entry.name}" was read from the manifest — it gets its own file on the next save`,
+      `Prefab "${entry.name}" was read from the manifest rather than its own file — saving writes ${prefabPath(entry.name)}`,
     );
     out.push(entry);
   }

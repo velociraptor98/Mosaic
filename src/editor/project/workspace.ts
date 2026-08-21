@@ -83,7 +83,6 @@ export class Workspace {
 
   private store: ProjectStore;
   private stopWatch: (() => void) | null = null;
-  private saveTimer: number | null = null;
   /**
    * The exact bytes we last wrote per path. A save fires the same watcher
    * events an external edit does, so the echo is filtered by COMPARING
@@ -220,13 +219,15 @@ export class Workspace {
 
   // -------------------------------------------------------------- saving
 
+  /**
+   * The store already debounces before it calls its persister, so this does
+   * not debounce again. It used to, which made every save wait out two 400ms
+   * timers in series before a single byte was written — the two were unaware
+   * of each other, and the second one bought nothing the first had not.
+   */
   private scheduleSave(project: ProjectData): void {
     if (!this.location) return;
-    if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
-    this.saveTimer = window.setTimeout(() => {
-      this.saveTimer = null;
-      void this.saveNow(project);
-    }, 400);
+    void this.saveNow(project);
   }
 
   async saveNow(project = this.store.project): Promise<void> {

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { SHAPE_STROKE, shapePolygon } from "./shapeGeometry";
 import {
   BUILTIN_TILESET_KEY,
   SHAPE_DEFS,
@@ -55,62 +56,13 @@ function drawObjectShape(
   w: number,
   h: number,
 ): void {
-  const cx = w / 2;
-  const cy = h / 2;
   gfx.fillStyle(color, 1);
-  gfx.lineStyle(1.5, 0x1d2d3d, 0.55);
+  gfx.lineStyle(SHAPE_STROKE.width, SHAPE_STROKE.color, SHAPE_STROKE.alpha);
 
-  switch (shape) {
-    case "circle": {
-      const r = Math.min(cx, cy) - 2;
-      gfx.fillCircle(cx, cy, r);
-      gfx.strokeCircle(cx, cy, r);
-      break;
-    }
-    case "capsule": {
-      gfx.fillRoundedRect(2, 2, w - 4, h - 4, Math.min(w, h) / 3);
-      gfx.strokeRoundedRect(2, 2, w - 4, h - 4, Math.min(w, h) / 3);
-      break;
-    }
-    case "diamond": {
-      const pts = [
-        new Phaser.Math.Vector2(cx, 2),
-        new Phaser.Math.Vector2(w - 2, cy),
-        new Phaser.Math.Vector2(cx, h - 2),
-        new Phaser.Math.Vector2(2, cy),
-      ];
-      gfx.fillPoints(pts, true);
-      gfx.strokePoints(pts, true);
-      break;
-    }
-    case "triangle": {
-      const pts = [
-        new Phaser.Math.Vector2(cx, 2),
-        new Phaser.Math.Vector2(w - 2, h - 2),
-        new Phaser.Math.Vector2(2, h - 2),
-      ];
-      gfx.fillPoints(pts, true);
-      gfx.strokePoints(pts, true);
-      break;
-    }
-    case "box": {
-      gfx.fillRect(2, 2, w - 4, h - 4);
-      gfx.strokeRect(2, 2, w - 4, h - 4);
-      break;
-    }
-    case "star": {
-      const pts: Phaser.Math.Vector2[] = [];
-      const spikes = 5;
-      const outer = Math.min(cx, cy) - 2;
-      const inner = outer * 0.45;
-      for (let i = 0; i < spikes * 2; i++) {
-        const r = i % 2 === 0 ? outer : inner;
-        const a = (Math.PI / spikes) * i - Math.PI / 2;
-        pts.push(new Phaser.Math.Vector2(cx + Math.cos(a) * r, cy + Math.sin(a) * r));
-      }
-      gfx.fillPoints(pts, true);
-      gfx.strokePoints(pts, true);
-      break;
-    }
-  }
+  // Geometry comes from shapeGeometry.ts, which the PNG rasteriser also reads.
+  // Describing a star in two places is how the editor and the shipped art
+  // drift apart.
+  const points = shapePolygon(shape, w, h).map((p) => new Phaser.Math.Vector2(p.x, p.y));
+  gfx.fillPoints(points, true);
+  gfx.strokePoints(points, true);
 }

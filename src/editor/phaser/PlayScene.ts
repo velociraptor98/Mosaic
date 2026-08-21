@@ -61,12 +61,10 @@ export class PlayScene extends Phaser.Scene {
   }
 
   create(): void {
-    const s = this.sceneData.settings;
-    this.cameras.main.setBackgroundColor(s.backgroundColor);
+    // Background, world bounds and gravity are the LOADER's job — this used to
+    // set them here too, which hid the fact that buildScene never did.
     this.cameras.main.setScroll(0, 0);
     this.cameras.main.setZoom(1);
-    this.physics.world.setBounds(0, 0, s.width, s.height);
-    this.physics.world.gravity.y = s.gravityY;
 
     const built = buildScene(this, this.project, this.sceneData, {
       physics: true,

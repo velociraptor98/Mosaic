@@ -96,6 +96,15 @@ export interface BodyDef {
   immovable: boolean;
   allowGravity: boolean;
   bounce: number;
+  /**
+   * Kept inside the scene's bounds.
+   *
+   * Absent on bodies written before this was authorable, and read as `true`
+   * there — the runtime used to force it on every body, so that is the
+   * behaviour those scenes were built against. It was never emitted on export,
+   * which meant the play-test walled objects in and the shipped game did not.
+   */
+  collideWorldBounds?: boolean;
 }
 
 /**

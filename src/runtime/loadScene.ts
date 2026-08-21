@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { resolveObject } from "../shared/prefabs";
+import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../shared/size";
 import { objectsById as indexObjects, worldTransform } from "../shared/transform";
 import { collectLoaderManifest } from "../shared/manifest";
 import { scriptsOf } from "../shared/scripts";
@@ -107,6 +108,7 @@ export function buildScene(
 ): BuiltScene {
   const withPhysics = options.physics !== false && !!scene.physics;
   const host = options.scripts ? new ScriptHost(scene) : null;
+  applySettings(scene, data, withPhysics);
   registerAtlasFrames(scene, project);
   registerAnimations(scene, project.anims);
 
@@ -155,6 +157,12 @@ export function buildScene(
         }
         group.add(sprite);
       }
+
+      // AFTER the group, never before. An arcade group applies its own
+      // defaults to every child it takes — collideWorldBounds false,
+      // allowGravity true, drag, acceleration — so a body configured first is
+      // silently overwritten by joining a group.
+      if (withPhysics && resolved.body) applyBody(sprite, resolved);
     }
   });
 
@@ -285,10 +293,30 @@ function createSprite(
   sprite.setData("sceneObject", obj);
   for (const [k, v] of Object.entries(obj.data ?? {})) sprite.setData(k, v);
 
-  if (withPhysics && obj.body) applyBody(sprite, obj);
   if (obj.playOnSpawn && scene.anims.exists(obj.playOnSpawn)) sprite.play(obj.playOnSpawn);
 
   return sprite;
+}
+
+/**
+ * The scene's own settings: background, world bounds, gravity.
+ *
+ * These belong here rather than in each caller. They used to be applied by the
+ * editor's play-test just before it called this function, which meant a game
+ * loading a scene through `buildScene` — the documented path — silently got no
+ * gravity and no background at all.
+ */
+export function applySettings(
+  scene: Phaser.Scene,
+  data: SceneData,
+  withPhysics: boolean,
+): void {
+  const s = data.settings;
+  if (scene.cameras?.main) scene.cameras.main.setBackgroundColor(s.backgroundColor);
+  if (withPhysics && scene.physics?.world) {
+    scene.physics.world.setBounds(0, 0, s.width, s.height);
+    scene.physics.world.gravity.y = s.gravityY;
+  }
 }
 
 /** Plays a one-shot cue, if the project actually loaded it. */
@@ -343,7 +371,7 @@ export function applyBody(sprite: Phaser.GameObjects.Sprite, obj: SceneObject): 
   body.setImmovable(def.immovable);
   body.setAllowGravity(def.allowGravity);
   body.setBounce(def.bounce, def.bounce);
-  body.setCollideWorldBounds(true);
+  body.setCollideWorldBounds(def.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS);
 }
 
 /** Fires the `overlap` cue of either object in a wired pair. */

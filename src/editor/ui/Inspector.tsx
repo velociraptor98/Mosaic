@@ -8,7 +8,7 @@ import {
   resolvePrefab,
 } from "../../shared/prefabs";
 import type { InspectorTab } from "../store/project";
-import { bodyForSize, objectSize } from "../../shared/size";
+import { DEFAULT_COLLIDE_WORLD_BOUNDS, bodyForSize, objectSize } from "../../shared/size";
 import { DEFAULT_CAMERA, type AssetDef, type SceneObject, type TileLayer } from "../../shared/types";
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
 import { PrefabPanel } from "./PrefabPanel";
@@ -620,6 +620,11 @@ function PhysicsTab() {
           </div>
           <CheckField label="Immovable" value={body.immovable} onCommit={(v) => set("body.immovable", v)} />
           <CheckField label="Allow gravity" value={body.allowGravity} onCommit={(v) => set("body.allowGravity", v)} />
+          <CheckField
+            label="Collide with world bounds"
+            value={body.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS}
+            onCommit={(v) => set("body.collideWorldBounds", v)}
+          />
           <NumberField label="Bounce" value={body.bounce} step={0.05} onCommit={(v) => set("body.bounce", v)} />
           <button
             className={`ghost ${store.ui.showBodies ? "on" : ""}`}
