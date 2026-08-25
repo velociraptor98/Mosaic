@@ -30,7 +30,7 @@ function createWindow(): BrowserWindow {
     height: 1000,
     minWidth: 1100,
     minHeight: 700,
-    backgroundColor: "#f2f2f3",
+    backgroundColor: "#14171a",
     title: "Mosaic",
     // Windows and Linux take the icon from the window; macOS takes it from the
     // dock, set below.
@@ -46,6 +46,13 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Chromium throttles requestAnimationFrame to nothing in a window it
+      // considers hidden, which stops the play-test's game loop dead — the
+      // scene stays active, sprites keep their bodies, and not one frame runs.
+      // An editor whose canvas freezes when its window is occluded is wrong on
+      // its own terms, and it also made every headless assertion about a
+      // running game depend on whether the window happened to be visible.
+      backgroundThrottling: false,
     },
   });
 

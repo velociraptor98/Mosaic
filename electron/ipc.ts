@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
 import { bundleScripts } from "./bundleScripts";
+import { bundleEntry, findGameEntries, recordScene } from "./recordScene";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import {
@@ -27,16 +28,52 @@ import {
   type Toolchain,
   type WriteRequest,
   type WriteResultIpc,
+  type SceneRecording,
 } from "./contract";
 
 const execFileAsync = promisify(execFile);
 
 const MANIFEST = "phaser.editor.json";
 const CONFIG = "mosaic.config.json";
-const SCENE_DIR = "src/scenes";
-const SRC_DIR = "src";
-const PREFAB_DIR = "src/prefabs";
+const DEFAULT_SCENE_DIR = "src/scenes";
+const DEFAULT_SRC_DIR = "src";
+const DEFAULT_PREFAB_DIR = "src/prefabs";
 const ASSET_DIR = "assets";
+
+interface Paths {
+  src: string;
+  scenes: string;
+  prefabs: string;
+  assets: string;
+}
+
+/**
+ * Where this project keeps things, per its own config.
+ *
+ * Read fresh rather than cached: the config is a file the user can edit in
+ * their own editor, and a stale layout is worse than a re-read.
+ */
+async function projectPaths(root: string): Promise<Paths> {
+  const raw = await readIfExists(path.join(root, CONFIG));
+  let parsed: { paths?: Partial<Paths> } = {};
+  try {
+    parsed = raw ? JSON.parse(raw) : {};
+  } catch {
+    parsed = {};
+  }
+  const clean = (v: string | undefined, fallback: string) => {
+    const t = (v ?? "").trim().replace(/^\/+|\/+$/g, "");
+    // A path that escapes the root is not a layout choice, it is a bug or an
+    // attack; either way the default is the safe answer.
+    return !t || t.startsWith("..") ? fallback : t;
+  };
+  return {
+    src: clean(parsed.paths?.src, DEFAULT_SRC_DIR),
+    scenes: clean(parsed.paths?.scenes, DEFAULT_SCENE_DIR),
+    prefabs: clean(parsed.paths?.prefabs, DEFAULT_PREFAB_DIR),
+    assets: clean(parsed.paths?.assets, ASSET_DIR),
+  };
+}
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|wav|m4a)$/i;
 const SCRIPT_EXT = /\.(ts|tsx|js|jsx|mts|mjs)$/i;
@@ -121,7 +158,30 @@ async function readDirFiles(
   return out;
 }
 
-async function listAssets(root: string): Promise<AssetFileInfo[]> {
+/**
+ * Does this folder already hold somebody's codebase?
+ *
+ * The question is not "is it empty" — a folder someone dropped sprites into
+ * before opening it is still ours to scaffold, and that is a normal way to
+ * start. The question is whether there is SOURCE here, because that is what
+ * Mosaic cannot read and must not bury under a starter scene.
+ *
+ * So: art and dotfiles do not count, and anything else does.
+ */
+async function isOccupied(root: string, paths: Paths): Promise<boolean> {
+  try {
+    const entries = await fs.readdir(root, { withFileTypes: true });
+    return entries.some((entry) => {
+      if (entry.name.startsWith(".")) return false;
+      if (entry.isDirectory()) return entry.name !== paths.assets.split("/")[0];
+      return !IMAGE_EXT.test(entry.name) && !AUDIO_EXT.test(entry.name);
+    });
+  } catch {
+    return false;
+  }
+}
+
+async function listAssets(root: string, assetDir: string): Promise<AssetFileInfo[]> {
   const out: AssetFileInfo[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -141,7 +201,7 @@ async function listAssets(root: string): Promise<AssetFileInfo[]> {
       out.push({ rel: toPosix(rel), bytes: stat.size, modified: stat.mtimeMs });
     }
   };
-  await walk(ASSET_DIR);
+  await walk(assetDir);
   return out;
 }
 
@@ -153,7 +213,7 @@ async function listAssets(root: string): Promise<AssetFileInfo[]> {
  * script components, happens above the platform seam where the browser build
  * would do it as well.
  */
-async function listScripts(root: string): Promise<ScriptFileIpc[]> {
+async function listScripts(root: string, srcDir: string): Promise<ScriptFileIpc[]> {
   const out: ScriptFileIpc[] = [];
   const walk = async (dir: string): Promise<void> => {
     let entries;
@@ -177,7 +237,19 @@ async function listScripts(root: string): Promise<ScriptFileIpc[]> {
       if (contents !== null) out.push({ rel: toPosix(rel), contents, modified: stat.mtimeMs });
     }
   };
-  await walk(SRC_DIR);
+  await walk(srcDir);
+
+  // Nothing under the configured source root usually means the project does not
+  // have one. A folder Mosaic scaffolded keeps its code in `src/`; a project
+  // that predates Mosaic frequently keeps it loose at the root, and the Phaser
+  // examples all do. Assuming `src/` there indexed zero files — which left the
+  // Scripts panel empty and, worse, gave the importer no classes to bind an
+  // object to, so an imported scene silently had no behaviour attached.
+  //
+  // Falling back rather than changing the default keeps a Mosaic project's
+  // index exactly as it was: its `src/` is never empty.
+  if (!out.length && srcDir !== ".") await walk(".");
+
   out.sort((a, b) => a.rel.localeCompare(b.rel));
   return out;
 }
@@ -272,7 +344,7 @@ export function registerIpc(): void {
     });
     if (result.canceled || !result.filePath) return null;
     const root = result.filePath;
-    await fs.mkdir(path.join(root, SCENE_DIR), { recursive: true });
+    await fs.mkdir(path.join(root, DEFAULT_SCENE_DIR), { recursive: true });
     await fs.mkdir(path.join(root, ASSET_DIR), { recursive: true });
     return { root, name: path.basename(root) };
   });
@@ -285,13 +357,15 @@ export function registerIpc(): void {
       } catch {
         return null;
       }
+      const paths = await projectPaths(root);
       return {
         root,
         manifest: await readIfExists(path.join(root, MANIFEST)),
         config: await readIfExists(path.join(root, CONFIG)),
-        scenes: await readDirFiles(root, SCENE_DIR, /\.scene\.json$/),
-        prefabs: await readDirFiles(root, PREFAB_DIR, /\.prefab\.json$/),
-        assets: await listAssets(root),
+        scenes: await readDirFiles(root, paths.scenes, /\.scene\.json$/),
+        prefabs: await readDirFiles(root, paths.prefabs, /\.prefab\.json$/),
+        assets: await listAssets(root, paths.assets),
+        occupied: await isOccupied(root, paths),
       };
     },
   );
@@ -319,7 +393,7 @@ export function registerIpc(): void {
   );
 
   ipcMain.handle(IPC.readScripts, async (_e, root: string): Promise<ScriptFileIpc[]> =>
-    listScripts(root),
+    projectPaths(root).then((p) => listScripts(root, p.src)),
   );
 
   ipcMain.handle(IPC.openInEditor, async (_e, root: string, rel: string, line?: number) =>
@@ -333,6 +407,32 @@ export function registerIpc(): void {
       // bundler, so a renderer cannot ask for a file outside the project.
       for (const entry of entries) resolveInside(root, entry.src);
       return bundleScripts(root, entries);
+    },
+  );
+
+  ipcMain.handle(IPC.findGameEntries, async (_e, root: string): Promise<string[]> =>
+    findGameEntries(root),
+  );
+
+  ipcMain.handle(
+    IPC.recordScene,
+    async (_e, root: string, entry: string): Promise<SceneRecording> => {
+      // The entry is a path from the renderer, so it is bounded like every
+      // other one before anything is compiled or run.
+      resolveInside(root, entry);
+      return recordScene(root, entry);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.bundleEntry,
+    async (_e, root: string, entry: string): Promise<{ code: string | null; error?: string }> => {
+      resolveInside(root, entry);
+      try {
+        return { code: await bundleEntry(root, entry) };
+      } catch (err) {
+        return { code: null, error: (err as Error).message };
+      }
     },
   );
 
@@ -355,10 +455,11 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.watch, async (_e, root: string) => {
     if (watchers.has(root)) return;
-    // src/ rather than src/scenes: scripts live beside the scenes they are
-    // attached in, and an edit to one has to re-index as promptly as an edit
-    // to the other reloads.
-    const watcher = chokidar.watch([MANIFEST, CONFIG, SRC_DIR, PREFAB_DIR, ASSET_DIR], {
+    const paths = await projectPaths(root);
+    // The source root rather than the scene folder: scripts live beside the
+    // scenes they are attached in, and an edit to one has to re-index as
+    // promptly as an edit to the other reloads.
+    const watcher = chokidar.watch([MANIFEST, CONFIG, paths.src, paths.prefabs, paths.assets], {
       cwd: root,
       ignoreInitial: true,
       ignored: (p: string) => SKIP_DIRS.has(path.basename(p)),
@@ -402,7 +503,7 @@ export function registerIpc(): void {
         const stat = await fs.stat(entry.root).catch(() => null);
         if (!stat?.isDirectory()) return { ...entry, missing: true };
         const scenes = await fs
-          .readdir(path.join(entry.root, SCENE_DIR))
+          .readdir(path.join(entry.root, DEFAULT_SCENE_DIR))
           .catch(() => [] as string[]);
         let phaser: string | null = null;
         const pkg = await readIfExists(path.join(entry.root, "package.json"));

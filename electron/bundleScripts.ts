@@ -96,7 +96,12 @@ function entryModule(entries: ScriptEntry[]): string {
   const imports: string[] = [];
   const pairs: string[] = [];
   entries.forEach((entry, i) => {
-    imports.push(`import { ${entry.className} as C${i} } from ${JSON.stringify(entry.src)};`);
+    const exported = entry.exportName ?? entry.className;
+    imports.push(
+      exported === "default"
+        ? `import C${i} from ${JSON.stringify(entry.src)};`
+        : `import { ${exported} as C${i} } from ${JSON.stringify(entry.src)};`,
+    );
     pairs.push(`  ${JSON.stringify(`${entry.src}::${entry.className}`)}: C${i},`);
   });
   return `${imports.join("\n")}\nexport default {\n${pairs.join("\n")}\n};\n`;

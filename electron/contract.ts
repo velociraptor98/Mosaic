@@ -33,6 +33,9 @@ export const IPC = {
   createProject: "mosaic:createProject",
   gitInit: "mosaic:gitInit",
   install: "mosaic:install",
+  findGameEntries: "mosaic:findGameEntries",
+  recordScene: "mosaic:recordScene",
+  bundleEntry: "mosaic:bundleEntry",
 } as const;
 
 /** Pushed from main -> renderer when watched files change on disk. */
@@ -70,6 +73,14 @@ export interface ProjectFiles {
   scenes: { rel: string; contents: string }[];
   prefabs: { rel: string; contents: string }[];
   assets: AssetFileInfo[];
+  /**
+   * The folder already holds something that is not ours.
+   *
+   * An empty folder is an invitation to scaffold into; somebody's existing
+   * repo is not, and the difference is not visible from the four things above
+   * — a Phaser project Mosaic cannot read looks exactly like an empty one.
+   */
+  occupied: boolean;
 }
 
 /** One source file of the project, as read for the script index. */
@@ -85,6 +96,12 @@ export interface ScriptEntry {
   /** Project-relative POSIX path. */
   src: string;
   className: string;
+  /**
+   * The name the module exports it under, when that differs from the class
+   * name. `"default"` for `export default class` — the form the Phaser
+   * examples use throughout, and one a named import cannot reach.
+   */
+  exportName?: string;
 }
 
 /**
@@ -179,6 +196,12 @@ export interface MosaicApi {
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
   /** Compiles the project's script classes for the play-test. */
   bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
+  /** Files that construct a `Phaser.Game` — the candidate import entries. */
+  findGameEntries(root: string): Promise<string[]>;
+  /** Runs one of them and reports what its scenes built. */
+  recordScene(root: string, entry: string): Promise<SceneRecording>;
+  /** Compiles an entry point so the renderer can run the project's own game. */
+  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
   importAssets(root: string): Promise<AssetFileInfo[]>;
   copyAssets(root: string, sourcePaths: string[]): Promise<AssetFileInfo[]>;
 
@@ -205,4 +228,18 @@ export interface MosaicApi {
   forget(root: string): Promise<void>;
   revealInFolder(root: string, rel?: string): Promise<void>;
   setTitle(title: string): Promise<void>;
+}
+
+/**
+ * One scene, as it existed the moment its `create()` returned.
+ *
+ * Deliberately untyped beyond this: the renderer owns the mapping into Mosaic's
+ * model, and the main process stays dumb about what a scene means — the same
+ * split `bundleScripts` already keeps.
+ */
+export interface SceneRecording {
+  ok: boolean;
+  error?: string;
+  /** Keyed by Phaser scene key. Shape matches the importer's `Recording`. */
+  scenes?: Record<string, unknown>;
 }

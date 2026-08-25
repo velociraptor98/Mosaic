@@ -641,6 +641,118 @@ export class Patrol extends ScriptComponent {
     ok("reopening the folder puts you back in the prefab you were editing",
        shape.docSurvivedReload === "Turret", String(shape.docSurvivedReload));
 
+    // --- animation, against a really running game ---
+    // Animation is the one feature that cannot be checked by reading a file:
+    // registering a key, playing it, and the frames actually advancing are
+    // three different things. The Anim Lab sample exists to exercise all of
+    // them, including the case a generator is most likely to drop — an
+    // animation played only from a script and named nowhere in the scene.
+    const anim = await evaluate<{
+      registered: string[];
+      authored: string[];
+      frames: number;
+      idler: { anim: string | null; playing: boolean; first: string | null; later: string | null };
+      coin: { anim: string | null; advanced: boolean };
+      overridden: string | null;
+      yoyo: boolean | null;
+      flashRepeat: number | null;
+      walker: { anim: string | null; started: boolean; moved: boolean };
+    }>(
+      win,
+      `(async () => {
+         const dbg = window.mosaicDebug;
+         await dbg.workspace.open({ root: "/Users/kunalsingh/Desktop/phaser-scene-editor/samples/anim-lab", name: "anim-lab" });
+         await new Promise(r => setTimeout(r, 1200));
+         const authored = dbg.store.project.anims.map(a => a.key).sort();
+
+         dbg.scriptTrust.trustRoot(dbg.workspace.location.root);
+         dbg.playtest.start();
+         await new Promise(r => setTimeout(r, 1800));
+
+         const play = dbg.playtest.game.registry.get("playScene");
+         const at = (n) => play.children.getByName(n);
+         const frameOf = (n) => { const o = at(n); return o && o.frame ? String(o.frame.name) : null; };
+
+         const startFrame = play.sys.game.loop.frame;
+         const idlerFirst = frameOf("Idler");
+         const coinFirst = frameOf("Coin");
+         const walkerX = at("Walker").x;
+         await new Promise(r => setTimeout(r, 700));
+
+         const host = play.host;
+         const walkerScripts = host && host.for ? host.for(at("Walker")) : [];
+         return {
+           registered: Object.keys(play.anims.anims.entries).sort(),
+           authored,
+           frames: play.sys.game.loop.frame - startFrame,
+           idler: {
+             anim: at("Idler").anims.currentAnim ? at("Idler").anims.currentAnim.key : null,
+             playing: at("Idler").anims.isPlaying,
+             first: idlerFirst,
+             later: frameOf("Idler"),
+           },
+           coin: {
+             anim: at("Coin").anims.currentAnim ? at("Coin").anims.currentAnim.key : null,
+             advanced: frameOf("Coin") !== coinFirst,
+           },
+           yoyo: play.anims.get("coin_spin") ? !!play.anims.get("coin_spin").yoyo : null,
+           flashRepeat: play.anims.get("coin_flash") ? play.anims.get("coin_flash").repeat : null,
+           overridden: at("Coin 3") && at("Coin 3").anims.currentAnim
+             ? at("Coin 3").anims.currentAnim.key : null,
+           walker: {
+             anim: at("Walker").anims.currentAnim ? at("Walker").anims.currentAnim.key : null,
+             started: walkerScripts.length > 0 && walkerScripts[0].origin !== 0,
+             moved: Math.abs(at("Walker").x - walkerX) > 1,
+           },
+         };
+       })()`,
+    );
+
+    // A hidden window used to throttle requestAnimationFrame to nothing, which
+    // stopped the play-test's loop dead and made every assertion below pass or
+    // fail on whether the window happened to be visible.
+    ok("the play-test's game loop runs even when the window is not in front",
+       anim.frames > 10, `${anim.frames} frames in 700ms`);
+
+    ok("every animation the project defines is registered, not just the played ones",
+       JSON.stringify(anim.registered) === JSON.stringify(anim.authored),
+       `registered ${anim.registered.join()} · authored ${anim.authored.join()}`);
+
+    ok("playOnSpawn starts an animation with no script involved",
+       anim.idler.anim === "hero_idle" && anim.idler.playing, JSON.stringify(anim.idler));
+
+    ok("a two-frame animation at 2fps is holding a frame, not stuck on the first",
+       anim.idler.later === "4" || anim.idler.first === "4", JSON.stringify(anim.idler));
+
+    ok("frames actually advance", anim.coin.advanced, JSON.stringify(anim.coin));
+
+    ok("yoyo is honoured, so four frames of art give seven of motion",
+       anim.yoyo === true, `coin_spin.yoyo = ${anim.yoyo}`);
+    ok("a finite repeat count survives to the running game",
+       anim.flashRepeat === 2, `coin_flash.repeat = ${anim.flashRepeat}`);
+
+    ok("an animation on a PREFAB reaches its instances",
+       anim.coin.anim === "coin_spin", String(anim.coin.anim));
+
+    ok("and an instance can override it, because the prefab exposed it",
+       anim.overridden === "hero_idle", String(anim.overridden));
+
+    ok("an animation played only from a script exists in the running game",
+       anim.walker.anim === "hero_walk", String(anim.walker.anim));
+
+    ok("its script ran and is driving the object",
+       anim.walker.started && anim.walker.moved, JSON.stringify(anim.walker));
+
+    await evaluate(win, "window.mosaicDebug.playtest.stop()");
+    await wait(400);
+    // Back to this run's own temp folder. The sample lives inside the repo, and
+    // leaving it open would point the git checks below at a real repository.
+    await evaluate(
+      win,
+      `window.mosaicDebug.workspace.open({ root: ${JSON.stringify(root)}, name: "smoke" })`,
+    );
+    await wait(600);
+
     // --- window chrome: traffic lights and dragging ---
     const chrome = await evaluate<{
       isDesktop: boolean;
@@ -744,9 +856,68 @@ export class Patrol extends ScriptComponent {
   }
 
   await newProjectFlow(win);
+  await codeAtTheRoot(win);
 
   console.log(failures === 0 ? "\nDesktop end-to-end passed" : `\n${failures} desktop check(s) failed`);
   app.exit(failures === 0 ? 0 : 1);
+}
+
+/**
+ * A project that keeps its code at the folder root, not under `src/`.
+ *
+ * The Phaser examples are all written this way, and the index used to walk only
+ * the configured source root — so it found nothing, the Scripts panel was
+ * empty, and the importer had no classes to bind an object to. An imported
+ * scene then had no behaviour attached and nobody could see why.
+ */
+async function codeAtTheRoot(win: BrowserWindow): Promise<void> {
+  const root = await fs.mkdtemp(path.join(app.getPath("temp"), "mosaic-flat-"));
+  console.log(`\nA project with its code at the root (${root})`);
+  try {
+    await fs.writeFile(
+      path.join(root, "Door.js"),
+      "export default class Door extends Phaser.GameObjects.Container\n{\n  constructor (name, scene, x, y)\n  {\n    super(scene, x, y);\n  }\n}\n",
+    );
+    await fs.writeFile(
+      path.join(root, "main.js"),
+      "import Door from './Door.js';\nnew Phaser.Game({ width: 800, height: 600, scene: [] });\n",
+    );
+
+    await evaluate(
+      win,
+      `window.mosaicDebug.workspace.open({ root: ${JSON.stringify(root)}, name: "flat" })`,
+    );
+    await wait(2500);
+
+    const classes = await evaluate<string[]>(
+      win,
+      `window.mosaicDebug.workspace.scripts.index.classes.map(c => c.name)`,
+    );
+    ok("code at the folder root is indexed, not only code under src/",
+       classes.includes("Door"), JSON.stringify(classes));
+
+    const files = await evaluate<string[]>(
+      win,
+      `window.mosaicDebug.workspace.scripts.index.files`,
+    );
+    ok("and a file declaring no class is indexed too, because RUN needs the entry point",
+       files.includes("main.js"), JSON.stringify(files));
+
+    const ctor = await evaluate<string[] | null>(
+      win,
+      `(window.mosaicDebug.workspace.scripts.index.classes.find(c => c.name === "Door") || {}).ctorParams`,
+    );
+    ok("with the constructor signature an import needs to bind to it",
+       JSON.stringify(ctor) === JSON.stringify(["name", "scene", "x", "y"]), JSON.stringify(ctor));
+
+    const entries = await evaluate<string[]>(win, `window.mosaicDebug.workspace.gameEntries`);
+    ok("and the file that starts the game is offered to run", entries.includes("main.js"),
+       JSON.stringify(entries));
+
+    await evaluate(win, `window.mosaicDebug.workspace.close()`);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /**

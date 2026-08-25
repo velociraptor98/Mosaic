@@ -13,11 +13,13 @@ import {
   attachableClasses,
   buildIndex,
   componentFiles,
+  sourceFiles,
   parseScriptFile,
   propertiesOf,
 } from "../src/editor/scripts/parse";
 import { samplePlayerController, scriptStub, toClassName } from "../src/editor/scripts/stub";
-import { scriptFilePath } from "../src/shared/scripts";
+import { scriptFilePath, scriptsOf } from "../src/shared/scripts";
+import { shapeTextureKey } from "../src/shared/definitions";
 import { generateFiles, generatePrefabClass, generateSceneClass } from "../src/editor/export/generate";
 import { extractKeepRegions, hasUnmarkedEdits, mergeKeepRegions } from "../src/editor/export/keep";
 import {
@@ -28,15 +30,40 @@ import {
 } from "../src/editor/project/scaffold";
 import { SET_TILES, openTilesFor } from "../src/shared/logoGeometry";
 import { FIELD, REVERSED, mosaicIconBitmap, pixelAt } from "../src/shared/logoBitmap";
+import {
+  CONFIG_PATH,
+  MANIFEST_PATH,
+  projectFromSource,
+  projectToFiles,
+  toManifest,
+} from "../src/editor/project/serialize";
+import {
+  applyImport,
+  sceneFromRecording,
+  type RecordedObject,
+  type Recording,
+} from "../src/editor/import/fromRecording";
+import { createStarterProject } from "../src/editor/store/templates";
+import { bindArgs, boundArgValues, unbindableParams } from "../src/shared/prefabBinding";
+import { collectLoaderManifest } from "../src/shared/manifest";
 import { ProjectStore } from "../src/editor/store/project";
-import { defaultBody } from "../src/editor/store/templates";
-import { resolveObject } from "../src/shared/prefabs";
+import { bodyForSize, objectSize } from "../src/shared/size";
+import { canInherit, resolveObject, resolvePrefab } from "../src/shared/prefabs";
 import { wouldCycle } from "../src/shared/transform";
 import { objectsById } from "../src/shared/transform";
 import type { ObjectLayer, TileLayer } from "../src/shared/types";
 
 let failures = 0;
 let checks = 0;
+
+/** A recorded display-list entry, with the defaults a snapshot always carries. */
+function obj(over: Partial<RecordedObject> & { kind: string }): RecordedObject {
+  return {
+    name: null, parent: null, x: 0, y: 0, depth: 0, rotationDeg: 0,
+    scaleX: 1, scaleY: 1, originX: 0.5, originY: 0.5, visible: true,
+    ...over,
+  };
+}
 
 function ok(label: string, condition: boolean, detail = ""): void {
   checks += 1;
@@ -46,6 +73,22 @@ function ok(label: string, condition: boolean, detail = ""): void {
     failures += 1;
     console.log(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`);
   }
+}
+
+/**
+ * Change a definition the way the editor does: open it as a document, edit it,
+ * push it. There is no other write path — the propagation panel exists so that
+ * there is not one.
+ */
+function editPrefab(name: string, patch: Record<string, unknown>): void {
+  const returnTo = store.activeSceneKey;
+  store.openPrefab(name);
+  for (const [path, value] of Object.entries(patch)) {
+    store.setObjectProp(store.prefabDoc!.rootId, path, value, `Set ${path}`);
+  }
+  store.pushPrefabSave();
+  store.closePrefab(true);
+  store.activateScene(returnTo);
 }
 
 function group(name: string): void {
@@ -62,10 +105,14 @@ group("Workflow 1 — project & scenes");
   const key = store.createScene("Level 02", "topdown");
   ok("createScene writes a new scene file", store.project.scenes.length === before + 1);
   ok("key is derived and collision-free", key === "Level_02", String(key));
-  ok("template starts runnable (tile layer + player)", (() => {
+  ok("template starts runnable (tile layer + a placed instance)", (() => {
     const scene = store.project.scenes.find((s) => s.key === key)!;
-    return scene.layers.some((l) => l.kind === "tile") && scene.objects.some((o) => o.type === "player");
+    return scene.layers.some((l) => l.kind === "tile") && scene.objects.some((o) => !!o.prefab);
   })());
+  ok("its starter content is prefabs the project owns, not engine types",
+     store.project.prefabs.some((p) => p.name === "Player") &&
+       store.project.scenes.every((sc) => sc.objects.every((o) => o.type === "sprite")),
+     JSON.stringify(store.project.prefabs.map((p) => p.name)));
 
   store.activateScene("Level_01");
   store.setSelection([store.scene!.objects[0].id]);
@@ -201,16 +248,37 @@ group("Workflow 4 — asset import & atlas slicing");
 }
 
 // ---------------------------------------------------------------- workflow 5
-group("Workflow 5 — prefabs & instancing");
+group("Workflow 5 — promote, isolate, expose, vary, place, propagate");
 {
   store.activateScene("Level_01");
-  const coins = store.scene!.objects.filter((o) => o.type === "coin");
-  ok("the repeated objects are there to select", coins.length === 4, String(coins.length));
+  // The fixture this workflow needs is PLAIN repeated objects. The starter
+  // project ships them as Pickup instances, so they are unpacked first — which
+  // is itself the editor action for "stop linking this to a definition".
+  const seeds = store.scene!.objects.filter((o) => o.prefab === "Pickup");
+  ok("the repeated objects are there to select", seeds.length === 4, String(seeds.length));
+  for (const seed of seeds) store.unpackInstance(seed.id);
+  const coins = store.scene!.objects.filter((o) => seeds.some((s) => s.id === o.id));
+  ok("unpacking leaves plain objects behind", coins.every((c) => !c.prefab));
+  for (const coin of coins) store.setObjectProp(coin.id, "data.value", 10);
 
+  // --- promote ---------------------------------------------------------
+  const before = store.project.prefabs.length;
   store.setSelection(coins.map((c) => c.id));
-  const prefab = store.createPrefab("Coin", ["data.value", "scaleX"], coins.map((c) => c.id));
-  ok("createPrefab writes a definition", !!prefab && store.project.prefabs.length === 1);
-  ok("selected objects became instances", store.scene!.objects.filter((o) => o.prefab === "Coin").length === 4);
+  const check = store.promoteCheck(coins.map((c) => c.id));
+  ok("siblings of one parent promote together", check.ok, check.reason ?? "");
+
+  const prefab = store.createPrefab({
+    name: "Coin",
+    objectId: check.root!.id,
+    exposed: ["data.value", "scaleX"],
+    siblingIds: check.siblings.map((o) => o.id),
+  });
+  ok("createPrefab writes a definition",
+     !!prefab && store.project.prefabs.length === before + 1);
+  ok("selected objects became instances",
+     store.scene!.objects.filter((o) => o.prefab === "Coin").length === 4);
+  ok("the definition's root carries a local id", !!prefab!.root!.lid);
+
 
   const first = store.scene!.objects.find((o) => o.prefab === "Coin")!;
   store.setObjectProp(first.id, "data.value", 25);
@@ -223,20 +291,228 @@ group("Workflow 5 — prefabs & instancing");
   ok("a non-exposed field is refused rather than silently written",
      store.scene!.objects.find((o) => o.id === first.id)!.originX !== 0.1);
 
-  // Editing the definition propagates everywhere except overridden fields.
-  store.updatePrefab("Coin", { data: { value: 50 } });
-  const instances = store.scene!.objects.filter((o) => o.prefab === "Coin");
-  const values = instances.map((o) => (resolveObject(store.project, o).data as { value: number }).value);
-  ok("untouched instances pick up the new definition value",
-     values.filter((v) => v === 50).length === 3, JSON.stringify(values));
-  ok("the overridden instance keeps its own value", values.filter((v) => v === 25).length === 1);
+  // --- isolate ---------------------------------------------------------
+  ok("prefab edit mode opens the definition as its own document", store.openPrefab("Coin"));
+  ok("the document IS the active scene", store.scene!.key === "prefab:Coin");
+  ok("the stage holds only the prefab", store.scene!.objects.length === 1);
+  ok("the underlying scene stays open", store.sceneBehind!.key === "Level_01");
+  ok("the document starts with its own clean undo stack", store.stack().depth === 0);
+
+  // Editing the definition does NOT touch the scenes until it is saved.
+  store.setObjectProp(store.prefabDoc!.rootId, "data", { value: 50 }, "Set value");
+  ok("the document is modified", store.isDirty("prefab:Coin"));
+  {
+    const untouched = store.project.scenes
+      .flatMap((sc) => sc.objects)
+      .filter((o) => o.prefab === "Coin" && !o.overrides?.["data.value"]);
+    ok("instances still resolve from the SAVED definition",
+       untouched.every((o) => (resolveObject(store.project, o).data as { value: number }).value === 10));
+  }
+
+  // --- propagate -------------------------------------------------------
+  const plan = store.planPrefabSave()!;
+  ok("saving plans before it writes", !!plan && !plan.unchanged);
+  ok("the plan counts what moves", plan.totals.moved === 3, String(plan.totals.moved));
+  ok("the plan counts what an instance keeps for itself", plan.totals.kept === 1,
+     String(plan.totals.kept));
+  ok("every consequence names where it lands",
+     plan.rows.every((r) => !!r.where && !!r.what));
+
+  store.pushPrefabSave();
+  {
+    const instances = store.project.scenes
+      .flatMap((sc) => sc.objects)
+      .filter((o) => o.prefab === "Coin");
+    const values = instances.map(
+      (o) => (resolveObject(store.project, o).data as { value: number }).value,
+    );
+    ok("untouched instances pick up the new definition value",
+       values.filter((v) => v === 50).length === 3, JSON.stringify(values));
+    ok("the overridden instance keeps its own value", values.filter((v) => v === 25).length === 1);
+  }
+  ok("the document is clean once pushed", !store.isDirty("prefab:Coin"));
+
+  // --- expose ----------------------------------------------------------
+  {
+    const held = () =>
+      store.project.scenes
+        .flatMap((sc) => sc.objects)
+        .filter((o) => o.prefab === "Coin" && "data.value" in (o.overrides ?? {})).length;
+
+    ok("an override is held against the exposed field", held() === 1);
+
+    const impact = store.unexposeImpact("data.value");
+    ok("unexposing states the cost first", impact.count === 1, String(impact.count));
+    ok("and names the scenes it would touch", impact.scenes.length === 1, impact.scenes.join());
+
+    store.toggleExposed("data.value");
+    store.planPrefabSave();
+    ok("the plan lists the override it would drop", store.ui.prefabPlan!.totals.dropped === 1);
+    ok("but nothing is dropped until it is pushed", held() === 1);
+
+    store.pushPrefabSave();
+    ok("pushing drops the override that can no longer be shown", held() === 0);
+
+    store.toggleExposed("data.value");
+    store.pushPrefabSave();
+    ok("re-exposing does not resurrect it — a dropped override is gone", held() === 0);
+  }
+
+  // --- skipped scenes ---------------------------------------------------
+  {
+    store.setObjectProp(store.prefabDoc!.rootId, "scaleY", 1.5, "Set scale");
+    const guarded = store.planPrefabSave((key) =>
+      key === "Level_01" ? "changed on disk since load" : null,
+    )!;
+    ok("a scene that cannot be written is marked skipped, with a reason",
+       guarded.scenes.some((sc) => sc.key === "Level_01" && !!sc.skipped));
+    ok("and the skip is listed as a consequence of its own",
+       guarded.rows.some((r) => r.kind === "skipped"));
+
+    const before = store.project.scenes
+      .flatMap((sc) => sc.objects)
+      .filter((o) => o.prefab === "Coin").length;
+    store.pushPrefabSave();
+    ok("pushing past a skipped scene leaves its instances alone",
+       store.project.scenes.flatMap((sc) => sc.objects).filter((o) => o.prefab === "Coin").length ===
+         before);
+  }
+
+  // --- variants --------------------------------------------------------
+  {
+    ok("a variant inherits rather than copying",
+       !!store.createVariant("Coin", "Coin_Gold"));
+    const variant = store.project.prefabs.find((p) => p.name === "Coin_Gold")!;
+    ok("a variant file has no tree of its own", !variant.root && variant.base === "Coin");
+
+    store.openPrefab("Coin_Gold");
+    store.setObjectProp(store.prefabDoc!.rootId, "scaleX", 2, "Set scale");
+    const def = store.prefabDocDef()!;
+    ok("a variant states only what differs",
+       Object.keys(def.diff ?? {}).join(",") === "scaleX", JSON.stringify(def.diff));
+    store.pushPrefabSave();
+
+    const gold = resolvePrefab(store.project, "Coin_Gold")!;
+    ok("the variant resolves its own claim", gold.root.scaleX === 2);
+    ok("and inherits everything else",
+       (gold.root.data as { value: number }).value === 50);
+    ok("the chain reads base first", gold.chain.join(" → ") === "Coin → Coin_Gold");
+
+    // A base change still flows through the fields the variant never claimed.
+    store.openPrefab("Coin");
+    store.setObjectProp(store.prefabDoc!.rootId, "data", { value: 99 }, "Set value");
+    store.pushPrefabSave();
+    ok("an unrelated base change reaches the variant",
+       (resolvePrefab(store.project, "Coin_Gold")!.root.data as { value: number }).value === 99);
+    ok("the variant keeps what it claimed",
+       resolvePrefab(store.project, "Coin_Gold")!.root.scaleX === 2);
+
+    ok("a variant of a variant is allowed", canInherit(store.project, "Coin_Gold", "Coin_Deep"));
+    store.createVariant("Coin_Gold", "Coin_Deep");
+    ok("but a third level is refused", !canInherit(store.project, "Coin_Deep", "Coin_Deeper"));
+    store.deletePrefab("Coin_Deep");
+  }
+
+  // --- back out --------------------------------------------------------
+  ok("leaving a clean document is allowed", store.closePrefab());
+  ok("the scene is the active document again", store.scene!.key === "Level_01");
 
   store.revertOverride(first.id, "data.value");
   ok("reverting an override relinks the field",
-     (resolveObject(store.project, store.scene!.objects.find((o) => o.id === first.id)!).data as { value: number }).value === 50);
+     (resolveObject(store.project, store.scene!.objects.find((o) => o.id === first.id)!).data as { value: number }).value === 99);
 
   store.unpackInstance(first.id);
   ok("unpacking makes it a plain object again", !store.scene!.objects.find((o) => o.id === first.id)!.prefab);
+  store.deletePrefab("Coin_Gold");
+}
+
+// -------------------------------------------- text, camera and sound as data
+group("Text, camera and sound are scene data");
+{
+  store.activateScene("Level_01");
+
+  // --- text ------------------------------------------------------------
+  const hudId = store.addText("SCORE 0")!;
+  const hud = store.scene!.objects.find((o) => o.id === hudId)!;
+  ok("a text object is an object like any other", hud.type === "text" && !!hud.text);
+  store.setObjectProp(hudId, "text.fixed", true);
+  store.setObjectProp(hudId, "text.fontSize", 18);
+  ok("its settings are scene data",
+     store.scene!.objects.find((o) => o.id === hudId)!.text!.fixed === true);
+
+  const withText = generateSceneClass(store.project, store.scene!);
+  ok("text is emitted as text, not skipped for having no texture",
+     withText.includes('this.add.text('), withText.slice(0, 200));
+  ok("a pinned HUD does not scroll with the level",
+     withText.includes(".setScrollFactor(0);"));
+
+  // --- camera ----------------------------------------------------------
+  const player = store.scene!.objects.find((o) => o.name.startsWith("Player"))!;
+  store.transact("Camera", () => {
+    store.scene!.settings.camera = {
+      follow: player.name,
+      lerpX: 0.1,
+      lerpY: 0.1,
+      zoom: 1,
+      clampToBounds: true,
+      deadzoneWidth: 200,
+      deadzoneHeight: 120,
+    };
+  });
+  const withCam = generateSceneClass(store.project, store.scene!);
+  ok("the camera follows what the scene says it follows",
+     withCam.includes("this.cameras.main.startFollow("), withCam);
+  ok("and its deadzone comes with it", withCam.includes("setDeadzone(200, 120)"));
+  ok("the follow call comes after the object it follows exists", (() => {
+    const lines = withCam.split("\n");
+    const target = lines.findIndex((l) => l.includes(`.setName("${player.name}")`));
+    const follow = lines.findIndex((l) => l.includes("startFollow("));
+    return target >= 0 && follow > target;
+  })());
+
+  store.transact("Camera", () => {
+    store.scene!.settings.camera!.follow = "NoSuchObject";
+  });
+  ok("a camera pointed at nothing is a validation error, not a silent no-op",
+     store.validate().some((i) => i.message.includes("NoSuchObject")));
+  store.transact("Camera", () => {
+    store.scene!.settings.camera!.follow = player.name;
+  });
+
+  // --- sound -----------------------------------------------------------
+  store.importAssets([
+    {
+      id: "asset-ping", key: "ping", kind: "audio", path: "assets/ping.wav",
+      url: "", width: 0, height: 0,
+    },
+  ]);
+  const chimeId = store.addObject({
+    type: "sprite",
+    name: "Chime",
+    x: 32,
+    y: 32,
+    texture: shapeTextureKey("circle"),
+    data: {},
+  })!;
+  store.setObjectProp(chimeId, "sounds.spawn", "ping");
+  ok("a sound cue is scene data",
+     store.scene!.objects.find((o) => o.id === chimeId)!.sounds?.spawn === "ping");
+  ok("and an exposed cue on an instance records an override",
+     (() => {
+       store.setObjectProp(player.id, "sounds.overlap", "ping");
+       return (store.scene!.objects.find((o) => o.id === player.id)!.overrides ?? {})[
+         "sounds.overlap"
+       ] === "ping";
+     })());
+  ok("audio a scene references is in its loader manifest",
+     collectLoaderManifest(store.project, store.scene!).some((e) => e.key === "ping"),
+     collectLoaderManifest(store.project, store.scene!).map((e) => e.key).join());
+
+  store.setObjectProp(chimeId, "sounds.spawn", "not_a_clip");
+  ok("a cue naming nothing is a validation error",
+     store.validate().some((i) => i.message.includes("not_a_clip")));
+  store.deleteObjects([hudId, chimeId]);
+  store.revertOverride(player.id, "sounds.overlap");
 }
 
 // ---------------------------------------------------------------- workflow 6
@@ -245,7 +521,7 @@ group("Workflow 6 — animation");
   store.upsertAnim({
     key: "hero_run",
     fps: 12,
-    loop: true,
+    repeat: -1,
     frames: [
       { textureKey: "hero", frame: "hero_00" },
       { textureKey: "hero", frame: "hero_01", duration: 250 },
@@ -253,10 +529,11 @@ group("Workflow 6 — animation");
   });
   ok("animations live in one keyed list", store.project.anims.length === 1);
 
-  const player = store.scene!.objects.find((o) => o.type === "player")!;
+  const player = store.scene!.objects.find((o) => o.prefab === "Player")!;
   store.setObjectProp(player.id, "playOnSpawn", "hero_run");
   ok("an object names the animation it plays on spawn",
-     store.scene!.objects.find((o) => o.id === player.id)!.playOnSpawn === "hero_run");
+     resolveObject(store.project, store.scene!.objects.find((o) => o.id === player.id)!)
+       .playOnSpawn === "hero_run");
 
   store.setObjectProp(player.id, "playOnSpawn", "does_not_exist");
   const issues = store.validate();
@@ -269,20 +546,32 @@ group("Workflow 6 — animation");
 // ---------------------------------------------------------------- workflow 7
 group("Workflow 7 — physics & collision");
 {
-  const player = store.scene!.objects.find((o) => o.type === "player")!;
-  ok("a template player ships with a body", !!player.body);
-  ok("body defaults derive from the type's bounds", defaultBody("player")!.height === 40);
+  const player = store.scene!.objects.find((o) => o.prefab === "Player")!;
+  ok("a template player ships with a body", !!resolveObject(store.project, player).body);
+  ok("body defaults derive from the object's own art",
+     bodyForSize(objectSize(store.project, resolveObject(store.project, player)))!.height === 40,
+     JSON.stringify(objectSize(store.project, resolveObject(store.project, player))));
 
   store.setObjectProp(player.id, "body.width", 22);
-  ok("the body is a section of the object", store.scene!.objects.find((o) => o.id === player.id)!.body!.width === 22);
+  ok("the body is a section of the object",
+     resolveObject(store.project, store.scene!.objects.find((o) => o.id === player.id)!)
+       .body!.width === 22);
 
   store.setCollisionRule("player", "pickup", "overlap");
   ok("the matrix is symmetric",
      store.project.collision.player.pickup === "overlap" && store.project.collision.pickup.player === "overlap");
 
-  store.addGroup("hazard");
+  store.addGroup("scenery");
   ok("a new group starts ignoring everything",
-     store.project.groups.includes("hazard") && store.project.collision.hazard.player === "ignore");
+     store.project.groups.includes("scenery") && store.project.collision.scenery.player === "ignore");
+
+  store.renameGroup("scenery", "backdrop");
+  ok("renaming a group carries the matrix with it",
+     !store.project.collision.scenery && store.project.collision.backdrop.player === "ignore");
+  store.removeGroup("backdrop");
+  ok("removing one takes its row and its column",
+     !store.project.groups.includes("backdrop") &&
+       Object.values(store.project.collision).every((row) => !("backdrop" in row)));
 }
 
 // ---------------------------------------------------------------- workflow 9
@@ -375,7 +664,7 @@ group("Prefabs become classes the scene actually constructs");
      code.includes(`this.physics.add.group([`) && code.includes(linkedVar));
 
   // Editing the definition must move every linked instance in the OUTPUT too.
-  store.updatePrefab(prefabName, { scaleX: 3 });
+  editPrefab(prefabName, { scaleX: 3 });
   const scaled = generateSceneClass(store.project, store.scene!);
   const scaledLinked = scaled
     .split("\n")
@@ -385,23 +674,23 @@ group("Prefabs become classes the scene actually constructs");
      scaledLinked.slice(0, 4).join(" | "));
   const cls = generatePrefabClass(store.project, prefabName);
   ok("the class carries the definition's scale instead", cls.includes("this.setScale(3"), cls);
-  store.updatePrefab(prefabName, { scaleX: 1 });
+  editPrefab(prefabName, { scaleX: 1 });
 
   // Animations: the class must not play before create() registers them.
-  store.upsertAnim({ key: "spin", fps: 8, loop: true, frames: [{ textureKey: "obj-coin", frame: "__BASE" }] });
-  store.updatePrefab(prefabName, { playOnSpawn: "spin" });
+  store.upsertAnim({ key: "spin", fps: 8, repeat: -1, frames: [{ textureKey: "obj-coin", frame: "__BASE" }] });
+  editPrefab(prefabName, { playOnSpawn: "spin" });
   const withAnim = generateSceneClass(store.project, store.scene!);
   const animClass = generatePrefabClass(store.project, prefabName);
   ok("the prefab constructor does not play the animation", !/this\.play\(/.test(animClass));
   ok("the scene plays it after anims.create",
      withAnim.lastIndexOf("this.anims.create") < withAnim.indexOf(".play(\"spin\")"));
-  store.updatePrefab(prefabName, { playOnSpawn: undefined });
+  editPrefab(prefabName, { playOnSpawn: undefined });
 
   // A body-less prefab is not an arcade sprite.
   const plain = store.scene!.objects.find((o) => !o.prefab && !o.body && o.type !== "container");
   if (plain) {
     store.setSelection([plain.id]);
-    store.createPrefab("Marker", [], [plain.id]);
+    store.createPrefab({ name: "Marker", objectId: plain.id, exposed: [] });
     const markerCls = generatePrefabClass(store.project, "Marker");
     ok("a prefab with no body extends GameObjects.Sprite",
        markerCls.includes("extends Phaser.GameObjects.Sprite"), markerCls.split("\n")[4]);
@@ -513,8 +802,12 @@ group("New project — the scaffold plan");
      !empty.writes.some((f) => f.rel.startsWith("src/prefabs/")));
 
   const noArt = planScaffold({ ...base, sampleArt: false });
-  ok("placeholder art is optional",
-     !noArt.writes.some((f) => f.rel.startsWith("assets/")));
+  ok("the optional SAMPLE art can be skipped",
+     !noArt.writes.some((f) => f.rel.includes("hero_sheet")));
+  ok("but the placeholder textures the manifest declares are always written",
+     noArt.writes.some((f) => f.rel === "assets/placeholder-tiles.png") &&
+       noArt.writes.some((f) => f.rel === "assets/shape-capsule.png"),
+     noArt.writes.filter((f) => f.rel.startsWith("assets/")).map((f) => f.rel).join());
 
   const noGit = planScaffold({ ...base, git: false });
   ok("gitignore follows the git option", !noGit.writes.some((f) => f.rel === ".gitignore"));
@@ -543,7 +836,13 @@ group("New project — the scaffold plan");
      plan.project.scenes[0].layers.length > 0 && plan.project.scenes[0].objects.length > 0);
 
   const art = plan.files.filter((f) => f.encoding === "base64");
-  ok("art is planned as binary, not as text", art.length === 2, String(art.length));
+  ok("art is planned as binary, not as text", art.length >= 7, String(art.length));
+  ok("every texture the exported scene loads exists on disk", (() => {
+    const written = new Set(plan.writes.map((f) => f.rel));
+    return plan.project.assets
+      .filter((a) => a.generated)
+      .every((a) => written.has(a.path));
+  })(), plan.project.assets.filter((a) => a.generated).map((a) => a.path).join());
 
   // Script components need three things on disk: the base class, a compiler
   // that accepts the decorator, and something to read.
@@ -553,10 +852,18 @@ group("New project — the scaffold plan");
   ok("and a tsconfig that accepts @property",
      JSON.parse(plan.files.find((f) => f.rel === "tsconfig.json")!.contents).compilerOptions
        .experimentalDecorators === true);
-  ok("the template's player opens with behaviour already attached", (() => {
-    const player = plan.project.scenes[0].objects.find((o) => o.type === "player");
-    return player?.scripts?.[0]?.class === "PlayerController";
+  ok("the template's player prefab opens with behaviour already attached", (() => {
+    const player = plan.project.prefabs.find((p) => p.name === "Player");
+    return player?.root?.scripts?.[0]?.class === "PlayerController";
   })());
+  ok("and every Player placed in the scene resolves it", (() => {
+    const placed = plan.project.scenes[0].objects.find((o) => o.prefab === "Player");
+    return !!placed && scriptsOf(resolveObject(plan.project, placed))[0]?.class === "PlayerController";
+  })());
+  ok("the starter prefabs are written as files of their own",
+     rels.includes("src/prefabs/Player.prefab.json") &&
+       rels.includes("src/prefabs/Pickup.prefab.json"),
+     rels.filter((r) => r.startsWith("src/prefabs/")).join());
   ok("the generated scene constructs it",
      plan.files.find((f) => f.rel === "src/scenes/Level_01.ts")!.contents.includes(
        "new PlayerController()",
@@ -692,6 +999,41 @@ class Helper extends ScriptComponent {}
      listed.join() === "src/scripts/fx/Shake.ts,src/scripts/PlayerController.ts", listed.join());
   ok("a scene class or a plain module is not a script file",
      !listed.some((f) => f.includes("main.ts") || f.includes("Level_01")), listed.join());
+  // Third-party projects are not written in Mosaic's brace style, and the
+  // parser used to lose the entire class body when they were not.
+  const allman = parseScriptFile(
+    "Door.js",
+    [
+      "export default class Door extends Phaser.GameObjects.Container",
+      "{",
+      "    constructor (name, scene, x, y)",
+      "    {",
+      "        super(scene, x, y);",
+      "    }",
+      "}",
+    ].join("\n"),
+  );
+  ok("a class with its brace on the next line is read, not discarded",
+     allman.classes.length === 1 && allman.classes[0].name === "Door",
+     JSON.stringify(allman.classes.map((c) => c.name)));
+  ok("its constructor signature is read as written, not assumed",
+     allman.classes[0]?.ctorParams?.join() === "name,scene,x,y",
+     JSON.stringify(allman.classes[0]?.ctorParams));
+  ok("and `export default` is recorded, because it changes the import",
+     allman.classes[0]?.isDefault === true);
+
+  const wrapped = parseScriptFile(
+    "W.ts",
+    "export class W {\n  constructor(\n    scene: Phaser.Scene,\n    opts = { a: 1, b: 2 },\n  ) {}\n}\n",
+  );
+  ok("parameters that wrap lines and carry object defaults still split cleanly",
+     wrapped.classes[0]?.ctorParams?.join() === "scene,opts",
+     JSON.stringify(wrapped.classes[0]?.ctorParams));
+
+  const noCtor = parseScriptFile("N.ts", "export class N extends Phaser.Scene {}\n");
+  ok("a class with no constructor says so, rather than claiming zero parameters",
+     noCtor.classes[0]?.ctorParams === null);
+
   ok("the panel lists every component a file declares, attachable or not", (() => {
     const file = componentFiles(projectIndex).find((f) => f.src.endsWith("PlayerController.ts"))!;
     // PlayerController, Base (abstract), Derived, Helper (not exported) — all
@@ -714,7 +1056,7 @@ class Helper extends ScriptComponent {}
 group("Script components — the scene stores values, the class stores fields");
 {
   store.activateScene("Level_01");
-  const objId = store.scene!.objects.find((o) => o.type === "player")!.id;
+  const objId = store.scene!.objects.find((o) => o.prefab === "Player")!.id;
   // Undo replaces the scene object wholesale, so the object is looked up by id
   // every time rather than held across an edit.
   const live = () => store.scene!.objects.find((o) => o.id === objId)!;
@@ -765,23 +1107,26 @@ group("Script components — the scene stores values, the class stores fields");
 
 group("Script components — prefab defines, instance overrides");
 {
-  const objId = store.scene!.objects.find((o) => o.type === "player")!.id;
+  const objId = store.scene!.objects.find((o) => o.prefab === "Player")!.id;
+  store.unpackInstance(objId);
   store.setSelection([objId]);
-  const prefab = store.createPrefab("ScriptedPlayer", ["scripts.0.props.moveSpeed"], [objId])!;
-  ok("the prefab definition carries the scripts", (prefab.root.scripts ?? []).length === 1);
+  const prefab = store.createPrefab({
+    name: "ScriptedPlayer",
+    objectId: objId,
+    exposed: ["scripts.0.props.moveSpeed"],
+  })!;
+  ok("the prefab definition carries the scripts", (prefab.root!.scripts ?? []).length === 1);
 
   const instance = store.scene!.objects.find((o) => o.prefab === "ScriptedPlayer")!;
   ok("the instance resolves its list from the definition", store.scriptsFor(instance).length === 1);
-  store.transact("smoke: edit the definition", () => {
-    prefab.root.scripts![0].props.jumpVelocity = -500;
-  });
+  editPrefab("ScriptedPlayer", { "scripts.0.props.jumpVelocity": -500 });
   ok("editing the definition reaches every instance",
      store.scriptsFor(instance)[0].props.jumpVelocity === -500);
 
   store.setScriptProp(instance.id, 0, "moveSpeed", 220);
   ok("a value edit on an instance records an override, not an edit to the prefab",
      instance.overrides?.["scripts.0.props.moveSpeed"] === 220 &&
-       (prefab.root.scripts?.[0].props.moveSpeed === undefined),
+       (prefab.root!.scripts?.[0].props.moveSpeed === undefined),
      JSON.stringify(instance.overrides));
   ok("and resolution puts it back on top of the definition",
      store.scriptsFor(instance)[0].props.moveSpeed === 220);
@@ -802,18 +1147,471 @@ group("Script components — prefab defines, instance overrides");
   ok("and the per-value overrides are folded in rather than applied twice",
      !Object.keys(instance.overrides ?? {}).some((k) => k.startsWith("scripts.")),
      Object.keys(instance.overrides ?? {}).join());
-  ok("the prefab is untouched by any of it", (prefab.root.scripts ?? []).length === 1);
+  ok("the prefab is untouched by any of it", (prefab.root!.scripts ?? []).length === 1);
 
   store.applyInstanceToPrefab(instance.id);
   ok("apply pushes the instance's list up into the definition",
-     (store.project.prefabs.find((p) => p.name === "ScriptedPlayer")!.root.scripts ?? []).length === 2);
+     (store.project.prefabs.find((p) => p.name === "ScriptedPlayer")!.root!.scripts ?? []).length === 2);
   store.deletePrefab("ScriptedPlayer");
+}
+
+group("Prefabs are files — the folder round trip");
+{
+  // Everything so far lives only in the store. A prefab is a file, so it has
+  // to survive being written out and read back with nothing lost.
+  const store2 = new ProjectStore();
+  const objId = store2.scene!.objects.find((o) => o.prefab === "Pickup")!.id;
+  store2.unpackInstance(objId);
+  store2.createPrefab({ name: "Trinket", objectId: objId, exposed: ["data.value"] });
+  store2.createVariant("Trinket", "Trinket_Rare");
+  store2.openPrefab("Trinket_Rare");
+  store2.setObjectProp(store2.prefabDoc!.rootId, "scaleX", 1.5, "Set scale");
+  store2.pushPrefabSave();
+  store2.closePrefab(true);
+
+  const files = projectToFiles(store2.project);
+  const prefabFiles = files.filter((f) => f.rel.startsWith("src/prefabs/"));
+  ok("each prefab is written as its own file",
+     prefabFiles.length === store2.project.prefabs.length,
+     prefabFiles.map((f) => f.rel).join());
+  ok("the base file carries the tree",
+     !!JSON.parse(prefabFiles.find((f) => f.rel.endsWith("Trinket.prefab.json"))!.contents).root);
+  {
+    const variant = JSON.parse(
+      prefabFiles.find((f) => f.rel.endsWith("Trinket_Rare.prefab.json"))!.contents,
+    );
+    ok("the variant file carries a base and a diff, not a second tree",
+       !variant.root && variant.base === "Trinket" && Object.keys(variant.diff).join() === "scaleX",
+       JSON.stringify(variant));
+  }
+
+  const manifest = JSON.parse(files.find((f) => f.rel === MANIFEST_PATH)!.contents);
+  ok("the manifest records which file each prefab is authored in",
+     manifest.prefabs.every((p: { file?: string }) => !!p.file),
+     JSON.stringify(manifest.prefabs.map((p: { file?: string }) => p.file)));
+  ok("and carries the definitions too, because it is the runtime's payload", (() => {
+    // A game importing the manifest has no filesystem to go and read the
+    // per-prefab files with; an index of filenames left every instance in the
+    // scene unresolvable.
+    const base = manifest.prefabs.find((p: { name: string }) => p.name === "Trinket");
+    const variant = manifest.prefabs.find((p: { name: string }) => p.name === "Trinket_Rare");
+    return !!base?.root && variant?.base === "Trinket" && !!variant?.diff;
+  })(), JSON.stringify(manifest.prefabs.map((p: { name: string }) => p.name)));
+
+  const reopened = projectFromSource(
+    {
+      root: "/smoke",
+      manifest: files.find((f) => f.rel === MANIFEST_PATH)!.contents,
+      config: files.find((f) => f.rel === CONFIG_PATH)!.contents,
+      scenes: files.filter((f) => f.rel.endsWith(".scene.json")),
+      prefabs: prefabFiles,
+      assets: [],
+    },
+    "smoke",
+    (rel) => rel,
+  );
+  ok("reopening the folder finds every prefab",
+     reopened.project.prefabs.length === store2.project.prefabs.length,
+     reopened.project.prefabs.map((p) => p.name).join());
+  ok("and the variant still resolves through its base",
+     resolvePrefab(reopened.project, "Trinket_Rare")!.root.scaleX === 1.5);
+  ok("local ids survive the round trip",
+     resolvePrefab(reopened.project, "Trinket")!.root.lid ===
+       resolvePrefab(store2.project, "Trinket")!.root.lid);
+
+  // A folder written by an older build kept definitions in the manifest.
+  const legacy = projectFromSource(
+    {
+      root: "/smoke",
+      manifest: JSON.stringify({ ...manifest, prefabs: store2.project.prefabs }),
+      config: files.find((f) => f.rel === CONFIG_PATH)!.contents,
+      scenes: files.filter((f) => f.rel.endsWith(".scene.json")),
+      prefabs: [],
+      assets: [],
+    },
+    "smoke",
+    (rel) => rel,
+  );
+  ok("a folder with inlined definitions still opens",
+     legacy.project.prefabs.length === store2.project.prefabs.length);
+  ok("and says the definitions are being moved into files",
+     legacy.issues.some((i) => i.includes("own file")), legacy.issues.join(" | "));
+
+  // Opening a folder that holds art but nothing of ours scaffolds a starter.
+  // The art still belongs to the project: it used to be skipped on the way in
+  // and only noticed on the NEXT open, which made the first open silently
+  // lossy and the manifest it wrote disagree with the disk.
+  const dropped = projectFromSource(
+    // Art only: no source here, so this folder is still ours to scaffold into.
+    { root: "/smoke", manifest: null, config: null, scenes: [], prefabs: [],
+      assets: [{ rel: "assets/hero.png", bytes: 128 }], occupied: false },
+    "dropped-art",
+    (rel) => rel,
+  );
+  ok("a folder with art but no project of ours is scaffolded", dropped.scaffolded);
+  ok("and being art-only, it is still written straight away", dropped.deferWrite === false);
+
+  // Opening somebody's Phaser repo used to drop five files into it and show a
+  // starter scene where their game should be. A project Mosaic cannot read is
+  // indistinguishable from an empty folder at this point, so the folder itself
+  // has to say whether anything is already there.
+  const occupied = projectFromSource(
+    { root: "/smoke", manifest: null, config: null, scenes: [], prefabs: [], assets: [],
+      occupied: true },
+    "bank panic",
+    (rel) => rel,
+  );
+  ok("someone else's codebase still gets a starter to look at", occupied.scaffolded === true);
+  ok("but every write to it is held back", occupied.deferWrite === true);
+  ok("and it says nothing was written, rather than failing silently",
+     occupied.issues.some((i) => i.includes("WITHOUT writing anything")), occupied.issues.join(" | "));
+  ok("the editor still gets a usable scene rather than opening blank",
+     occupied.project.scenes.length > 0 && occupied.project.name === "bank panic");
+
+  ok("and the art on disk comes in with it, on the FIRST open",
+     dropped.project.assets.some((a) => a.path === "assets/hero.png" && !a.generated),
+     dropped.project.assets.map((a) => a.key).join());
+  ok("the placeholders are still there beside it",
+     dropped.project.assets.filter((a) => a.generated).length > 0);
+
+  // The scaffold writes a manifest immediately, so reopening must reconcile
+  // that art against itself rather than mint a second key for the same file.
+  const reopenedScaffold = projectFromSource(
+    { root: "/smoke", manifest: JSON.stringify(toManifest(dropped.project)), config: null,
+      scenes: projectToFiles(dropped.project).filter((f) => f.rel.endsWith(".scene.json")),
+      // The scaffold's save writes the prefab files too, so the reopen has to
+      // be handed them — passing none would exercise the legacy inline path
+      // instead of the one this is about.
+      prefabs: projectToFiles(dropped.project).filter((f) => f.rel.endsWith(".prefab.json")),
+      assets: [{ rel: "assets/hero.png", bytes: 128 }] },
+    "dropped-art",
+    (rel) => rel,
+  );
+  ok("reopening it keeps one key for the one file, not two",
+     reopenedScaffold.project.assets.filter((a) => a.path === "assets/hero.png").length === 1,
+     reopenedScaffold.project.assets.map((a) => a.key).join());
+  ok("and reports nothing missing from disk", reopenedScaffold.issues.length === 0,
+     reopenedScaffold.issues.join(" | "));
+}
+
+group("Binding an import to the project's own classes");
+{
+  const known = [
+    { name: "Door", src: "Door.js", isDefault: true, ctorParams: ["name", "scene", "x", "y"] },
+    { name: "Snowman", src: "Snowman.js", isDefault: true, ctorParams: ["scene", "track", "size"] },
+    { name: "Ghost", src: "Ghost.js", isDefault: false, ctorParams: null },
+  ];
+  const out = sceneFromRecording(
+    {
+      sceneKey: "MainGame",
+      settings: { canvas: { w: 800, h: 600 } },
+      anims: [],
+      loads: [],
+      objects: [
+        obj({ kind: "Door", name: "Door1", x: 144, y: 352 }),
+        obj({ kind: "Door", name: "Door2", x: 388, y: 352 }),
+        obj({ kind: "Image", parent: "Door1", texture: "assets", frame: "doorBackground" }),
+        obj({ kind: "Snowman", x: 80, y: 196, texture: "sprites", frame: "s0" }),
+      ],
+    },
+    known,
+  );
+
+  const door = out.prefabCandidates.find((c) => c.className === "Door")!;
+  ok("a class whose constructor a snapshot CAN satisfy is bound", !!door.bound, JSON.stringify(door));
+  ok("bound to the module it is actually declared in, as a default export",
+     door.bound?.module === "Door.js" && door.bound.export === "default");
+  ok("and its real signature is carried, not a presumed (scene, x, y)",
+     door.bound?.params.join() === "name,scene,x,y", JSON.stringify(door.bound?.params));
+
+  const snowman = out.prefabCandidates.find((c) => c.className === "Snowman")!;
+  ok("a constructor wanting things a snapshot cannot know is NOT bound", !snowman.bound);
+  ok("and it says which parameters stopped it",
+     snowman.blockedBy?.join() === "track,size", JSON.stringify(snowman.blockedBy));
+  ok("that refusal is surfaced rather than silently downgraded",
+     out.issues.some((i) => i.includes("Snowman takes track, size")), out.issues.join(" | "));
+
+  ok("a prefab is created for the bound class only",
+     out.prefabs.map((p) => p.name).join() === "Door", out.prefabs.map((p) => p.name).join());
+  ok("its instances point at it", (() => {
+    const doors = out.scene.objects.filter((o) => o.prefab === "Door");
+    return doors.length === 2;
+  })(), JSON.stringify(out.scene.objects.map((o) => `${o.name}:${o.prefab ?? "-"}`)));
+  ok("the unbound one stays a plain sprite, still importable",
+     out.scene.objects.some((o) => o.texture === "sprites" && !o.prefab));
+  ok("children the class builds for itself are not ALSO placed by the scene", (() => {
+    // Door's constructor adds its own background; importing it twice would
+    // draw it twice and leave an orphan the prefab does not own.
+    return !out.scene.objects.some((o) => o.frame === "doorBackground");
+  })(), JSON.stringify(out.scene.objects.map((o) => o.name)));
+}
+
+group("Export constructs the project's own class");
+{
+  const proj = createStarterProject();
+  proj.prefabs.push({
+    name: "Door",
+    exposed: [],
+    source: { module: "Door.js", export: "default", params: ["name", "scene", "x", "y"] },
+    root: { lid: "d1", name: "Door", type: "sprite", x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1,
+            originX: 0.5, originY: 0.5, visible: true, data: {}, children: [] },
+  });
+  const scene = proj.scenes[0];
+  const layer = scene.layers.find((l) => l.kind === "object")!;
+  scene.objects.push({
+    id: "door-1", name: "Door1", type: "container", layerId: layer.id, parentId: null,
+    x: 144, y: 352, rotation: 0, scaleX: 1, scaleY: 1, originX: 0.5, originY: 0.5,
+    visible: true, prefab: "Door", data: {},
+  });
+
+  const files = generateFiles(proj, scene, "tsSceneClass");
+  const sceneFile = files.find((f) => f.path.includes("scenes/"))!.contents;
+
+  ok("the scene imports the project's own module, not a generated lookalike",
+     sceneFile.includes('import Door from "../../Door.js";'),
+     sceneFile.split("\n").filter((l) => l.startsWith("import")).join(" | "));
+  ok("and constructs it with the signature that class actually declares",
+     sceneFile.includes('new Door("Door1", this, 144, 352)'),
+     sceneFile.split("\n").find((l) => l.includes("new Door")) ?? "(no call)");
+  ok("no class file is written over the one the project already owns",
+     !files.some((f) => f.path === "src/prefabs/Door.ts"),
+     files.map((f) => f.path).join());
+
+  // A bound prefab is frequently a Container with no texture of its own; the
+  // guards that ask "is there anything to draw" must not eat it.
+  ok("a textureless container instance is still emitted, because its class draws it",
+     (sceneFile.match(/new Door\(/g) ?? []).length === 1);
+
+  // An unbound prefab keeps the old behaviour exactly.
+  proj.prefabs.push({
+    name: "Plain", exposed: [],
+    root: { lid: "p1", name: "Plain", type: "sprite", x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1,
+            originX: 0.5, originY: 0.5, visible: true, texture: shapeTextureKey("box"), data: {}, children: [] },
+  });
+  scene.objects.push({
+    id: "plain-1", name: "Plain1", type: "sprite", layerId: layer.id, parentId: null,
+    x: 10, y: 20, rotation: 0, scaleX: 1, scaleY: 1, originX: 0.5, originY: 0.5,
+    visible: true, prefab: "Plain", data: {},
+  });
+  const files2 = generateFiles(proj, scene, "tsSceneClass");
+  const scene2 = files2.find((f) => f.path.includes("scenes/"))!.contents;
+  ok("an unbound prefab is still generated and constructed as (scene, x, y)",
+     scene2.includes("new Plain(this, 10, 20)") &&
+     files2.some((f) => f.path === "src/prefabs/Plain.ts"),
+     scene2.split("\n").find((l) => l.includes("new Plain")) ?? "(no call)");
+}
+
+group("The project's source, as the panel sees it");
+{
+  // A project written before Mosaic has no ScriptComponent anywhere, and the
+  // panel that only listed those showed an empty list beside a folder full of
+  // code — which read as "the editor found nothing".
+  const phaserProject = buildIndex([
+    parseScriptFile("Boot.js", "export default class Boot extends Phaser.Scene\n{\n  create () {}\n}\n"),
+    parseScriptFile("Door.js", "export default class Door extends Phaser.GameObjects.Container\n{\n  constructor (name, scene, x, y) {}\n}\n"),
+  ]);
+
+  ok("the component list is empty for a project with no components",
+     componentFiles(phaserProject).length === 0);
+  ok("but the source inventory has every file", sourceFiles(phaserProject).length === 2,
+     sourceFiles(phaserProject).map((f) => f.src).join());
+  ok("with the classes in them, so the panel can say what each one is", (() => {
+    const door = sourceFiles(phaserProject).find((f) => f.src === "Door.js")!;
+    return door.classes.length === 1 && door.classes[0].name === "Door" &&
+      door.classes[0].base === "Phaser.GameObjects.Container";
+  })());
+  ok("and it reports none of them as attachable, because none are",
+     sourceFiles(phaserProject).every((f) => f.components.length === 0));
+
+  // A Mosaic project keeps the old answer exactly.
+  const mosaicProject = buildIndex([
+    parseScriptFile("src/scripts/Patrol.ts", "export class Patrol extends ScriptComponent {}\n"),
+    parseScriptFile("src/main.ts", "const game = 1;\nexport default game;\n"),
+  ]);
+  ok("a Mosaic project still lists its components as before",
+     componentFiles(mosaicProject).map((f) => f.src).join() === "src/scripts/Patrol.ts");
+  ok("while the inventory also shows the file that declares nothing at all",
+     sourceFiles(mosaicProject).length === 2 &&
+     sourceFiles(mosaicProject).some((f) => f.src === "src/main.ts"),
+     sourceFiles(mosaicProject).map((f) => f.src).join());
+  // The entry point that constructs the game usually declares no class, and it
+  // is the file RUN needs most.
+  ok("a file with no classes is listed, with none, rather than omitted",
+     sourceFiles(mosaicProject).find((f) => f.src === "src/main.ts")?.classes.length === 0);
+}
+
+group("Choosing which file starts the game");
+{
+  // findGameEntries lives in the main process, but the ordering it applies is
+  // the thing that decides what RUN does by default, so the rule is pinned
+  // here against the shapes real projects have.
+  const rank = (rel: string): number => {
+    const base = rel.split("/").pop() ?? rel;
+    const stem = base.replace(/\.\w+$/, "").toLowerCase();
+    if (stem === "main") return 0;
+    if (stem === "index") return 1;
+    if (stem === "game") return 2;
+    return 3;
+  };
+  const order = (rels: string[]): string[] =>
+    [...rels].sort(
+      (a, b) => rank(a) - rank(b) || a.split("/").length - b.split("/").length || a.localeCompare(b),
+    );
+
+  ok("a conventional entry wins over one that merely sorts earlier",
+     order(["built-main.js", "main.js"])[0] === "main.js",
+     order(["built-main.js", "main.js"]).join());
+  ok("and over one nearer the root, because the name is the stronger signal",
+     order(["alt.js", "src/main.js"])[0] === "src/main.js",
+     order(["alt.js", "src/main.js"]).join());
+  ok("shallower wins when neither name is conventional",
+     order(["deep/nested/boot.js", "boot.js"])[0] === "boot.js");
+  ok("the order is total, so the default never depends on directory listing order",
+     order(["b.js", "a.js"]).join() === "a.js,b.js");
+}
+
+group("One binding plan, two consumers");
+{
+  // The exporter turns a plan into source text; the play-test turns the same
+  // plan into values. If those ever disagreed the editor would show one thing
+  // and the shipped game would do another, so both go through bindArgs.
+  const plan = bindArgs(["name", "scene", "x", "y"])!;
+  ok("a satisfiable signature yields a plan", !!plan && plan.length === 4);
+  ok("filled in the order the constructor declares", (() => {
+    const values = boundArgValues(plan, {
+      scene: "SCENE", x: 144, y: 352, name: "Door1", texture: "assets", frame: "door1",
+    });
+    return JSON.stringify(values) === JSON.stringify(["Door1", "SCENE", 144, 352]);
+  })(), JSON.stringify(boundArgValues(plan, {
+    scene: "SCENE", x: 144, y: 352, name: "Door1", texture: "assets", frame: "door1",
+  })));
+
+  const sheet = bindArgs(["scene", "x", "y", "key", "frame"])!;
+  ok("key and frame map to the texture the instance draws with", (() => {
+    const values = boundArgValues(sheet, {
+      scene: "S", x: 1, y: 2, name: "n", texture: "atlas", frame: "hero",
+    });
+    return JSON.stringify(values) === JSON.stringify(["S", 1, 2, "atlas", "hero"]);
+  })());
+
+  ok("an unsatisfiable signature yields no plan at all", bindArgs(["scene", "track", "size"]) === null);
+  ok("and names exactly what it could not fill",
+     unbindableParams(["scene", "track", "size"]).join() === "track,size");
+}
+
+group("Exporting into a scene the project already owns");
+{
+  const proj = createStarterProject();
+  proj.prefabs.push({
+    name: "Door", exposed: [],
+    source: { module: "Door.js", export: "default", params: ["name", "scene", "x", "y"] },
+    root: { lid: "d2", name: "Door", type: "sprite", x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1,
+            originX: 0.5, originY: 0.5, visible: true, data: {}, children: [] },
+  });
+  const scene = proj.scenes[0];
+  const layer = scene.layers.find((l) => l.kind === "object")!;
+  scene.objects.push({
+    id: "d-1", name: "Door1", type: "container", layerId: layer.id, parentId: null,
+    x: 144, y: 352, rotation: 0, scaleX: 1, scaleY: 1, originX: 0.5, originY: 0.5,
+    visible: true, prefab: "Door", data: {},
+  });
+
+  const mod = generateFiles(proj, scene, "tsSceneModule").find((f) => f.path.endsWith(".objects.ts"))!;
+
+  ok("the module form does not declare a Phaser.Scene of its own",
+     !mod.contents.includes("extends Phaser.Scene"),
+     mod.contents.split("\n").find((l) => l.includes("class")) ?? "(no class)");
+  ok("it exports a builder the project's own create() can call",
+     mod.contents.includes("export function build") && mod.contents.includes("export function preload"));
+  ok("the bodies are invoked with the caller's scene as `this`",
+     mod.contents.includes("buildBody.call(host)"));
+  ok("so the emitted lines are the same ones the class form uses, unrewritten",
+     mod.contents.includes('new Door("Door1", this, 144, 352)'),
+     mod.contents.split("\n").find((l) => l.includes("new Door")) ?? "(no call)");
+  ok("the maps are attached to that scene, so `this.objects` resolves",
+     mod.contents.includes("host.objects ??= {}"));
+  ok("and there is no update() — the project's scene owns its own loop",
+     !mod.contents.includes("update(_time"));
+
+  // The class form must be untouched by all of this.
+  const cls = generateFiles(proj, scene, "tsSceneClass").find((f) => f.path.endsWith("Scene.ts"))!;
+  ok("the owning form still emits a Scene subclass with its own update()",
+     cls.contents.includes("extends Phaser.Scene") && cls.contents.includes("update(_time"));
+  ok("and both forms construct the bound class identically",
+     cls.contents.includes('new Door("Door1", this, 144, 352)'));
+
+  // An atlas is two files and the generated loader names both.
+  const atlasProj = createStarterProject();
+  atlasProj.assets.push({
+    id: "asset-sheet", key: "sheet", kind: "atlas", path: "assets/sheet.png", url: "",
+    width: 128, height: 64,
+    frames: [{ name: "hero", x: 0, y: 0, w: 32, h: 32, pivotX: 0.5, pivotY: 0.5 }],
+  });
+  const atlasScene = atlasProj.scenes[0];
+  atlasScene.objects.push({
+    id: "a-1", name: "Hero", type: "sprite", layerId: atlasScene.layers.find((l) => l.kind === "object")!.id,
+    parentId: null, x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, originX: 0.5, originY: 0.5,
+    visible: true, texture: "sheet", frame: "hero", data: {},
+  });
+  const atlasFiles = generateFiles(atlasProj, atlasScene, "tsSceneClass");
+  const sidecar = atlasFiles.find((f) => f.path === "assets/sheet.atlas.json");
+  ok("an atlas's sidecar JSON is written, not just referenced", !!sidecar,
+     atlasFiles.map((f) => f.path).join());
+  ok("in the JSON-hash shape Phaser's loader reads", (() => {
+    if (!sidecar) return false;
+    const json = JSON.parse(sidecar.contents);
+    const f = json.frames?.hero;
+    return f?.frame?.w === 32 && json.meta?.size?.w === 128;
+  })(), sidecar?.contents.slice(0, 90));
+}
+
+group("Importing into a project that already has one");
+{
+  const base = createStarterProject();
+  const imported = sceneFromRecording({
+    sceneKey: "MainGame",
+    settings: { canvas: { w: 800, h: 600 }, gameBackgroundColor: "#2e91f3" },
+    anims: [{ key: "idle", frameRate: 8, repeat: -1, frames: [{ textureKey: "a", frame: "i0" }] }],
+    loads: [{ method: "image", args: ["hero", "hero.png"], path: "art/" }],
+    textures: [{ key: "hero", width: 32, height: 32, dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", frames: [] }],
+    objects: [obj({ kind: "Sprite", name: "Hero", x: 10, y: 20, texture: "hero" })],
+  });
+
+  const notes = applyImport(base, imported);
+  ok("the imported scene is ADDED, never swapped in for what was there",
+     base.scenes.length === 2 && base.scenes.some((s) => s.key === "Level_01"),
+     base.scenes.map((s) => s.key).join());
+  ok("its animations come with it", base.anims.some((a) => a.key === "idle"));
+  ok("and its assets do too", base.assets.some((a) => a.key === "hero"), base.assets.map((a) => a.key).join());
+  ok("the notes say what was added", notes.some((n) => n.includes("asset reference")), notes.join(" | "));
+  ok("the captured art comes along as files to write",
+     imported.files.some((f) => f.rel === "assets/imported/hero.png"), imported.files.map((f) => f.rel).join());
+
+  // Importing the same scene twice is a thing people do — usually after
+  // editing the game and wanting the new version beside the old one.
+  const again = applyImport(base, imported);
+  ok("importing the same scene twice keeps both", base.scenes.length === 3,
+     base.scenes.map((s) => s.key).join());
+  ok("the second gets a fresh key rather than clobbering the first",
+     new Set(base.scenes.map((s) => s.key)).size === 3, base.scenes.map((s) => s.key).join());
+  ok("and it says so", again.some((n) => n.includes("already taken")), again.join(" | "));
+  ok("assets and anims are not duplicated on the way in",
+     base.assets.filter((a) => a.key === "hero").length === 1 &&
+     base.anims.filter((a) => a.key === "idle").length === 1);
 }
 
 group("Script components — export wires them up");
 {
   const scene = store.scene!;
-  const obj = scene.objects.find((o) => o.type === "player")!;
+  const objId = store.addObject({
+    type: "sprite",
+    name: "Hero",
+    x: 64,
+    y: 64,
+    texture: shapeTextureKey("capsule"),
+    data: {},
+  })!;
+  const obj = scene.objects.find((o) => o.id === objId)!;
   store.transact("smoke: scripts for codegen", () => {
     obj.scripts = [
       { class: "PlayerController", src: "src/scripts/PlayerController.ts", enabled: true, props: { moveSpeed: 220 } },
@@ -827,7 +1625,7 @@ group("Script components — export wires them up");
   ok("the base class is imported from the project's own source",
      code.includes('import { ScriptHost } from "../scripts/ScriptComponent";'), code.slice(0, 400));
   ok("values authored in the editor are passed to the constructor",
-     code.includes('this.scripts.add(player, new PlayerController(), { "moveSpeed": 220 });'), code);
+     code.includes('this.scripts.add(hero, new PlayerController(), { "moveSpeed": 220 });'), code);
   ok("a disabled script is still constructed, and says so",
      code.includes('new FootstepAudio(), {}, false)'), code);
   ok("two classes of one name are imported under distinct aliases",
@@ -879,6 +1677,159 @@ group("Identity — the app icon is the mark");
   const tinted = mosaicIconBitmap(64, { field: REVERSED, mark: FIELD });
   ok("the palette is a parameter, not a constant",
      pixelAt(tinted, 2, 2).slice(0, 3).join() === REVERSED.join());
+}
+
+group("Importing a hand-written Phaser scene");
+{
+  // A genuine excerpt of a recording taken from the Phaser examples' "snowmen
+  // attack" — a project written with no thought of this editor. Every value
+  // below came off the real snapshot: the pooled snowballs it parks at the
+  // origin, the full-screen overlay that legitimately sits there too, the
+  // atlas frame names, and a loader that pulls everything from a CDN.
+  const rec: Recording = {
+    sceneKey: "MainGame",
+    settings: {
+      // What an untouched camera really reports: valid black, at alpha 0.
+      backgroundColor: "#000000",
+      backgroundColorAlpha: 0,
+      gameBackgroundColor: "rgba(51,102,178,1)",
+      canvas: { w: 1024, h: 768 },
+      worldBounds: { w: 1024, h: 768 },
+      gravityY: 0,
+    },
+    anims: [
+      { key: "idle", frameRate: 8, repeat: -1, yoyo: true,
+        frames: [0, 1, 2, 3].map((n) => ({ textureKey: "sprites", frame: `idle00${n}` })) },
+      { key: "die", frameRate: 24, repeat: 0,
+        frames: [{ textureKey: "sprites", frame: "die000" }] },
+    ],
+    loads: [
+      { method: "image", args: [["background", "overlay", "title"]],
+        path: "assets/games/snowmen-attack/", baseURL: "https://cdn.phaserfiles.com/v385" },
+      { method: "atlas", args: ["sprites", "sprites.png", "sprites.json"],
+        path: "assets/games/snowmen-attack/", baseURL: "https://cdn.phaserfiles.com/v385" },
+      { method: "glsl", args: ["snow", "snow.frag"], path: "assets/games/snowmen-attack/" },
+      { method: "audio", args: ["music", ["music.ogg", "music.m4a", "music.mp3"]],
+        path: "assets/games/snowmen-attack/sounds/" },
+    ],
+    // What the loader actually resolved. This is the half that survives a CDN
+    // base URL — the paths above never existed on this machine.
+    textures: [
+      { key: "background", width: 1024, height: 768, dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", frames: [] },
+      { key: "sprites", width: 1007, height: 955, dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", frames: [
+        { name: "idle000", x: 0, y: 0, w: 48, h: 96, pivotX: 0.5, pivotY: 0.5 },
+        { name: "snowman-big-idle0", x: 48, y: 0, w: 64, h: 64, pivotX: 0.5, pivotY: 0.5 },
+      ] },
+    ],
+    objects: [
+      obj({ kind: "Image", x: 512, y: 384, texture: "background" }),
+      // Visible, and parked exactly where the pool is. It is content.
+      obj({ kind: "Image", x: 0, y: 0, texture: "overlay" }),
+      obj({ kind: "Snowman", x: -100, y: 196, depth: 1, texture: "sprites",
+            frame: "snowman-big-idle0", anim: "snowmanIdleBig",
+            body: { w: 64, h: 64, immovable: true, allowGravity: false, collideWorldBounds: false } }),
+      obj({ kind: "Snowman", x: 80, y: 196, depth: 1, texture: "sprites", frame: "snowman-small-idle0" }),
+      obj({ kind: "Player", x: 900, y: 196, depth: 2, texture: "sprites", frame: "idle000", anim: "idle",
+            body: { w: 48, h: 96, immovable: false, allowGravity: false, collideWorldBounds: true, bounceX: 0.2 } }),
+      obj({ kind: "Text", x: 140, y: 2, depth: 3, texture: "72cc4a33-uuid-canvas", text: "0" }),
+      // The pool: switched off, waiting to be thrown.
+      ...Array.from({ length: 6 }, () =>
+        obj({ kind: "PlayerSnowball", x: 0, y: 0, visible: false, texture: "sprites", frame: "snowball2" })),
+    ],
+  };
+
+  const out = sceneFromRecording(rec);
+  const names = out.scene.objects.map((o) => o.name);
+
+  ok("the object pool is left out", out.scene.objects.length === 6, names.join());
+  ok("and says so rather than dropping them silently",
+     out.issues.some((i) => i.includes("6 hidden object")), out.issues.join(" | "));
+  ok("a VISIBLE object at the origin is kept — it is an overlay, not a pooled one",
+     out.scene.objects.some((o) => o.texture === "overlay"), names.join());
+
+  ok("distinct depths become distinct layers", out.scene.layers.length === 4,
+     out.scene.layers.map((l) => l.name).join());
+  ok("and each object lands on the layer its depth named", (() => {
+    const player = out.scene.objects.find((o) => o.texture === "sprites" && o.frame === "idle000")!;
+    const depth2 = out.scene.layers[out.scene.layers.findIndex((l) => l.name === "Depth 2")];
+    return player.layerId === depth2.id;
+  })());
+
+  // Nothing in this project ever calls setName().
+  ok("unnamed objects are named after the class they were built from",
+     names.some((n) => n.startsWith("Snowman")) && names.some((n) => n.startsWith("Player")), names.join());
+  ok("and the names are unique, because they key the scene's objects map",
+     new Set(names).size === names.length, names.join());
+
+  const text = out.scene.objects.find((o) => o.type === "text")!;
+  ok("a Text object keeps its content", text.text?.content === "0");
+  ok("and NOT the uuid canvas Phaser minted for it", text.texture === undefined, String(text.texture));
+
+  ok("the scene falls back to the game config's colour when the camera has none",
+     out.scene.settings.backgroundColor === "#3366b2", out.scene.settings.backgroundColor);
+
+  const player = out.scene.objects.find((o) => o.frame === "idle000")!;
+  ok("bodies come across with their real measured size",
+     player.body?.width === 48 && player.body?.height === 96, JSON.stringify(player.body));
+  ok("and the animation that was playing becomes playOnSpawn", player.playOnSpawn === "idle");
+
+  ok("animations import whole", (() => {
+    const idle = out.anims.find((a) => a.key === "idle")!;
+    return idle.fps === 8 && idle.repeat === -1 && idle.yoyo === true && idle.frames.length === 4 &&
+      idle.frames[0].textureKey === "sprites" && idle.frames[0].frame === "idle000";
+  })(), JSON.stringify(out.anims[0]));
+
+  const keys = out.assets.map((a) => a.key);
+  ok("only assets whose pixels were captured come across",
+     keys.sort().join() === "background,sprites", keys.join());
+  ok("their bytes come with them, as files to write",
+     out.files.length === 2 && out.files.every((f) => f.rel.startsWith("assets/imported/") && f.base64.length > 0),
+     out.files.map((f) => f.rel).join());
+  ok("and the asset points at where those bytes will land, not at the CDN path it came from",
+     out.assets.find((a) => a.key === "background")?.path === "assets/imported/background.png",
+     out.assets.find((a) => a.key === "background")?.path);
+  ok("a texture with several frames is an atlas, and keeps them", (() => {
+    const sprites = out.assets.find((a) => a.key === "sprites");
+    return sprites?.kind === "atlas" && sprites.frames?.length === 2 &&
+      sprites.frames[0].name === "idle000" && sprites.width === 1007;
+  })(), JSON.stringify(out.assets.find((a) => a.key === "sprites")));
+  // Audio has no equivalent of reading a texture back, so it cannot be brought.
+  ok("audio is NOT imported as a reference to a file that will never exist",
+     !keys.includes("music"), keys.join());
+  ok("and that is said out loud rather than left as a broken manifest entry",
+     out.issues.some((i) => i.includes("no bytes to bring across")), out.issues.join(" | "));
+  ok("a loader call with no Mosaic equivalent is skipped, not faked", !keys.includes("snow"), keys.join());
+
+  // Bank panic's `Door` is a Container subclass holding three children. Typing
+  // a container by its class name misses every one of those.
+  const nested = sceneFromRecording({
+    sceneKey: "MainGame",
+    settings: { canvas: { w: 1024, h: 768 } },
+    anims: [],
+    loads: [],
+    objects: [
+      obj({ kind: "Door", name: "Door1", x: 144, y: 352 }),
+      obj({ kind: "Image", parent: "Door1", texture: "assets", frame: "doorBackground" }),
+      obj({ kind: "Sprite", parent: "Door1", texture: "assets", frame: "door1" }),
+      obj({ kind: "Container", name: "Empty", x: 10, y: 10 }),
+    ],
+  });
+  ok("a Container SUBCLASS is typed as a container, not a textureless sprite",
+     nested.scene.objects.find((o) => o.name === "Door1")?.type === "container",
+     nested.scene.objects.find((o) => o.name === "Door1")?.type);
+  ok("Phaser's own Container still is too, even with nothing inside it",
+     nested.scene.objects.find((o) => o.name === "Empty")?.type === "container");
+  ok("and its children hang off it by id", (() => {
+    const door = nested.scene.objects.find((o) => o.name === "Door1")!;
+    const kids = nested.scene.objects.filter((o) => o.parentId === door.id);
+    return kids.length === 2;
+  })(), nested.scene.objects.map((o) => `${o.name}:${o.parentId ?? "-"}`).join());
+
+  ok("project classes are offered as prefabs, Phaser's own types are not", (() => {
+    const named = out.prefabCandidates.map((c) => `${c.className}:${c.count}`);
+    return named.includes("Snowman:2") && named.includes("Player:1") &&
+      !out.prefabCandidates.some((c) => c.className === "Image" || c.className === "Text");
+  })(), out.prefabCandidates.map((c) => `${c.className}:${c.count}`).join());
 }
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
