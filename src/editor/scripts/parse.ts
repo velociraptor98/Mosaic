@@ -40,6 +40,19 @@ export interface ScriptClass {
   base: string | null;
   exported: boolean;
   abstract: boolean;
+  /** True for `export default class`, which is imported without braces. */
+  isDefault: boolean;
+  /**
+   * The constructor's parameter names, in order. Empty when it declares none
+   * and `null` when the class has no constructor of its own.
+   *
+   * Read because anything that wants to CONSTRUCT one of these classes has to
+   * know its shape, and the shape is not conventional: across the Phaser
+   * examples the signatures include `(scene, x, y)`, `(name, scene, x, y)`,
+   * `(scene, track)` and `(config)`. Assuming the first would generate calls
+   * that silently pass a scene where a name was wanted.
+   */
+  ctorParams: string[] | null;
   /** 1-based line of the class declaration. */
   line: number;
   properties: ScriptProperty[];
@@ -143,6 +156,8 @@ export function parseScriptFile(src: string, source: string): ParsedFile {
 
   let current: ScriptClass | null = null;
   let currentDepth = 0;
+  /** Whether `current`'s body has actually been entered yet. */
+  let bodyOpened = false;
   /** Decorator options waiting for the field they annotate. */
   let pending: { options: Record<string, unknown>; line: number } | null = null;
 
@@ -154,10 +169,17 @@ export function parseScriptFile(src: string, source: string): ParsedFile {
     // runs before the class regex below, so a class declared on the line right
     // after another one's closing brace opens a new class rather than having
     // its members read as the previous one's.
-    if (current && at <= currentDepth) {
+    //
+    // The body has to have OPENED first. With the brace on its own line — the
+    // style the Phaser examples are written in — the `{` sits at the
+    // declaration's own depth, and treating that as a close threw the class
+    // away before a single member was read. Nothing Mosaic generates is
+    // written that way, which is why it went unnoticed.
+    if (current && bodyOpened && at <= currentDepth) {
       current = null;
       pending = null;
     }
+    if (current && at > currentDepth) bodyOpened = true;
 
     const cls = CLASS_RE.exec(line);
     if (cls && !current) {
@@ -167,16 +189,56 @@ export function parseScriptFile(src: string, source: string): ParsedFile {
         base: cls[5] ?? null,
         exported: !!cls[1],
         abstract: !!cls[3],
+        isDefault: !!cls[2],
+        ctorParams: null,
         line: i + 1,
         properties: [],
       };
       currentDepth = at;
       classes.push(current);
       pending = null;
+      // `class Derived extends Base {}` opens and closes on its own line, so
+      // there is no body to wait for and nothing after it belongs to this
+      // class.
+      //
+      // Both halves of the test are needed. The next line's depth alone cannot
+      // tell that case from a brace on the following line — `depth` is the
+      // depth BEFORE a line, so both read as unchanged — and the declaration
+      // having a brace at all is what separates them.
+      bodyOpened = false;
+      const opensHere = line.includes("{");
+      if (opensHere && i + 1 < depth.length && depth[i + 1] <= at) current = null;
       continue;
     }
 
     if (!current) continue;
+
+    // The constructor's own line. Parameters may wrap, so the text is taken
+    // from the opening paren to its match rather than from this line alone.
+    if (current.ctorParams === null) {
+      const ctor = /^\s*constructor\s*\(/.exec(line);
+      if (ctor) {
+        let text = "";
+        let depth = 0;
+        let done = false;
+        for (let j = i; j < code.length && !done; j += 1) {
+          const from = j === i ? code[j].indexOf("(") : 0;
+          for (let k = from; k < code[j].length; k += 1) {
+            const ch = code[j][k];
+            if (ch === "(") depth += 1;
+            else if (ch === ")") {
+              depth -= 1;
+              if (depth === 0) { done = true; break; }
+              continue;
+            }
+            if (depth >= 1 && !(j === i && k === from)) text += ch;
+          }
+          text += " ";
+        }
+        current.ctorParams = splitParams(text);
+      }
+    }
+
     // Only the class's own members, never a nested object literal's keys.
     if (at !== currentDepth + 1) continue;
 
@@ -369,6 +431,14 @@ function looseJson(text: string): unknown {
 export interface ScriptIndex {
   /** Every class found, in path order. */
   classes: ScriptClass[];
+  /**
+   * Every file read, whether or not it declared a class.
+   *
+   * Kept because a project's most important file often declares none — the
+   * entry point that constructs the game is usually a handful of statements —
+   * and an inventory that only listed class-bearing files left it out.
+   */
+  files: string[];
   byKey: Map<string, ScriptClass>;
   errors: { src: string; error: string }[];
 }
@@ -382,6 +452,7 @@ export function buildIndex(files: ParsedFile[]): ScriptIndex {
   const classes = files.flatMap((f) => f.classes);
   return {
     classes,
+    files: files.map((f) => f.src).sort((a, b) => a.localeCompare(b)),
     byKey: new Map(classes.map((c) => [scriptKey(c.src, c.name), c])),
     errors: files.flatMap((f) => (f.error ? [{ src: f.src, error: f.error }] : [])),
   };
@@ -427,6 +498,31 @@ export interface ComponentFile {
  * file under src/, but main.ts and the generated scene classes are not scripts
  * and listing them would bury the ones that are.
  */
+/**
+ * Every source file the project has, with the classes in it.
+ *
+ * `componentFiles` answers a narrower question — which files declare something
+ * ATTACHABLE — and returns nothing at all for a project written before Mosaic,
+ * where no class extends ScriptComponent. That made the editor look like it had
+ * found no code in a folder full of it. This is the honest inventory: the panel
+ * decides what to say about each entry.
+ */
+export function sourceFiles(index: ScriptIndex): ComponentFile[] {
+  const bySrc = new Map<string, ScriptClass[]>();
+  // Seeded with every file, so one that declares no class still appears.
+  for (const src of index.files) bySrc.set(src, []);
+  for (const cls of index.classes) {
+    const list = bySrc.get(cls.src) ?? [];
+    list.push(cls);
+    bySrc.set(cls.src, list);
+  }
+  const out: ComponentFile[] = [];
+  for (const [src, classes] of bySrc) {
+    out.push({ src, classes, components: classes.filter((c) => isScriptComponent(index, c)) });
+  }
+  return out.sort((a, b) => a.src.localeCompare(b.src));
+}
+
 export function componentFiles(index: ScriptIndex): ComponentFile[] {
   const bySrc = new Map<string, ScriptClass[]>();
   for (const cls of index.classes) {
@@ -462,4 +558,41 @@ export function propertiesOf(index: ScriptIndex, cls: ScriptClass): ScriptProper
     }
   }
   return out;
+}
+
+/**
+ * Parameter names out of a constructor's parameter list.
+ *
+ * Only the NAME matters to a caller building an argument list, so defaults,
+ * types and modifiers are stripped. Nested parens, brackets and braces are
+ * tracked so a default like `= new Foo(1, 2)` or a destructured `{ a, b }`
+ * does not split the list in the wrong place.
+ */
+function splitParams(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of text) {
+    if ("([{".includes(ch)) depth += 1;
+    else if (")]}".includes(ch)) depth -= 1;
+    if (ch === "," && depth === 0) {
+      out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  out.push(current);
+
+  return out
+    .map((raw) => {
+      const noDefault = raw.split("=")[0];
+      const noType = noDefault.split(":")[0];
+      const name = noType
+        .replace(/\b(public|private|protected|readonly|override)\b/g, "")
+        .replace(/\.\.\./, "")
+        .trim();
+      return name;
+    })
+    .filter((n) => n.length > 0 && /^[A-Za-z_$][\w$]*$/.test(n));
 }

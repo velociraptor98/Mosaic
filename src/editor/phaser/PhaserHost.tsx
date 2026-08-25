@@ -27,7 +27,7 @@ export function PhaserHost({ store, bridge, playtest }: Props) {
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: containerRef.current,
-      backgroundColor: "#eeeeef", // --color-bg under the 2% canvas wash
+      backgroundColor: "#181b1e", // --color-bg under the 2% canvas wash
       scale: { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.NO_CENTER },
       physics: { default: "arcade", arcade: { gravity: { x: 0, y: 0 }, debug: false } },
       audio: { noAudio: true },

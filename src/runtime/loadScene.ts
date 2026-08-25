@@ -1,10 +1,12 @@
 import Phaser from "phaser";
-import { resolveObject } from "../shared/prefabs";
+import { resolveObject, resolvePrefab } from "../shared/prefabs";
+import { bindArgs, boundArgValues } from "../shared/prefabBinding";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../shared/size";
 import { objectsById as indexObjects, worldTransform } from "../shared/transform";
 import { collectLoaderManifest } from "../shared/manifest";
 import { scriptsOf } from "../shared/scripts";
 import { ScriptHost, type ScriptComponent } from "./scripts";
+import { animRepeat } from "../shared/types";
 import type {
   AnimDef,
   ProjectData,
@@ -34,6 +36,15 @@ export interface BuiltScene {
   pairs: { a: string; b: string; rule: string }[];
   /** Set when script classes were supplied and something was attached. */
   scripts: ScriptHost | null;
+  /**
+   * Bound prefabs whose own constructor threw.
+   *
+   * Reported rather than swallowed: the object simply is not there afterwards,
+   * and an object vanishing with no explanation is the worst way for this to
+   * fail. The commonest cause is a class that reads state its own scene sets
+   * up — `scene.doors` and the like — which the play-test does not have.
+   */
+  failures: { prefab: string; object: string; error: string }[];
 }
 
 export function preloadProject(
@@ -86,7 +97,8 @@ export function registerAnimations(scene: Phaser.Scene, anims: AnimDef[]): void 
         duration: f.duration ?? 0,
       })),
       frameRate: def.fps,
-      repeat: def.loop ? -1 : 0,
+      repeat: animRepeat(def),
+      yoyo: !!def.yoyo,
     });
   }
 }
@@ -104,6 +116,16 @@ export function buildScene(
      * are inert, which is what the editor's play-test does.
      */
     scripts?: Record<string, new () => ScriptComponent>;
+    /**
+     * Classes the PROJECT wrote, by prefab name, for prefabs bound to them.
+     *
+     * Without these a bound prefab has no texture and no type the generic
+     * sprite path understands, so it was skipped outright — the play-test
+     * silently dropped exactly the objects that had behaviour. Hand them over
+     * and the real class is constructed here the same way the exported scene
+     * constructs it.
+     */
+    prefabClasses?: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject>;
   } = {},
 ): BuiltScene {
   const withPhysics = options.physics !== false && !!scene.physics;
@@ -112,6 +134,7 @@ export function buildScene(
   registerAtlasFrames(scene, project);
   registerAnimations(scene, project.anims);
 
+  const failures: BuiltScene["failures"] = [];
   const tileLayers = new Map<string, Phaser.Tilemaps.TilemapLayer>();
   const objectsByIdMap = new Map<string, Phaser.GameObjects.Sprite>();
   const groups = new Map<string, Phaser.Physics.Arcade.Group>();
@@ -134,6 +157,16 @@ export function buildScene(
     for (const obj of data.objects) {
       if (obj.layerId !== layer.id) continue;
       const resolved = resolveObject(project, obj);
+
+      // A prefab bound to the project's own class is constructed BEFORE the
+      // generic guards below, because those ask "is there a texture" and the
+      // answer for a class that draws itself is no.
+      const bound = createBoundPrefab(scene, project, obj, resolved, index, depth, options.prefabClasses, failures);
+      if (bound) {
+        objectsByIdMap.set(obj.id, bound as Phaser.GameObjects.Sprite);
+        continue;
+      }
+
       if (resolved.type === "container") continue;
       const sprite = resolved.text
         ? (createText(scene, resolved, index, depth) as unknown as Phaser.GameObjects.Sprite | null)
@@ -170,7 +203,7 @@ export function buildScene(
   applyCamera(scene, data);
   startMusic(scene, data);
 
-  return { objectsById: objectsByIdMap, tileLayers, groups, pairs, scripts: host };
+  return { objectsById: objectsByIdMap, tileLayers, groups, pairs, scripts: host, failures };
 }
 
 /**
@@ -421,4 +454,66 @@ function wireCollisions(
   }
 
   return pairs;
+}
+
+
+/**
+ * Constructs a prefab instance through the project's own class.
+ *
+ * Returns null whenever that cannot be done — no binding, no class supplied,
+ * or a signature this cannot fill — so the caller falls through to the ordinary
+ * sprite path and the object still appears, just without its behaviour.
+ */
+function createBoundPrefab(
+  scene: Phaser.Scene,
+  project: ProjectData,
+  obj: SceneObject,
+  resolved: SceneObject,
+  index: Map<string, SceneObject>,
+  depth: number,
+  classes: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject> | undefined,
+  failures: BuiltScene["failures"],
+): Phaser.GameObjects.GameObject | null {
+  if (!obj.prefab || !classes) return null;
+  const prefab = resolvePrefab(project, obj.prefab);
+  if (!prefab?.source) return null;
+  const Ctor = classes[obj.prefab];
+  if (!Ctor) return null;
+  const plan = bindArgs(prefab.source.params);
+  if (!plan) return null;
+
+  const world = worldTransform(obj, index);
+  // A constructor that throws part-way has usually already added things to the
+  // scene — the four Doors in bank panic each add three children before they
+  // reach the line that fails. Without a mark to rewind to, a failed object
+  // leaves its debris on the display list, which looks like a half-drawn scene
+  // rather than a reported error.
+  const mark = scene.children.list.length;
+  try {
+    const args = boundArgValues(plan, {
+      scene,
+      x: world.x,
+      y: world.y,
+      name: obj.name,
+      texture: resolved.texture ?? "",
+      frame: resolved.frame ?? "",
+    });
+    const made = new Ctor(...(args as never[]));
+    // The class positions itself from the arguments it was given; the editor
+    // still owns name and depth, which no constructor takes.
+    made.setName?.(obj.name);
+    (made as { setDepth?: (d: number) => void }).setDepth?.(depth);
+    made.setData?.("sceneObjectId", obj.id);
+    return made;
+  } catch (err) {
+    // A constructor that depends on scene state the play-test does not set up
+    // is a real possibility. One broken object must not take the scene down.
+    for (const extra of scene.children.list.slice(mark)) extra.destroy();
+    failures.push({
+      prefab: obj.prefab,
+      object: obj.name,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }

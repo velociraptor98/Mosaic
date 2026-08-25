@@ -3,8 +3,17 @@ import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
 import { resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../../shared/size";
 import { worldTransform } from "../../shared/transform";
-import type { ProjectData, SceneData, SceneObject, TileLayer } from "../../shared/types";
+import {
+  animRepeat,
+  type AssetDef,
+  type ProjectData,
+  type SceneData,
+  type SceneObject,
+  type TileLayer,
+} from "../../shared/types";
 import { MANIFEST_PATH, toManifest } from "../project/serialize";
+import { bindArgs } from "../../shared/prefabBinding";
+import type { PrefabSource } from "../../shared/types";
 
 export interface GeneratedFile {
   path: string;
@@ -12,7 +21,7 @@ export interface GeneratedFile {
   language: "json" | "ts";
 }
 
-export type ExportTarget = "sceneJson" | "tsSceneClass" | "both";
+export type ExportTarget = "sceneJson" | "tsSceneClass" | "tsSceneModule" | "both";
 
 /**
  * The generator is pure: the same scene in produces the same bytes out, so
@@ -40,13 +49,14 @@ export function generateFiles(
     });
   }
 
-  if (target === "tsSceneClass" || target === "both") {
+  if (target === "tsSceneModule") {
     files.push({
-      path: `src/scenes/${sceneClassName(scene.key)}.ts`,
-      contents: generateSceneClass(project, scene),
+      path: `src/scenes/${sceneClassName(scene.key)}.objects.ts`,
+      contents: generateSceneModule(project, scene),
       language: "ts",
     });
     for (const prefab of usedPrefabs(project, scene)) {
+      if (resolvePrefab(project, prefab)?.source) continue;
       files.push({
         path: `src/prefabs/${className(prefab)}.ts`,
         contents: generatePrefabClass(project, prefab),
@@ -55,7 +65,75 @@ export function generateFiles(
     }
   }
 
+  if (target === "tsSceneClass" || target === "both") {
+    files.push({
+      path: `src/scenes/${sceneClassName(scene.key)}.ts`,
+      contents: generateSceneClass(project, scene),
+      language: "ts",
+    });
+    for (const prefab of usedPrefabs(project, scene)) {
+      // A prefab bound to the project's own class has nothing to generate:
+      // writing a lookalike beside it would be the second definition of the
+      // same thing, and the wrong one would win.
+      if (resolvePrefab(project, prefab)?.source) continue;
+      files.push({
+        path: `src/prefabs/${className(prefab)}.ts`,
+        contents: generatePrefabClass(project, prefab),
+        language: "ts",
+      });
+    }
+  }
+
+  // An atlas is two files, and the generated `load.atlas(key, png, json)` names
+  // both. The JSON side was never written — the slicer's status line said it
+  // had been, but the frames only ever went into the manifest — so a generated
+  // scene using an atlas failed to load one. Emitted here, from the frames the
+  // project already holds, in the JSON-hash shape Phaser reads.
+  if (target !== "sceneJson") {
+    for (const entry of collectLoaderManifest(project, scene)) {
+      if (entry.type !== "atlas") continue;
+      const asset = project.assets.find((a) => a.key === entry.key);
+      if (!asset?.frames?.length) continue;
+      files.push({
+        path: asset.path.replace(/\.\w+$/, ".atlas.json"),
+        contents: atlasSidecar(asset),
+        language: "json",
+      });
+    }
+  }
+
   return files;
+}
+
+/** Phaser's JSON-hash atlas format, from the frames the editor already has. */
+function atlasSidecar(asset: AssetDef): string {
+  const frames: Record<string, unknown> = {};
+  for (const f of asset.frames ?? []) {
+    frames[f.name] = {
+      frame: { x: f.x, y: f.y, w: f.w, h: f.h },
+      rotated: false,
+      trimmed: false,
+      spriteSourceSize: { x: 0, y: 0, w: f.w, h: f.h },
+      sourceSize: { w: f.w, h: f.h },
+      pivot: { x: f.pivotX, y: f.pivotY },
+    };
+  }
+  return (
+    JSON.stringify(
+      {
+        frames,
+        meta: {
+          app: "Mosaic",
+          image: asset.path.split("/").pop(),
+          format: "RGBA8888",
+          size: { w: asset.width, h: asset.height },
+          scale: "1",
+        },
+      },
+      null,
+      2,
+    ) + "\n"
+  );
 }
 
 function usedPrefabs(project: ProjectData, scene: SceneData): string[] {
@@ -94,7 +172,28 @@ function varName(obj: SceneObject, used: Set<string>): string {
  * play-on-spawn calls are emitted with the animations, after the anims they
  * reference exist.
  */
+/**
+ * How a generated scene relates to the project.
+ *
+ * `class` — Mosaic owns the scene: it emits a `Phaser.Scene` subclass with
+ * keep-markers for hand-written code. Right for a project Mosaic started.
+ *
+ * `module` — the project owns the scene: Mosaic emits functions its existing
+ * `create()` calls. Right for a project that already had one, where taking the
+ * class over would mean rewriting somebody's game to import its layout.
+ */
+export type SceneEmitMode = "class" | "module";
+
 export function generateSceneClass(project: ProjectData, scene: SceneData): string {
+  return emitScene(project, scene, "class");
+}
+
+/** The non-owning form: functions the project's own scene calls. */
+export function generateSceneModule(project: ProjectData, scene: SceneData): string {
+  return emitScene(project, scene, "module");
+}
+
+function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode): string {
   const cls = sceneClassName(scene.key);
   const manifest = collectLoaderManifest(project, scene);
   // Resolved, so an instance composes its definition's transform, not the
@@ -122,20 +221,17 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     objectKeys.add(key);
     return key;
   };
-  const L: string[] = [];
-
-  L.push(`// GENERATED by Mosaic from src/scenes/${scene.key}.scene.json`);
-  L.push(`// Regenerating rewrites this file; code between the keep markers below survives.`);
-  L.push(`import Phaser from "phaser";`);
-  L.push(``);
-  L.push(`export class ${cls} extends Phaser.Scene {`);
-  L.push(`  constructor() {`);
-  L.push(`    super(${q(scene.key)});`);
-  L.push(`  }`);
-  L.push(``);
+  // The body is collected in sections rather than written straight out, so the
+  // same emitted lines can be wrapped two ways: as a Phaser.Scene that Mosaic
+  // owns, or as functions the project's OWN scene calls. Every line below uses
+  // `this` for the scene, which is what makes the second form possible at all —
+  // the module wrapper invokes the bodies with the caller's scene as `this`.
+  const preloadBody: string[] = [];
+  const createBody: string[] = [];
+  const handlerBody: string[] = [];
+  let L: string[] = preloadBody;
 
   // ---- preload ----
-  L.push(`  preload(): void {`);
   if (!manifest.length) L.push(`    // No assets referenced by this scene.`);
   for (const entry of manifest) {
     const asset = project.assets.find((a) => a.key === entry.key);
@@ -156,11 +252,9 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   }
   L.push(`    // <keep id="preload">`);
   L.push(`    // </keep>`);
-  L.push(`  }`);
-  L.push(``);
 
   // ---- create ----
-  L.push(`  create(): void {`);
+  L = createBody;
   if (scene.settings.backgroundColor) {
     L.push(`    this.cameras.main.setBackgroundColor(${q(scene.settings.backgroundColor)});`);
   }
@@ -215,8 +309,16 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     L.push(`    // layer ${depth}: ${layer.name} (objects)`);
     for (const raw of members) {
       const obj = resolveObject(project, raw);
-      if (obj.type === "container") continue;
-      if (!obj.texture && !obj.text) continue;
+      // A prefab instance is exempt from both guards below. They ask "is there
+      // anything to draw", which for a plain sprite means a texture — but a
+      // prefab is drawn by its own constructor, and one bound to the project's
+      // class may well be a Container with no texture of its own. Dropping
+      // those silently emitted a scene missing exactly the objects that had
+      // behaviour attached.
+      if (!raw.prefab) {
+        if (obj.type === "container") continue;
+        if (!obj.texture && !obj.text) continue;
+      }
       const world = worldTransform(index.get(raw.id) ?? raw, index);
       const v = varName(obj, used);
       varsById.set(obj.id, v);
@@ -236,7 +338,7 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
       if (prefab) {
         usedPrefabClasses.add(prefab.name);
         L.push(
-          `    const ${v} = new ${className(prefab.name)}(this, ${round(world.x)}, ${round(world.y)});`,
+          `    const ${v} = new ${className(prefab.name)}(${constructorArgs(prefab, obj, world)});`,
         );
         L.push(`    ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
         if (prefab.root.body) bodyLines.push(`    ${v}.applyBody();`);
@@ -341,7 +443,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
           .join(", ")}],`,
       );
       L.push(`      frameRate: ${anim.fps},`);
-      L.push(`      repeat: ${anim.loop ? -1 : 0},`);
+      L.push(`      repeat: ${animRepeat(anim)},`);
+      if (anim.yoyo) L.push(`      yoyo: true,`);
       L.push(`    });`);
     }
     // Started here, after anims.create, for plain objects and prefab
@@ -361,13 +464,8 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
   L.push(`    // <keep id="create">`);
   L.push(`    // Your own wiring goes here — it survives regeneration.`);
   L.push(`    // </keep>`);
-  L.push(`  }`);
-  L.push(``);
-  L.push(`  update(_time: number, _delta: number): void {`);
-  L.push(`    // <keep id="update">`);
-  L.push(`    // </keep>`);
-  L.push(`  }`);
-  L.push(``);
+
+  L = handlerBody;
   for (const handler of overlapHandlers) {
     L.push(`  /** ${handler.a} × ${handler.b} — authored as "overlap" in the collision matrix. */`);
     // Phaser's own alias, rather than spelled-out parameters: it has widened
@@ -395,22 +493,36 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
     L.push(`  }`);
     L.push(``);
   }
-  if (sceneHasScripts(project, scene)) L.push(`  scripts!: ScriptHost;`);
+  const fields: string[] = [];
+  if (sceneHasScripts(project, scene)) fields.push(`  scripts!: ScriptHost;`);
   // A scene holds sprites and text, so the map says so. Callers reaching for
   // a body still cast — Sprite never had one either.
-  L.push(
+  fields.push(
     `  objects: Record<string, Phaser.GameObjects.Sprite | Phaser.GameObjects.Text> = {};`,
   );
-  L.push(`  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer> = {};`);
-  L.push(`  groups: Record<string, Phaser.Physics.Arcade.Group> = {};`);
-  L.push(`}`);
-  L.push(``);
+  fields.push(`  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer> = {};`);
+  fields.push(`  groups: Record<string, Phaser.Physics.Arcade.Group> = {};`);
+
+  const out: string[] =
+    mode === "class"
+      ? assembleClass(cls, scene, preloadBody, createBody, handlerBody, fields)
+      : assembleModule(cls, scene, preloadBody, createBody, handlerBody);
 
   const imports: string[] = [];
   if (scene.layers.some((l) => l.kind === "tile")) {
     imports.push(`import sceneData from "./${scene.key}.scene.json";`);
   }
   for (const name of [...usedPrefabClasses].sort()) {
+    const source = resolvePrefab(project, name)?.source;
+    if (source) {
+      const spec = relativeModule(`src/scenes/${sceneClassName(scene.key)}.ts`, source.module);
+      imports.push(
+        source.export === "default"
+          ? `import ${className(name)} from "${spec}";`
+          : `import { ${source.export} as ${className(name)} } from "${spec}";`,
+      );
+      continue;
+    }
     imports.push(`import { ${className(name)} } from "../prefabs/${className(name)}";`);
   }
   if (scriptImports.size) {
@@ -421,11 +533,139 @@ export function generateSceneClass(project: ProjectData, scene: SceneData): stri
       imports.push(`import { ${binding} } from "${entry.module}";`);
     }
   }
-  if (!imports.length) return L.join("\n");
-  return L.join("\n").replace(
+  if (!imports.length) return out.join("\n");
+  return out.join("\n").replace(
     `import Phaser from "phaser";`,
     [`import Phaser from "phaser";`, ...imports].join("\n"),
   );
+}
+
+/** The form Mosaic owns: a Phaser.Scene of its own. */
+function assembleClass(
+  cls: string,
+  scene: SceneData,
+  preloadBody: string[],
+  createBody: string[],
+  handlerBody: string[],
+  fields: string[],
+): string[] {
+  return [
+    `// GENERATED by Mosaic from src/scenes/${scene.key}.scene.json`,
+    `// Regenerating rewrites this file; code between the keep markers below survives.`,
+    `import Phaser from "phaser";`,
+    ``,
+    `export class ${cls} extends Phaser.Scene {`,
+    `  constructor() {`,
+    `    super(${q(scene.key)});`,
+    `  }`,
+    ``,
+    `  preload(): void {`,
+    ...preloadBody,
+    `  }`,
+    ``,
+    `  create(): void {`,
+    ...createBody,
+    `  }`,
+    ``,
+    `  update(_time: number, _delta: number): void {`,
+    `    // <keep id="update">`,
+    `    // </keep>`,
+    `  }`,
+    ``,
+    ...handlerBody,
+    ...fields,
+    `}`,
+    ``,
+  ];
+}
+
+/**
+ * The form the PROJECT owns: functions its own scene calls.
+ *
+ * An existing Phaser project already has a scene class, with its own state and
+ * its own update loop, and taking that over is not something an editor should
+ * do to import a layout. So Mosaic emits what it actually knows — the objects,
+ * and the loads they need — and the project's `create()` calls it:
+ *
+ *     create() {
+ *       this.doors = [];
+ *       buildMainGame(this);
+ *     }
+ *
+ * The bodies are the same lines the class form emits, `this` and all, so they
+ * are invoked with the caller's scene as `this` rather than rewritten. That is
+ * also why the maps are attached to that scene: `this.objects` inside a body
+ * has to resolve to something, and the caller having them afterwards is the
+ * point.
+ */
+function assembleModule(
+  cls: string,
+  scene: SceneData,
+  preloadBody: string[],
+  createBody: string[],
+  handlerBody: string[],
+): string[] {
+  const built = `${cls}Built`;
+  const hasHandlers = handlerBody.length > 0;
+  // In a class the handlers are fields and the helper a method. Here they are
+  // attached to the caller's scene, because the collision lines in the body
+  // reach for them as `this.<name>` either way.
+  const attached = handlerBody.map((line) =>
+    /^  [A-Za-z_$][\w$]*: Phaser\.Types/.test(line)
+      ? line.replace(/^  ([A-Za-z_$][\w$]*): Phaser\.Types[^=]*= \(/, "  self.$1 = (")
+      : line,
+  );
+
+  return [
+    `// GENERATED by Mosaic from src/scenes/${scene.key}.scene.json`,
+    `// Regenerating rewrites this file. Your scene class is yours — this only`,
+    `// builds the objects the editor authored, into a scene you already have.`,
+    `import Phaser from "phaser";`,
+    ``,
+    `export interface ${built} {`,
+    `  objects: Record<string, Phaser.GameObjects.Sprite | Phaser.GameObjects.Text>;`,
+    `  tileLayers: Record<string, Phaser.Tilemaps.TilemapLayer>;`,
+    `  groups: Record<string, Phaser.Physics.Arcade.Group>;`,
+    `}`,
+    ``,
+    `type Host = Phaser.Scene & ${built} & Record<string, unknown>;`,
+    ``,
+    `/** Queues everything this scene's objects load. Call from your preload(). */`,
+    `export function preload${cls}(scene: Phaser.Scene): void {`,
+    `  preloadBody.call(scene as Host);`,
+    `}`,
+    ``,
+    `/** Builds the authored objects into your scene. Call from your create(). */`,
+    `export function build${cls}(scene: Phaser.Scene): ${built} {`,
+    `  const host = scene as Host;`,
+    `  host.objects ??= {};`,
+    `  host.tileLayers ??= {};`,
+    `  host.groups ??= {};`,
+    `  buildBody.call(host);`,
+    `  return { objects: host.objects, tileLayers: host.tileLayers, groups: host.groups };`,
+    `}`,
+    ``,
+    `function preloadBody(this: Host): void {`,
+    ...preloadBody,
+    `}`,
+    ``,
+    `function buildBody(this: Host): void {`,
+    ...(hasHandlers ? [`  const self = this;`, ...attached] : []),
+    ...createBody,
+    `}`,
+    ...(hasHandlers
+      ? [
+          ``,
+          `function playOverlapCues(this: Host, ...parts: unknown[]): void {`,
+          `  for (const part of parts) {`,
+          `    const key = (part as Phaser.GameObjects.GameObject)?.getData?.("__sfxOverlap");`,
+          `    if (typeof key === "string" && this.cache.audio.exists(key)) this.sound.play(key);`,
+          `  }`,
+          `}`,
+        ]
+      : []),
+    ``,
+  ];
 }
 
 function sceneHasScripts(project: ProjectData, scene: SceneData): boolean {
@@ -663,13 +903,22 @@ function emitBody(
   }
 }
 
+/**
+ * Every animation the project defines — the same set the runtime loader
+ * registers.
+ *
+ * This used to return only the ones a scene object named in `playOnSpawn`,
+ * which quietly dropped any animation played from a script. The play-test
+ * registers them all, so the animation ran in the editor and did not exist in
+ * the build: `play("hero_walk")` on a key Phaser had never been given.
+ *
+ * A scene carrying animations it never plays is a cost worth paying for that.
+ * Narrowing the set is a feature to design deliberately, not a filter to apply
+ * silently, because nothing can tell from the scene file what a script plays.
+ */
 function usedAnims(project: ProjectData, scene: SceneData) {
-  const keys = new Set<string>();
-  for (const raw of scene.objects) {
-    const obj = resolveObject(project, raw);
-    if (obj.playOnSpawn) keys.add(obj.playOnSpawn);
-  }
-  return project.anims.filter((a) => keys.has(a.key));
+  void scene;
+  return project.anims.filter((a) => a.frames.length > 0);
 }
 
 export function generatePrefabClass(project: ProjectData, name: string): string {
@@ -748,4 +997,53 @@ export function generatePrefabClass(project: ProjectData, name: string): string 
 
 function round(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+
+/**
+ * The argument list for a prefab's constructor.
+ *
+ * A prefab Mosaic generates takes `(scene, x, y)`, because Mosaic wrote it. One
+ * bound to the project's own class takes whatever that class declares, so the
+ * call is built from the recorded parameter names rather than assumed — passing
+ * a scene where a name was wanted is the kind of bug that compiles.
+ */
+function constructorArgs(
+  prefab: { name: string; source?: PrefabSource },
+  obj: SceneObject,
+  world: { x: number; y: number },
+): string {
+  const plan = prefab.source ? bindArgs(prefab.source.params) : null;
+  if (!plan) return `this, ${round(world.x)}, ${round(world.y)}`;
+  return plan
+    .map((arg) => {
+      switch (arg.kind) {
+        case "scene":
+          return "this";
+        case "x":
+          return String(round(world.x));
+        case "y":
+          return String(round(world.y));
+        case "name":
+          return q(obj.name);
+        case "texture":
+          return q(obj.texture ?? "");
+        case "frame":
+          return q(obj.frame ?? "");
+      }
+    })
+    .join(", ");
+}
+
+/** An import specifier from one project-relative file to another. */
+function relativeModule(fromFile: string, toModule: string): string {
+  const from = fromFile.split("/").slice(0, -1);
+  const to = toModule.split("/");
+  while (from.length && to.length > 1 && from[0] === to[0]) {
+    from.shift();
+    to.shift();
+  }
+  const up = from.map(() => "..");
+  const spec = [...up, ...to].join("/");
+  return spec.startsWith(".") ? spec : `./${spec}`;
 }

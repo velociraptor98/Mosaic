@@ -178,9 +178,23 @@ The timeline takes over the asset dock so the canvas stays full size. Frames
 are picked from a spritesheet or a sliced atlas, dragged to reorder, and can
 carry a per-frame duration that overrides the global fps.
 
+An animation stores frames, frame rate, a **repeat count** (`-1` forever, `0`
+once, `N` more times) and **yoyo**, which plays the frames forward then back —
+four frames of art become seven of motion, so it is the difference between
+drawing four poses and drawing seven. `+ all` appends a whole sheet in order,
+because building a sixty-frame clip one click at a time is not a workflow.
+
 The preview runs the **real Phaser animation manager** on the real texture
 bytes, so approved timing is shipped timing. An object names the animation it
 plays on spawn; a missing key is a validation error, not a silent no-op.
+
+Every animation the project defines is registered in the exported scene, not
+only the ones an object names in `playOnSpawn`. Nothing in a scene file can say
+what a script plays, and an animation that is merely absent fails at the moment
+it is asked for — so `npm run anim-lab` builds a sample whose whole job is to
+exercise this: a looping walk, a two-frame idle at 2fps, a one-shot with
+per-frame durations, an animation on a prefab that instances inherit and one
+overrides, and an animation played only from a script.
 
 ### 7. Physics & collision — `Inspector.tsx` (Physics), `dialogs/CollisionDialog`
 Bodies are a *section of the object*, not a separate editor: box or circle,
@@ -422,13 +436,22 @@ specific to this app — the play-test evaluates compiled scripts with
 
 The UI follows the design tokens in `Phaser Editor Workflows.html`. `src/tokens.css`
 carries that document's `:root` block verbatim — palette, ramps, type, spacing,
-radii, elevation — followed by a short, commented set of additions.
+radii, elevation — followed by a short, commented set of additions, and then the
+**dark ground** from `token.html`, which is the block that actually ships. The
+light block is kept above it as the reference it was derived from; swapping the
+two is the whole of a theme switch.
 
-- **Ground** `#f2f2f3` paper, `#e9e9ea` input surfaces, `#1d1f20` ink, hairline
+- **Ground** `#14171a` ink, `#1e2226` input surfaces, `#e6e9ec` text, hairline
   `--color-divider` rules. Panels are separated by 1px lines, not by fills.
-- **Accent** `#5980a6` carries every selected state: a 12–16% tint with
+- **Accent** `#7ba3cc` carries every selected state: a 12–16% tint with
   `--color-accent-800` text for selection, solid accent with `--color-bg` text
   for primary actions and the collision matrix's *collide* cell.
+- **The ramps invert, the steps don't.** On the dark ground both tonal ramps run
+  dark→light, so a step keeps its *meaning*: 700–900 is still "readable ink
+  against the ground" and 100–300 is still "a quiet fill sitting on it". Every
+  rule written against the light ground therefore survives the swap untouched.
+  Only rules that pinned a literal colour against a ramp step needed restating,
+  and there were three of them.
 - **Square corners everywhere.** The reference's blueprint pass zeroes the
   radius on `.card/.btn/.input/.tag/.seg/.dialog`; the editor does the same, so
   the radius tokens are defined but deliberately unused.
@@ -449,7 +472,10 @@ Two things the reference had no need for, and how they were derived:
   accent ramp — selection at `accent`, handles at `accent-800`, guides at
   `accent-400`, bodies at `accent-900`. Because the palette is monochrome by
   design, bodies are told apart from selection by *line style* (dashed) rather
-  than by inventing a hue for them.
+  than by inventing a hue for them. These are the one part of the palette the
+  ground does **not** move: gizmos are drawn over the *scene's* background,
+  which is the user's data, so they stay tuned to that rather than to the
+  editor's chrome.
 
 The placeholder tiles and objects are drawn from the same ramps, at steps far
 enough apart to stay distinguishable by value, so a scene reads as one drawing
@@ -540,8 +566,9 @@ scripts/parity/    boots the SAME scene through the runtime loader and through
                    the generated class, in one page, and diffs what each built.
                    Scene semantics exist twice; this is what stops them drifting
 scripts/sample-game/
-                   builds the Coin Rush sample by driving the editor, and
-                   renders the build guide from the same pass
+                   builds the samples by driving the editor: Coin Rush (a
+                   playable game, and the build guide) and Anim Lab (built to
+                   exercise the animation feature rather than to be a game)
 ```
 
 ### Why the play-test and the export are checked against each other

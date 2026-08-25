@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { useEffect, useRef } from "react";
-import type { AnimDef, AssetDef } from "../../shared/types";
+import { animRepeat, type AnimDef, type AssetDef } from "../../shared/types";
 
 /**
  * The preview runs the real Phaser animation manager in a throwaway game
@@ -58,7 +58,8 @@ export function AnimPreview({ anim, assets }: { anim: AnimDef; assets: AssetDef[
               duration: f.duration ?? 0,
             })),
             frameRate: anim.fps,
-            repeat: anim.loop ? -1 : 0,
+            repeat: animRepeat(anim),
+            yoyo: !!anim.yoyo,
           });
           const sprite = this.add.sprite(66, 66, anim.frames[0].textureKey, anim.frames[0].frame);
           const scale = Math.min(96 / (sprite.width || 32), 96 / (sprite.height || 32));

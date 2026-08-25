@@ -54,26 +54,45 @@ function rgb(color: number): [number, number, number] {
   return [(color >> 16) & 255, (color >> 8) & 255, color & 255];
 }
 
+export interface Painted {
+  points: Point[];
+  color: number;
+  /** Outlined as well as filled. Off for interior detail like a leg. */
+  outline?: boolean;
+}
+
 /**
- * One filled, outlined shape. Coverage is sampled on an SS×SS grid per pixel,
- * which is what keeps the diagonal of a triangle from stepping.
+ * Composites one polygon into a bitmap at an x offset.
+ *
+ * Coverage is sampled on an SS×SS grid per pixel, which is what keeps a
+ * triangle's diagonal from stepping and a star's points from looking chewed.
+ * Later shapes paint over earlier ones, so a frame is a list back to front.
  */
-export function rasteriseShape(
-  shape: (typeof SHAPE_DEFS)[number]["shape"],
-  color: number,
-  width: number,
-  height: number,
-): Bitmap {
-  const bmp = blank(width, height);
-  const points = shapePolygon(shape, width, height);
+export function fillPolygon(bmp: Bitmap, shape: Painted, ox = 0): void {
+  const { points, color } = shape;
   const [fr, fg, fb] = rgb(color);
   const [sr, sg, sb] = rgb(SHAPE_STROKE.color);
   const half = SHAPE_STROKE.width / 2;
   const step = 1 / SS;
   const offset = step / 2;
 
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of points) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const x0 = Math.max(0, Math.floor(minX - 2));
+  const x1 = Math.min(bmp.width - ox, Math.ceil(maxX + 2));
+  const y0 = Math.max(0, Math.floor(minY - 2));
+  const y1 = Math.min(bmp.height, Math.ceil(maxY + 2));
+
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
       let fill = 0;
       let stroke = 0;
       for (let sy = 0; sy < SS; sy++) {
@@ -81,7 +100,7 @@ export function rasteriseShape(
           const px = x + sx * step + offset;
           const py = y + sy * step + offset;
           const on = inside(points, px, py);
-          if (edgeDistance(points, px, py) <= half) stroke += 1;
+          if (shape.outline !== false && edgeDistance(points, px, py) <= half) stroke += 1;
           else if (on) fill += 1;
         }
       }
@@ -91,15 +110,47 @@ export function rasteriseShape(
       const alpha = Math.min(1, strokeA + fillA);
       if (alpha <= 0) continue;
 
-      // Stroke over fill, both premultiplied against the coverage they own.
       const weight = strokeA + fillA;
-      const at = (y * width + x) * 4;
-      bmp.data[at] = Math.round((sr * strokeA + fr * fillA) / weight);
-      bmp.data[at + 1] = Math.round((sg * strokeA + fg * fillA) / weight);
-      bmp.data[at + 2] = Math.round((sb * strokeA + fb * fillA) / weight);
-      bmp.data[at + 3] = Math.round(alpha * 255);
+      const at = (y * bmp.width + (x + ox)) * 4;
+      const r = Math.round((sr * strokeA + fr * fillA) / weight);
+      const g = Math.round((sg * strokeA + fg * fillA) / weight);
+      const b = Math.round((sb * strokeA + fb * fillA) / weight);
+      // Source-over against whatever is already there.
+      const dstA = bmp.data[at + 3] / 255;
+      const outA = alpha + dstA * (1 - alpha);
+      bmp.data[at] = Math.round((r * alpha + bmp.data[at] * dstA * (1 - alpha)) / outA);
+      bmp.data[at + 1] = Math.round((g * alpha + bmp.data[at + 1] * dstA * (1 - alpha)) / outA);
+      bmp.data[at + 2] = Math.round((b * alpha + bmp.data[at + 2] * dstA * (1 - alpha)) / outA);
+      bmp.data[at + 3] = Math.round(outA * 255);
     }
   }
+}
+
+/** One filled, outlined shape, on its own transparent bitmap. */
+export function rasteriseShape(
+  shape: (typeof SHAPE_DEFS)[number]["shape"],
+  color: number,
+  width: number,
+  height: number,
+): Bitmap {
+  const bmp = blank(width, height);
+  fillPolygon(bmp, { points: shapePolygon(shape, width, height), color });
+  return bmp;
+}
+
+/**
+ * A strip of frames, left to right — the layout Phaser's spritesheet loader
+ * expects, so `frameWidth` / `frameHeight` are all it needs to cut them.
+ */
+export function rasteriseStrip(
+  frames: Painted[][],
+  frameWidth: number,
+  frameHeight: number,
+): Bitmap {
+  const bmp = blank(frameWidth * frames.length, frameHeight);
+  frames.forEach((shapes, i) => {
+    for (const shape of shapes) fillPolygon(bmp, shape, i * frameWidth);
+  });
   return bmp;
 }
 

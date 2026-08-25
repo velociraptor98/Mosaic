@@ -64,8 +64,14 @@ export function createElectronPlatform(api: MosaicApi): Platform {
         scenes: files.scenes,
         prefabs: files.prefabs,
         assets: files.assets,
+        occupied: files.occupied,
       };
     },
+
+    canImportPhaser: true,
+    findGameEntries: (root) => api.findGameEntries(root),
+    recordScene: (root, entry) => api.recordScene(root, entry),
+    bundleEntry: (root, entry) => api.bundleEntry(root, entry),
 
     async writeFiles(root, files): Promise<WriteOutcome> {
       return api.writeFiles(root, files);

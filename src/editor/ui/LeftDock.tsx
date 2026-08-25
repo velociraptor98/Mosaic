@@ -57,10 +57,12 @@ function GitBadge({ code }: { code: string | undefined }) {
 
 function ProjectTree() {
   const { store, workspace, openDialog } = useEditor();
+  const gameEntry = workspace.gameEntry ?? "";
   useWorkspace(workspace);
   useScripts(workspace.scripts);
   const git = workspace.git;
   const scriptFiles = workspace.scripts.files();
+  const allSourceCount = workspace.scripts.index.classes.length;
   // How many objects, across every scene, actually run each class. A script
   // nothing uses is worth seeing as much as one everything uses.
   const usage = new Map<string, number>();
@@ -99,6 +101,51 @@ function ProjectTree() {
         <div className="banner warn">
           {workspace.issues.length} issue(s) reading this folder: {workspace.issues[0]}
         </div>
+      )}
+
+      {/*
+        The offer belongs here, not only in the command palette. This is the
+        moment the editor knows the folder holds a Phaser project it could not
+        read — the banner above is saying exactly that — and an action nobody
+        can find is one that may as well not exist.
+      */}
+      {platform.canImportPhaser && workspace.deferredWrite && (
+        <button className="block" onClick={() => openDialog("importphaser")}>
+          Import a scene from this Phaser project…
+        </button>
+      )}
+
+      {/*
+        RUN plays the scene as the editor holds it. This plays the game as the
+        project runs it — its own scene classes, its own update loop. They are
+        different questions, so they are different buttons rather than a mode.
+      */}
+      {workspace.gameEntries.length > 0 && (
+        <>
+          <button
+            className="block"
+            onClick={() => openDialog("runproject")}
+            title={`Runs ${gameEntry} — the project's own game, with its own behaviour`}
+          >
+            Run the project's own game…
+          </button>
+          {/* More than one file constructs a game here, so which is a question
+              only the user can answer. */}
+          {workspace.gameEntries.length > 1 && (
+            <select
+              className="block"
+              value={gameEntry}
+              onChange={(e) => workspace.setGameEntry(e.target.value)}
+              title="Which entry point to run"
+            >
+              {workspace.gameEntries.map((rel) => (
+                <option key={rel} value={rel}>
+                  {rel}
+                </option>
+              ))}
+            </select>
+          )}
+        </>
       )}
 
       <div className="tree-group">src/scenes</div>
@@ -186,8 +233,17 @@ function ProjectTree() {
           {workspace.scripts.loading && <div className="empty">Indexing src/…</div>}
           {!workspace.scripts.loading && scriptFiles.length === 0 && (
             <div className="empty">
-              No script components yet. Select an object and use + Add in the Scripts tab to
-              write one.
+              {/* "No script components" is true but reads as "no code here",
+                  which for an imported project is flatly wrong — its whole
+                  game is on disk. Say which of the two situations it is. */}
+              {allSourceCount > 0 ? (
+                <>
+                  {allSourceCount} source file(s) indexed, none of them Mosaic script components —
+                  see the Scripts tab in the dock for what is here.
+                </>
+              ) : (
+                <>No script components yet. Select an object and use + Add in the Scripts tab to write one.</>
+              )}
             </div>
           )}
           {scriptFiles.map((file) => {

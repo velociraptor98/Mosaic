@@ -34,6 +34,16 @@ export const browserPlatform: Platform = {
   async readProject(): Promise<ProjectSource | null> {
     return null;
   },
+  canImportPhaser: false,
+  async findGameEntries(): Promise<string[]> {
+    return [];
+  },
+  async recordScene() {
+    return { ok: false, error: "Importing a Phaser project needs the desktop app." };
+  },
+  async bundleEntry() {
+    return { code: null, error: "Running a project's own game needs the desktop app." };
+  },
   async writeFiles(): Promise<WriteOutcome> {
     return { written: [], failed: [] };
   },

@@ -17,6 +17,8 @@ export interface PlaySceneInit {
    * in every one of those cases the scene still runs, without behaviour.
    */
   scripts?: Record<string, ScriptCtor>;
+  /** Project classes bound prefabs are constructed through. */
+  prefabClasses?: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject>;
 }
 
 /**
@@ -30,6 +32,7 @@ export class PlayScene extends Phaser.Scene {
   private bridge!: EditorBridge;
   private debug = true;
   private scripts?: Record<string, ScriptCtor>;
+  private prefabClasses?: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject>;
   private host: ScriptHost | null = null;
   /** Scripts that threw and were switched off, for the status bar. */
   scriptErrors: { script: string; message: string }[] = [];
@@ -54,6 +57,7 @@ export class PlayScene extends Phaser.Scene {
     this.bridge = data.bridge;
     this.debug = data.debug;
     this.scripts = data.scripts;
+    this.prefabClasses = data.prefabClasses;
     this.scriptErrors = [];
     this.paused = false;
     this.frame = 0;
@@ -69,9 +73,23 @@ export class PlayScene extends Phaser.Scene {
     const built = buildScene(this, this.project, this.sceneData, {
       physics: true,
       scripts: this.scripts,
+      prefabClasses: this.prefabClasses,
     });
     this.objects = built.objectsById;
     this.host = built.scripts;
+
+    // A bound class that threw took its object with it. Say so once, the same
+    // way a script that throws is reported — silence here reads as "the editor
+    // lost my objects".
+    for (const failure of built.failures) {
+      this.scriptErrors.push({ script: failure.prefab, message: failure.error });
+      this.bridge.send("scriptError", { script: failure.prefab, message: failure.error });
+      console.error(
+        `[mosaic] ${failure.prefab} threw while constructing "${failure.object}" — ` +
+          `the class needs scene state this play-test does not set up`,
+        failure.error,
+      );
+    }
 
     // A script that throws is disabled rather than allowed to take the run
     // down; the editor says which one, once, rather than every frame.

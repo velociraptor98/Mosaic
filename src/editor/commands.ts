@@ -7,6 +7,8 @@ export type DialogName =
   | "palette"
   | "newscene"
   | "import"
+  | "importphaser"
+  | "runproject"
   | "atlas"
   | "prefab"
   | "collision"
@@ -55,6 +57,8 @@ export function buildCommands(ctx: CommandContext): Command[] {
         { id: "project.open", title: "Open project folder…", category: "Project", binding: `${mod}O`, run: () => void workspace.pickAndOpen() },
         { id: "project.new", title: "New project folder…", category: "Project", binding: `${mod}⇧N`, run: () => void workspace.createAndOpen() },
         { id: "project.save", title: "Save project to disk", category: "Project", binding: `${mod}S`, run: () => void workspace.saveNow() },
+        { id: "project.importPhaser", title: "Import scene from a Phaser project…", category: "Project", run: () => openDialog("importphaser") },
+        { id: "project.runGame", title: "Run the project's own game", category: "Project", run: () => { if (workspace.gameEntry) openDialog("runproject"); } },
         { id: "project.reload", title: "Reload project from disk", category: "Project", run: () => void workspace.reload() },
         { id: "project.close", title: "Close project", category: "Project", binding: `${mod}W`, run: () => workspace.close() },
         { id: "project.reveal", title: "Reveal project in file manager", category: "Project", run: () => workspace.reveal() },

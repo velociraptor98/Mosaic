@@ -4,7 +4,9 @@ import { imageSize, readFileAsDataUrl } from "../assets/slice";
 import type { AnimDef, AssetDef } from "../../shared/types";
 import { AnimPreview } from "./AnimPreview";
 import { NumberField, TextField } from "./fields";
-import { useEditor, useStoreVersion } from "./context";
+import { useEditor, useScripts, useStoreVersion } from "./context";
+import { isScriptComponent, sourceFiles } from "../scripts/parse";
+import { platform } from "../platform";
 
 export function BottomDock() {
   const { store } = useEditor();
@@ -25,15 +27,25 @@ export function BottomDock() {
         >
           Animation
         </button>
+        <button
+          className={store.ui.dockTab === "scripts" ? "active" : ""}
+          onClick={() => store.setUi({ dockTab: "scripts" })}
+        >
+          Scripts
+        </button>
         <div className="tabs-spacer" />
         <span className="hint inline">
           {store.ui.dockTab === "anim"
             ? "The timeline takes over the dock so the canvas stays full size."
-            : "Selecting an asset arms the place tool."}
+            : store.ui.dockTab === "scripts"
+              ? "Every source file in the project, and what the editor can do with each."
+              : "Selecting an asset arms the place tool."}
         </span>
       </div>
       <div className="panel-body">
-        {store.ui.dockTab === "assets" ? <AssetBrowser /> : <AnimEditor />}
+        {store.ui.dockTab === "assets" && <AssetBrowser />}
+        {store.ui.dockTab === "anim" && <AnimEditor />}
+        {store.ui.dockTab === "scripts" && <ScriptBrowser />}
       </div>
     </section>
   );
@@ -184,7 +196,7 @@ function AnimEditor() {
 
   const createAnim = () => {
     const key = `anim_${anims.length + 1}`;
-    store.upsertAnim({ key, frames: [], fps: 12, loop: true }, "Create animation");
+    store.upsertAnim({ key, frames: [], fps: 12, repeat: -1 }, "Create animation");
   };
 
   const update = (patch: Partial<AnimDef>) => {
@@ -275,10 +287,25 @@ function AnimEditor() {
             <label className="field check">
               <input
                 type="checkbox"
-                checked={current.loop}
-                onChange={(e) => update({ loop: e.target.checked })}
+                checked={current.repeat === -1}
+                onChange={(e) => update({ repeat: e.target.checked ? -1 : 0 })}
               />
-              <span className="field-label">Loop (repeat: -1)</span>
+              <span className="field-label">Loop forever</span>
+            </label>
+            {current.repeat !== -1 && (
+              <NumberField
+                label="Repeat"
+                value={current.repeat}
+                onCommit={(v) => update({ repeat: Math.max(0, Math.round(v)) })}
+              />
+            )}
+            <label className="field check">
+              <input
+                type="checkbox"
+                checked={!!current.yoyo}
+                onChange={(e) => update({ yoyo: e.target.checked || undefined })}
+              />
+              <span className="field-label">Yoyo</span>
             </label>
             <button className="danger" onClick={() => store.deleteAnim(current.key)}>
               Delete
@@ -289,6 +316,33 @@ function AnimEditor() {
           <div className="anim-timeline">
             <div className="strip-header">
               <span>Timeline — {current.frames.length} frames</span>
+              {source && (
+                <>
+                  <button
+                    className="mini"
+                    title={`Append all ${sourceFrames().length} frames of ${source.key}, in order`}
+                    onClick={() =>
+                      update({
+                        frames: [
+                          ...current.frames,
+                          ...sourceFrames().map((frame) => ({ textureKey: source.key, frame })),
+                        ],
+                      })
+                    }
+                  >
+                    + all {sourceFrames().length}
+                  </button>
+                  {current.frames.length > 0 && (
+                    <button
+                      className="mini danger"
+                      title="Remove every frame from this animation"
+                      onClick={() => update({ frames: [] })}
+                    >
+                      clear
+                    </button>
+                  )}
+                </>
+              )}
               <select value={source?.key ?? ""} onChange={(e) => setSourceKey(e.target.value)}>
                 {sources.length === 0 && <option value="">import a spritesheet or slice an atlas</option>}
                 {sources.map((s) => (
@@ -373,6 +427,85 @@ function AnimEditor() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * Every source file in the project, and what the editor can do with each.
+ *
+ * The Scripts tab used to be a list of ScriptComponents, which meant a project
+ * written before Mosaic showed an empty panel while its whole game sat on disk
+ * beside it. What a person wants to know here is "what code is in this
+ * project, and what does the editor understand about it" — so everything is
+ * listed, and each file says which of three things it is.
+ */
+function ScriptBrowser() {
+  const { store, workspace } = useEditor();
+  useScripts(workspace.scripts);
+  useStoreVersion(store);
+
+  const files = sourceFiles(workspace.scripts.index);
+  const boundByClass = new Map(
+    store.project.prefabs.filter((p) => p.source).map((p) => [p.name, p]),
+  );
+  const root = workspace.location?.root ?? "";
+
+  if (!files.length) {
+    return (
+      <div className="empty">
+        No source files found. Mosaic reads them from the folder named by{" "}
+        <code>paths.src</code> in <code>mosaic.config.json</code> — a project that keeps its code
+        somewhere else needs that pointed at it.
+      </div>
+    );
+  }
+
+  return (
+    <div className="script-browser">
+      {files.map((file) => (
+        <div key={file.src} className="script-file">
+          <div className="script-file-head">
+            <button
+              className="link"
+              onClick={() => void platform.openInEditor(root, file.src)}
+              title="Open in your own editor"
+            >
+              {file.src}
+            </button>
+            <span className="note">
+              {file.classes.length} class{file.classes.length === 1 ? "" : "es"}
+            </span>
+          </div>
+          {file.classes.map((cls) => {
+            const attachable = isScriptComponent(workspace.scripts.index, cls);
+            const bound = boundByClass.get(cls.name);
+            return (
+              <div key={cls.name} className="script-class">
+                <button
+                  className="link"
+                  onClick={() => void platform.openInEditor(root, cls.src, cls.line)}
+                >
+                  {cls.name}
+                </button>
+                <span className="note">{cls.base ? `extends ${cls.base}` : "no base class"}</span>
+                {attachable && <span className="chip on">attachable</span>}
+                {bound && (
+                  <span className="chip on" title={`Instances construct ${cls.name} from ${cls.src}`}>
+                    bound to prefab
+                  </span>
+                )}
+                {!attachable && !bound && cls.ctorParams && (
+                  <span className="note">
+                    ({cls.ctorParams.join(", ")})
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

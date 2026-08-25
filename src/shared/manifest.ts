@@ -18,10 +18,13 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
   for (const obj of scene.objects) {
     const resolved = resolveObject(project, obj);
     if (resolved.texture) needed.add(resolved.texture);
-    if (resolved.playOnSpawn) {
-      const anim = project.anims.find((a) => a.key === resolved.playOnSpawn);
-      for (const f of anim?.frames ?? []) needed.add(f.textureKey);
-    }
+  }
+
+  // Every animation's frames, not just the ones an object names on spawn: a
+  // script can play any key, and a sheet that arrives unloaded is a texture
+  // error at the moment the animation is asked for.
+  for (const anim of project.anims) {
+    for (const frame of anim.frames) needed.add(frame.textureKey);
   }
 
   // Prefab definitions used by this scene pull in their own art — resolved,

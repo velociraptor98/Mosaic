@@ -27,6 +27,9 @@ import { CollisionDialog } from "./editor/ui/dialogs/CollisionDialog";
 import { CommandPalette } from "./editor/ui/dialogs/CommandPalette";
 import { ExportDialog } from "./editor/ui/dialogs/ExportDialog";
 import { ImportDialog } from "./editor/ui/dialogs/ImportDialog";
+import { ImportPhaserDialog } from "./editor/ui/dialogs/ImportPhaserDialog";
+import { RunProjectDialog } from "./editor/ui/dialogs/RunProjectDialog";
+import { applyImport, findEntries, previewScene, surveyProject } from "./editor/import/importPhaser";
 import { NewSceneDialog } from "./editor/ui/dialogs/NewSceneDialog";
 import { PrefabDialog } from "./editor/ui/dialogs/PrefabDialog";
 import { PromoteDialog } from "./editor/ui/dialogs/PromoteDialog";
@@ -49,6 +52,7 @@ if (typeof window !== "undefined") {
     bridge,
     platform,
     scriptTrust: { isTrusted, trustRoot, revokeRoot },
+    importPhaser: { findEntries, surveyProject, previewScene, applyImport },
     planScaffold,
     DEFAULT_OPTIONS,
   };
@@ -59,6 +63,16 @@ export default function App() {
   const [creating, setCreating] = useState(false);
   const [firstRun, setFirstRun] = useState<FirstRunInfo | null>(null);
   const openDialog = useCallback((name: DialogName) => setDialog(name), []);
+
+  // The dialogs are React state, so the debug handle cannot reach them from
+  // module scope the way it reaches the store. Published here instead, for the
+  // desktop end-to-end test and for devtools.
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).mosaicDebug = {
+      ...((window as unknown as Record<string, Record<string, unknown>>).mosaicDebug ?? {}),
+      openDialog,
+    };
+  }, [openDialog]);
 
   const workspaceRevision = useWorkspace(workspace);
   // The propagation panel is opened by the store, not by a menu, so the shell
@@ -152,6 +166,8 @@ export default function App() {
         {dialog === "palette" && <CommandPalette onClose={() => setDialog(null)} />}
         {dialog === "newscene" && <NewSceneDialog onClose={() => setDialog(null)} />}
         {dialog === "import" && <ImportDialog onClose={() => setDialog(null)} />}
+        {dialog === "importphaser" && <ImportPhaserDialog onClose={() => setDialog(null)} />}
+        {dialog === "runproject" && <RunProjectDialog onClose={() => setDialog(null)} />}
         {dialog === "atlas" && <AtlasDialog onClose={() => setDialog(null)} />}
         {dialog === "prefab" && <PrefabDialog onClose={() => setDialog(null)} />}
         {dialog === "collision" && <CollisionDialog onClose={() => setDialog(null)} />}

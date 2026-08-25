@@ -55,6 +55,13 @@ export interface DiskFile {
   /** Project-relative POSIX path. */
   rel: string;
   contents: string;
+  /**
+   * base64 for binary files (imported art); utf8 by default.
+   *
+   * The IPC has always understood this — it is what the New Project flow writes
+   * placeholder art with. It just was not reachable from the platform seam.
+   */
+  encoding?: "utf8" | "base64";
 }
 
 export interface DiskAsset {
@@ -72,6 +79,8 @@ export interface ProjectSource {
   scenes: DiskFile[];
   prefabs: DiskFile[];
   assets: DiskAsset[];
+  /** The folder already holds files that are not ours. */
+  occupied: boolean;
 }
 
 export interface WriteOutcome {
@@ -108,6 +117,20 @@ export interface Platform {
   /** Compiles the project's script classes so the play-test can run them. */
   bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
 
+  // --- Importing a hand-written Phaser project ---------------------------
+  /** True when this platform can run a project's own code to record a scene. */
+  readonly canImportPhaser: boolean;
+  /** Files that construct a `Phaser.Game`, as import entry candidates. */
+  findGameEntries(root: string): Promise<string[]>;
+  /**
+   * Runs one entry in an isolated window and reports what each of its scenes
+   * put on the display list. Executes the project's code — only ever call it
+   * for a folder the user has explicitly trusted.
+   */
+  recordScene(root: string, entry: string): Promise<SceneRecordingResult>;
+  /** Compiles the project's entry point so the editor can run its real game. */
+  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+
   /** Native picker on desktop; copies the chosen files into assets/. */
   importAssets(root: string): Promise<AssetDef[]>;
   /** Copy already-known paths (drag & drop) into assets/. */
@@ -137,4 +160,11 @@ export interface Platform {
   forget(root: string): Promise<void>;
   reveal(root: string, rel?: string): Promise<void>;
   setWindowTitle(title: string): void;
+}
+
+/** What `recordScene` hands back; `scenes` is keyed by Phaser scene key. */
+export interface SceneRecordingResult {
+  ok: boolean;
+  error?: string;
+  scenes?: Record<string, unknown>;
 }

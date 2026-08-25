@@ -1,6 +1,7 @@
 import { DEFAULT_GROUPS, LEGACY_OBJECT_TEXTURES } from "../../shared/definitions";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_PATHS,
   type AnimDef,
   type AssetDef,
   type CollisionRule,
@@ -87,6 +88,14 @@ export interface LoadResult {
   issues: string[];
   /** True when the folder held nothing Mosaic recognised. */
   scaffolded: boolean;
+  /**
+   * Hold every write back until the user asks for one.
+   *
+   * Set when a starter was generated into a folder that already belongs to
+   * somebody — the editor has something to show, but nothing about that is
+   * worth putting on their disk unprompted.
+   */
+  deferWrite: boolean;
 }
 
 /** mosaic.config.json, defaulted field by field so a partial file still opens. */
@@ -103,6 +112,12 @@ function readConfig(contents: string | null | undefined, issues: string[]): Proj
     scale: parsed.scale ?? DEFAULT_CONFIG.scale,
     physics: parsed.physics ?? DEFAULT_CONFIG.physics,
     pixelArt: parsed.pixelArt ?? DEFAULT_CONFIG.pixelArt,
+    paths: {
+      src: parsed.paths?.src ?? DEFAULT_PATHS.src,
+      scenes: parsed.paths?.scenes ?? DEFAULT_PATHS.scenes,
+      prefabs: parsed.paths?.prefabs ?? DEFAULT_PATHS.prefabs,
+      assets: parsed.paths?.assets ?? DEFAULT_PATHS.assets,
+    },
   };
 }
 
@@ -150,7 +165,30 @@ export function projectFromSource(
   if (!manifest && !scenes.length) {
     const starter = createStarterProject();
     starter.name = folderName;
-    return { project: starter, issues, scaffolded: true };
+    // Art already sitting in the folder is still the project's art, even when
+    // nothing else in it is ours — a folder someone dropped sprites into
+    // before opening it is the ordinary case, not a strange one. Reconciling
+    // here rather than returning early also keeps the scaffold's own save
+    // honest: the manifest it writes lists what is actually on disk, so the
+    // first open and every later one agree.
+    starter.assets = reconcileAssets(starter.assets, source.assets, assetUrl, issues);
+
+    // An EMPTY folder is an invitation: scaffold into it and write, so what is
+    // on disk matches what the editor shows. A folder that already holds
+    // somebody's work is not. Mosaic cannot read a hand-written Phaser project,
+    // and a project it cannot read is indistinguishable here from an empty
+    // one — so writing a starter into it drops five files into a repo the user
+    // never asked us to touch, and buries their game under a sample scene.
+    //
+    // The starter still opens, so the editor is usable rather than blank. It
+    // just stays unsaved until the user asks for it.
+    if (source.occupied) {
+      issues.push(
+        "This folder already has files in it but no Mosaic project — showing a starter scene WITHOUT writing anything. Save to create the project here.",
+      );
+      return { project: starter, issues, scaffolded: true, deferWrite: true };
+    }
+    return { project: starter, issues, scaffolded: true, deferWrite: false };
   }
 
   const assets = reconcileAssets(manifest?.assets ?? [], source.assets, assetUrl, issues);
@@ -168,8 +206,9 @@ export function projectFromSource(
 
   if (!scenes.length) issues.push("No scene files found — started you on a fresh scene.");
   migrateLegacyTextures(project, issues);
+  migrateLegacyAnimLoop(project, issues);
   orderScenes(project, manifest);
-  return { project, issues, scaffolded: false };
+  return { project, issues, scaffolded: false, deferWrite: false };
 }
 
 /**
@@ -211,6 +250,27 @@ function migrateLegacyTextures(project: ProjectData, issues: string[]): void {
     issues.push(
       `Repointed ${moved} placeholder texture reference(s) to the shape they draw — save to write it back`,
     );
+  }
+}
+
+/**
+ * `loop: boolean` became `repeat: number`, because a boolean could only say
+ * forever or once. A folder written before that is converted on the way in and
+ * the old field dropped, so nothing downstream has to keep reading both.
+ */
+function migrateLegacyAnimLoop(project: ProjectData, issues: string[]): void {
+  let moved = 0;
+  for (const anim of project.anims) {
+    if (typeof anim.repeat === "number") {
+      delete anim.loop;
+      continue;
+    }
+    anim.repeat = anim.loop ? -1 : 0;
+    delete anim.loop;
+    moved += 1;
+  }
+  if (moved) {
+    issues.push(`Converted ${moved} animation(s) from loop to a repeat count — save to write it back`);
   }
 }
 

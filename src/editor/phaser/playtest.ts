@@ -1,10 +1,17 @@
 import Phaser from "phaser";
-import type { SceneData } from "../../shared/types";
+import type { ProjectData, SceneData } from "../../shared/types";
 import type { EditorBridge } from "../bridge";
 import type { ProjectStore } from "../store/project";
 import type { Workspace } from "../project/workspace";
 import { isTrusted, type ScriptCtor } from "../scripts/runtime";
 import type { PlayScene } from "./PlayScene";
+import {
+  runProjectGame,
+  showProjectScene,
+  stopProjectGame,
+  waitForProjectLoad,
+  type ProjectRunResult,
+} from "./projectRun";
 
 export interface PendingPromotion {
   id: string;
@@ -51,6 +58,64 @@ export class Playtest {
   }
 
   /**
+   * Runs the project's OWN game rather than Mosaic's runtime.
+   *
+   * The two are different answers to the same question and cannot both be
+   * right at once, so this is a separate action rather than a mode of RUN: one
+   * shows you the scene as the editor holds it, the other shows you the game as
+   * the project runs it.
+   */
+  async startProject(entry: string): Promise<ProjectRunResult> {
+    if (!this.game) return { ok: false, error: "No canvas yet." };
+    const root = this.workspace.location?.root;
+    if (!root) return { ok: false, error: "No project open." };
+
+    this.stop();
+    this.game.scene.stop("EditorScene");
+    this.store.setStatus(`Compiling ${entry}…`);
+
+    const result = await runProjectGame(this.game, root, entry, this.store.activeSceneKey);
+    if (!result.ok) {
+      this.game.scene.start("EditorScene", { store: this.store, bridge: this.bridge });
+      this.store.setStatus(`Could not run ${entry}: ${result.error}`);
+      return result;
+    }
+
+    this.projectRunning = true;
+    this.bridge.send("playtest", { playing: true, paused: false, frame: 0 });
+    this.store.setStatus(
+      `Running the project's own game — ${result.keys?.join(", ")}`,
+    );
+
+    // The chain loads first; the scene the editor is showing is brought
+    // forward once it actually has, not after a guess at how long that takes.
+    if (result.started && result.started !== result.keys?.[0]) {
+      void waitForProjectLoad(this.game, result.keys![0]).then((settled) => {
+        if (!this.projectRunning || !this.game) return;
+        showProjectScene(this.game, result.started!);
+        this.store.setStatus(
+          settled
+            ? `Running ${result.started} from the project's own code`
+            : `Running ${result.started} — the project's loader did not finish, so art may be missing`,
+        );
+      });
+    }
+    return result;
+  }
+
+  /** True while the project's own game has the canvas. */
+  projectRunning = false;
+
+  stopProject(): void {
+    if (!this.game) return;
+    stopProjectGame(this.game);
+    this.projectRunning = false;
+    this.game.scene.start("EditorScene", { store: this.store, bridge: this.bridge });
+    this.bridge.send("playtest", { playing: false, paused: false, frame: 0 });
+    this.store.setStatus("Stopped — back to the editor");
+  }
+
+  /**
    * Compiling the project's scripts is the one asynchronous step between RUN
    * and a running scene, so the transport flips immediately and the scene
    * starts when the code is ready. A scene with no scripts never waits.
@@ -75,6 +140,7 @@ export class Playtest {
       bridge: this.bridge,
       debug: true,
       scripts,
+      prefabClasses: this.workspace.scriptRuntime.prefabClasses,
     });
     this.store.setStatus(
       scripts
@@ -98,19 +164,24 @@ export class Playtest {
   private async compileScripts(
     scene: SceneData,
   ): Promise<Record<string, ScriptCtor> | undefined> {
-    void scene;
     const root = this.workspace.location?.root;
-    if (!root || !this.sceneHasScripts()) return undefined;
+    // Bound prefabs need the same compile scripts do — the project's class has
+    // to exist before the scene can construct one. A scene with neither still
+    // never waits.
+    const bound = boundPrefabClasses(this.store.project).filter((b) =>
+      scene.objects.some((o) => o.prefab === b.prefab),
+    );
+    if (!root || (!this.sceneHasScripts() && !bound.length)) return undefined;
 
     if (!isTrusted(root)) {
       this.store.setStatus(
-        "Scripts are not running: this project has not been trusted to execute its code",
+        "Not running the project's own code: this folder has not been trusted to execute it",
       );
       return undefined;
     }
 
-    this.store.setStatus("Compiling scripts…");
-    const ok = await this.workspace.scriptRuntime.build(root, this.workspace.scripts);
+    this.store.setStatus("Compiling the project's code…");
+    const ok = await this.workspace.scriptRuntime.build(root, this.workspace.scripts, bound);
     if (!ok) {
       this.store.setStatus(
         `Scripts did not compile — running without behaviour. ${this.workspace.scriptRuntime.error ?? ""}`,
@@ -137,7 +208,11 @@ export class Playtest {
     if (!root || !this.snapshot || !this.game) return;
     this.store.setStatus("Scripts changed — recompiling…");
 
-    const ok = await this.workspace.scriptRuntime.build(root, this.workspace.scripts);
+    const ok = await this.workspace.scriptRuntime.build(
+      root,
+      this.workspace.scripts,
+      boundPrefabClasses(this.store.project),
+    );
     if (!this.playing || !this.game) return;
     if (!ok) {
       // Keep the run alive on the last good build and say what is wrong; a
@@ -155,6 +230,7 @@ export class Playtest {
       bridge: this.bridge,
       debug: true,
       scripts: this.workspace.scriptRuntime.classes,
+      prefabClasses: this.workspace.scriptRuntime.prefabClasses,
     });
     this.paused = false;
     this.bridge.send("playtest", { playing: true, paused: false, frame: 0 });
@@ -186,6 +262,13 @@ export class Playtest {
   }
 
   stop(): PendingPromotion[] {
+    // STOP is one button to the user, so it has to end whichever kind of run
+    // is going. A project run has no volatile edits to promote — the objects
+    // belong to the project's own code, not to the editor's scene data.
+    if (this.projectRunning) {
+      this.stopProject();
+      return [];
+    }
     const play = this.playScene;
     const scene = this.store.scene;
     const edits = play?.volatileEdits() ?? [];
@@ -254,4 +337,28 @@ export class Playtest {
   readRuntime(id: string): Record<string, unknown> | null {
     return this.playScene?.readRuntime(id) ?? null;
   }
+}
+
+
+/**
+ * The project classes this scene's prefabs are bound to.
+ *
+ * Read from the project rather than the script index: the binding was decided
+ * at import time and recorded on the prefab, and re-deriving it here could
+ * disagree with what the exporter will emit.
+ */
+function boundPrefabClasses(
+  project: ProjectData,
+): { prefab: string; src: string; className: string; exportName: string }[] {
+  const out: { prefab: string; src: string; className: string; exportName: string }[] = [];
+  for (const prefab of project.prefabs) {
+    if (!prefab.source) continue;
+    out.push({
+      prefab: prefab.name,
+      src: prefab.source.module,
+      className: prefab.name,
+      exportName: prefab.source.export,
+    });
+  }
+  return out;
 }

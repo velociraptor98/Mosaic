@@ -249,3 +249,76 @@
   --label-size: 11.5px;
   --label-tracking: 0.09em;
 }
+
+/* ---------------------------------------------------------------------------
+   Mosaic dark ground — from `token.html`. The Industry block above stays as
+   the reference light ground; this block retunes it for a developer tool and
+   is the one that ships.
+
+   Same roles, same steel accent, but the ground is inverted and both tonal
+   ramps run dark→light, so the meaning of a step is preserved: 700–900 is
+   still "readable ink against the ground" and 100–300 is still "a quiet fill
+   sitting on it". Every rule written against the light ground therefore keeps
+   working here — only the three places that paired a ramp step with a literal
+   colour needed touching (see styles.css).
+--------------------------------------------------------------------------- */
+
+:root {
+  --color-bg: #14171a;
+  --color-surface: #1e2226;
+  --color-text: #e6e9ec;
+  --color-accent: #7ba3cc;
+  --color-accent-2: #7ba3cc;
+  --color-divider: color-mix(in srgb, #e6e9ec 15%, transparent);
+
+  --color-neutral-100: #15171a;
+  --color-neutral-200: #1c1f22;
+  --color-neutral-300: #24272b;
+  --color-neutral-400: #33373c;
+  --color-neutral-500: #4d5157;
+  --color-neutral-600: #71767d;
+  --color-neutral-700: #9aa0a7;
+  --color-neutral-800: #c2c7cd;
+  --color-neutral-900: #e6e9ec;
+
+  --color-accent-100: #161b21;
+  --color-accent-200: #1c2530;
+  --color-accent-300: #24313f;
+  --color-accent-400: #35485c;
+  --color-accent-500: #4d657f;
+  --color-accent-600: #6a86a3;
+  --color-accent-700: #8ea9c6;
+  --color-accent-800: #b2c8de;
+  --color-accent-900: #d7e4f0;
+
+  --color-accent-2-100: #161b21;
+  --color-accent-2-200: #1c2530;
+  --color-accent-2-300: #24313f;
+  --color-accent-2-400: #35485c;
+  --color-accent-2-500: #4d657f;
+  --color-accent-2-600: #6a86a3;
+  --color-accent-2-700: #8ea9c6;
+  --color-accent-2-800: #b2c8de;
+  --color-accent-2-900: #d7e4f0;
+
+  /* dark ground: a hairline edge plus ambient darkness, not ink blur */
+  --shadow-sm: 0 0 0 1px color-mix(in srgb, #e6e9ec 8%, transparent);
+  --shadow-md: 0 0 0 1px color-mix(in srgb, #e6e9ec 8%, transparent), 0 6px 18px rgba(0,0,0,.45);
+  --shadow-lg: 0 0 0 1px color-mix(in srgb, #e6e9ec 10%, transparent), 0 18px 44px rgba(0,0,0,.6);
+
+  /* The two state hues ported onto this ground the same way the accent ramp
+     was: each step keeps its hue, takes the dark accent step's lightness, and
+     scales its chroma by that hue's own chroma ratio — so danger and caution
+     still read as siblings of the accent rather than imports, and -100/-800
+     invert with the rest (deep fill, light ink). */
+  --color-danger: #d78488;
+  --color-danger-100: #221719;
+  --color-danger-800: #e6b8b9;
+  --color-caution: #b99a69;
+  --color-caution-100: #1f1a10;
+  --color-caution-800: #d5c2ab;
+
+  /* Native widgets — scrollbars, the colour input's picker, focus rings on
+     unstyled controls — follow the ground rather than the OS. */
+  color-scheme: dark;
+}

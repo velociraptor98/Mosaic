@@ -62,7 +62,7 @@ import { UndoStack, type SliceChange } from "./undo";
 
 export type Tool = "select" | "place" | "brush" | "rect" | "erase";
 export type LeftTab = "project" | "outliner" | "layers";
-export type DockTab = "assets" | "anim";
+export type DockTab = "assets" | "anim" | "scripts";
 export type InspectorTab =
   | "object"
   | "tile"

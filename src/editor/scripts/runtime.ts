@@ -63,6 +63,14 @@ export class ScriptRuntime {
   warnings: string[] = [];
   /** Class by `<src>::<class>`, ready for buildScene. */
   classes: Record<string, ScriptCtor> = {};
+  /**
+   * Classes the project wrote that prefabs are bound to, by prefab name.
+   *
+   * Compiled in the same bundle as the scripts rather than a second one: they
+   * routinely import each other, and two bundles would give the play-test two
+   * copies of any shared module.
+   */
+  prefabClasses: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject> = {};
   /** Project-relative paths that went into the last build. */
   modules: string[] = [];
   revision = 0;
@@ -86,6 +94,7 @@ export class ScriptRuntime {
     this.error = null;
     this.warnings = [];
     this.classes = {};
+    this.prefabClasses = {};
     this.modules = [];
     this.emit();
   }
@@ -100,19 +109,26 @@ export class ScriptRuntime {
    * scene attaches, because a script routinely reaches for a sibling class and
    * the bundle has to contain it.
    */
-  async build(root: string, registry: ScriptRegistry): Promise<boolean> {
+  async build(
+    root: string,
+    registry: ScriptRegistry,
+    /** Prefab name -> the project class it is bound to. */
+    bound: { prefab: string; src: string; className: string; exportName: string }[] = [],
+  ): Promise<boolean> {
     if (!isTrusted(root)) {
       this.status = "untrusted";
       this.error = null;
       this.emit();
       return false;
     }
-    const entries: ScriptEntry[] = registry
-      .attachable()
-      .map((cls) => ({ src: cls.src, className: cls.name }));
+    const entries: ScriptEntry[] = [
+      ...registry.attachable().map((cls) => ({ src: cls.src, className: cls.name })),
+      ...bound.map((b) => ({ src: b.src, className: b.className, exportName: b.exportName })),
+    ];
     if (!entries.length) {
       this.status = "ready";
       this.classes = {};
+      this.prefabClasses = {};
       this.modules = [];
       this.emit();
       return true;
@@ -135,6 +151,13 @@ export class ScriptRuntime {
 
     try {
       this.classes = evaluateBundle(bundle.code);
+      // The bundle is keyed by `<src>::<class>`; prefabs are looked up by name.
+      const byPrefab: Record<string, new (...args: never[]) => Phaser.GameObjects.GameObject> = {};
+      for (const b of bound) {
+        const cls = (this.classes as Record<string, unknown>)[`${b.src}::${b.className}`];
+        if (cls) byPrefab[b.prefab] = cls as new (...args: never[]) => Phaser.GameObjects.GameObject;
+      }
+      this.prefabClasses = byPrefab;
       this.modules = bundle.modules;
       this.status = "ready";
     } catch (err) {
@@ -155,12 +178,24 @@ export class ScriptRuntime {
  * nothing here pretends otherwise.
  */
 function evaluateBundle(code: string): Record<string, ScriptCtor> {
+  // Two names for the same instance, deliberately.
+  //
+  // `__mosaicPhaser` is what the bundler maps `import Phaser from "phaser"` on
+  // to. But a project written against a script tag — which is how the Phaser
+  // examples and a lot of real games are written — never imports it and just
+  // says `Phaser`, so that identifier has to resolve in this scope too.
+  // Passing it as a parameter keeps it out of `window`, where it would leak
+  // into the editor's own globals.
   const factory = new Function(
     "__mosaicPhaser",
+    "Phaser",
     `${code}\nreturn MosaicScripts;`,
-  ) as (phaser: unknown) => { default?: Record<string, ScriptCtor> } | Record<string, ScriptCtor>;
+  ) as (
+    phaser: unknown,
+    globalPhaser: unknown,
+  ) => { default?: Record<string, ScriptCtor> } | Record<string, ScriptCtor>;
 
-  const exported = factory(Phaser);
+  const exported = factory(Phaser, Phaser);
   const map = (exported as { default?: Record<string, ScriptCtor> }).default ?? exported;
   return map as Record<string, ScriptCtor>;
 }

@@ -921,7 +921,7 @@ kbd {
 .tile-swatch {
   position: relative;
   padding: 0;
-  border: 1px solid color-mix(in srgb, #fff 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-text) 40%, transparent);
   outline: 1px solid var(--color-divider);
   outline-offset: 0;
   image-rendering: pixelated;
@@ -1108,13 +1108,19 @@ kbd {
 
 .strip-header {
   display: flex;
-  justify-content: space-between;
+  gap: var(--space-2);
   align-items: center;
   font-family: var(--font-heading);
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-dim);
+}
+
+/* The source picker sits at the far end; the bulk actions stay by the count
+   they act on. */
+.strip-header select {
+  margin-left: auto;
 }
 
 .strip-header select {
@@ -2190,10 +2196,15 @@ button.block {
   color: color-mix(in srgb, var(--color-text) 78%, transparent);
 }
 
+/* A recessed well, not an inversion. The light ground got its separation by
+   flipping to the far end of the accent ramp; on the dark ground that same
+   flip lands on a glaring pale slab, so the roles are stated directly — a
+   deep steel fill with the ramp's readable step as ink, which recedes on
+   either ground. */
 .config-preview,
 .code-preview {
-  background: var(--color-accent-900);
-  color: #dfe7ef;
+  background: var(--color-accent-100);
+  color: var(--color-accent-900);
   padding: var(--space-3);
   white-space: pre;
   overflow: auto;
@@ -2223,7 +2234,10 @@ button.block {
   position: relative;
   width: 100%;
   border: 1px solid color-mix(in srgb, var(--color-text) 28%, transparent);
-  background-color: #fbfbfc;
+  /* A schematic, not a colour-accurate render of the scene, so it follows the
+     editor's ground like every other panel — its ground line, player box and
+     label are all ink-and-accent mixes that only read against it. */
+  background-color: var(--wash-1);
   background-image:
     linear-gradient(to right, color-mix(in srgb, var(--color-text) 9%, transparent) 1px, transparent 1px),
     linear-gradient(to bottom, color-mix(in srgb, var(--color-text) 9%, transparent) 1px, transparent 1px);
@@ -3221,4 +3235,63 @@ button.link {
 .matrix .group-head input:focus {
   border-color: var(--color-divider);
   background: var(--color-bg);
+}
+
+/* ------------------------------------------------------ scripts in the dock
+
+   The panel is an inventory, so it reads as a list of files rather than as a
+   grid of things to pick up — that is the assets tab's job, and confusing the
+   two would suggest you could drag a class onto the canvas. */
+
+.script-browser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: auto;
+  font-size: 12px;
+}
+
+.script-file {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-divider);
+}
+
+.script-file-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+}
+
+.script-file-head .note,
+.script-class .note {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.script-class {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-left: var(--space-4);
+  font-family: var(--font-mono);
+}
+
+/* A file path or a class name opens the real file, so it reads as a link
+   rather than as a button that does something inside the editor. */
+.script-browser button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--color-accent-800);
+  cursor: pointer;
+}
+
+.script-browser button.link:hover {
+  color: var(--color-accent-900);
+  text-decoration: underline;
 }

@@ -236,10 +236,35 @@ export type PrefabNode = Omit<SceneObject, "id" | "layerId" | "parentId"> & {
  * so fixing the base fixes every variant except where one deliberately
  * disagreed. Read one through `resolvePrefab`, never straight off the field.
  */
+/**
+ * A prefab backed by a class the PROJECT already wrote, rather than one Mosaic
+ * generates.
+ *
+ * This is what lets an imported scene actually run: the generated scene
+ * constructs the user's own `Door`, with its own behaviour, positioned by the
+ * editor — instead of a lookalike sprite that does nothing.
+ */
+export interface PrefabSource {
+  /** Project-relative module path, e.g. "Door.js". */
+  module: string;
+  /** Exported name, or "default". */
+  export: string;
+  /**
+   * Constructor parameter names, in order.
+   *
+   * Recorded because the signature is not conventional across real projects —
+   * `(scene, x, y)`, `(name, scene, x, y)` and `(scene, track, size)` all
+   * occur — so the call has to be built to match rather than assumed.
+   */
+  params: string[];
+}
+
 export interface PrefabDef {
   name: string;
   /** Property paths instances are allowed to override, e.g. "data.value". */
   exposed: string[];
+  /** Set when this prefab is backed by the project's own class. */
+  source?: PrefabSource;
   /** The definition tree. Absent on a variant. */
   root?: PrefabNode;
   /** Variant: the prefab this one inherits from. */
@@ -256,6 +281,11 @@ export interface ResolvedPrefab {
   name: string;
   exposed: string[];
   root: PrefabNode;
+  /**
+   * Carried down the chain: a variant of a bound prefab is still that class,
+   * so `Coin_Gold` constructs the project's `Coin` like its base does.
+   */
+  source?: PrefabSource;
   base?: string;
   /** Base first, this prefab last. A base prefab's chain is just its name. */
   chain: string[];
@@ -276,7 +306,29 @@ export interface AnimDef {
   key: string;
   frames: AnimFrameRef[];
   fps: number;
-  loop: boolean;
+  /**
+   * How many times to play again after the first pass. `-1` is forever, `0`
+   * plays once — Phaser's own semantics, so nothing has to be translated.
+   *
+   * This replaced a `loop` boolean, which could only ever say "forever" or
+   * "once": playing a hit-flash three times was not expressible at all.
+   */
+  repeat: number;
+  /**
+   * Play the frames forward, then backward.
+   *
+   * A four-frame swing yoyos into seven frames of motion, so it is the
+   * difference between drawing four poses and drawing seven.
+   */
+  yoyo?: boolean;
+  /** Read on load from folders written before `repeat` existed. */
+  loop?: boolean;
+}
+
+/** Forever, once, or a count — whatever the definition says or used to say. */
+export function animRepeat(def: Pick<AnimDef, "repeat" | "loop">): number {
+  if (typeof def.repeat === "number") return def.repeat;
+  return def.loop ? -1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -350,9 +402,38 @@ export interface ProjectConfig {
   physics: "arcade" | "matter" | "none";
   /** Forces nearest-neighbour filtering and integer camera positions. */
   pixelArt: boolean;
+  /**
+   * Where this project keeps things.
+   *
+   * Mosaic's own layout is the default, but it is a convention rather than a
+   * requirement, and a project that predates Mosaic will not follow it — the
+   * Phaser examples keep every scene class loose at the folder root. Hardcoding
+   * the layout meant those projects indexed zero source files, which in turn
+   * meant nothing could be bound to the classes they define.
+   */
+  paths: ProjectPaths;
 }
 
+export interface ProjectPaths {
+  /** Source root for the script index. */
+  src: string;
+  /** Where Mosaic reads and writes `*.scene.json`. */
+  scenes: string;
+  /** Where Mosaic reads and writes `*.prefab.json`. */
+  prefabs: string;
+  /** Where art and audio are scanned from. */
+  assets: string;
+}
+
+export const DEFAULT_PATHS: ProjectPaths = {
+  src: "src",
+  scenes: "src/scenes",
+  prefabs: "src/prefabs",
+  assets: "assets",
+};
+
 export const DEFAULT_CONFIG: ProjectConfig = {
+  paths: DEFAULT_PATHS,
   canvas: { width: 960, height: 540 },
   tile: 32,
   scale: "FIT",

@@ -206,7 +206,12 @@ export function resolvePrefab(
     for (const path of link.exposed ?? []) exposed.add(path);
   }
 
+  // The binding belongs to the base that declared it; a variant inherits it
+  // unless it names its own.
+  const source = [...result.chain].reverse().find((link) => link.source)?.source;
+
   return {
+    source,
     name,
     exposed: [...exposed],
     root,

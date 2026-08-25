@@ -59,6 +59,17 @@ export class Workspace {
   saving = false;
   /** Background dependency install, when the New Project flow started one. */
   install: { running: boolean; log: string; code: number | null; error?: string } | null = null;
+  /**
+   * Files in this folder that construct a `Phaser.Game`.
+   *
+   * Detected on open so the UI can offer to run the project's own game without
+   * a scan at click time. Empty for a project Mosaic scaffolded, which has no
+   * entry point of its own.
+   */
+  gameEntries: string[] = [];
+  /** The entry the user picked, when the folder offers more than one. */
+  selectedGameEntry: string | null = null;
+
   /** Bumped on every change, so React can subscribe with useSyncExternalStore. */
   revision = 0;
   /**
@@ -80,6 +91,14 @@ export class Workspace {
    * them SKIPPED instead of overwriting them behind someone's back.
    */
   conflicts = new Set<string>();
+
+  /**
+   * Nothing is written to this folder until the user asks. Set when a starter
+   * was opened over a project Mosaic could not read; cleared by the first
+   * explicit save, which is the moment the user says the folder is theirs to
+   * use.
+   */
+  deferredWrite = false;
 
   private store: ProjectStore;
   private stopWatch: (() => void) | null = null;
@@ -156,7 +175,7 @@ export class Workspace {
       return false;
     }
 
-    const { project, issues, scaffolded } = projectFromSource(source, location.name, (rel) =>
+    const { project, issues, scaffolded, deferWrite } = projectFromSource(source, location.name, (rel) =>
       platform.assetUrl(location.root, rel),
     );
     await measureAssets(project);
@@ -166,15 +185,24 @@ export class Workspace {
     setProjectRoot(location.root);
     this.issues = issues;
     this.store.loadProject(project);
-    this.store.setPersister((next) => this.scheduleSave(next));
 
-    // A folder with nothing in it gets its scaffold written immediately, so
-    // what is on disk always matches what the editor is showing.
-    if (scaffolded) await this.saveNow(project);
+    // Autosave is what makes the editor feel like it edits a folder rather
+    // than a document — but it is also a write, and a starter shown over
+    // somebody else's repo must not put one on their disk. Skipping the
+    // scaffold's save is not enough on its own: the persister fires on the
+    // very first edit, and the folder fills up anyway.
+    this.deferredWrite = deferWrite;
+    if (!deferWrite) {
+      this.store.setPersister((next) => this.scheduleSave(next));
+      // A folder with nothing in it gets its scaffold written immediately, so
+      // what is on disk always matches what the editor is showing.
+      if (scaffolded) await this.saveNow(project);
+    }
 
     // The index is built in the background: the scene is on screen either
     // way, and a project with hundreds of source files should not hold it up.
     void this.scripts.load(location.root);
+    void this.detectGameEntries(location.root);
 
     this.startWatching();
     void this.refreshGit();
@@ -196,12 +224,32 @@ export class Workspace {
     this.git = {};
     this.issues = [];
     this.scripts.clear();
+    this.gameEntries = [];
+    this.selectedGameEntry = null;
     this.scriptRuntime.reset();
     setProjectRoot(null);
     if (!opts.keepStore) {
       this.store.setPersister(null);
       platform.setWindowTitle("Mosaic");
     }
+    this.emit();
+  }
+
+  /** The entry RUN would use: the user's choice, else the best-ranked one. */
+  get gameEntry(): string | null {
+    return this.selectedGameEntry ?? this.gameEntries[0] ?? null;
+  }
+
+  setGameEntry(rel: string): void {
+    this.selectedGameEntry = rel;
+    this.emit();
+  }
+
+  private async detectGameEntries(root: string): Promise<void> {
+    if (!platform.canImportPhaser) return;
+    const found = await platform.findGameEntries(root).catch(() => []);
+    if (this.location?.root !== root) return;
+    this.gameEntries = found;
     this.emit();
   }
 
@@ -232,6 +280,12 @@ export class Workspace {
 
   async saveNow(project = this.store.project): Promise<void> {
     if (!this.location) return;
+    if (this.deferredWrite) {
+      // Asked for by hand, so the folder is fair game from here on.
+      this.deferredWrite = false;
+      this.store.setPersister((next) => this.scheduleSave(next));
+      this.issues = this.issues.filter((i) => !i.includes("WITHOUT writing anything"));
+    }
     this.saving = true;
     this.emit();
     const files = projectToFiles(project);
@@ -349,7 +403,7 @@ export class Workspace {
     void this.scripts.load(this.location.root);
     const source = await platform.readProject(this.location.root);
     if (!source) return;
-    const { project, issues } = projectFromSource(source, this.location.name, (rel) =>
+    const { project, issues, deferWrite } = projectFromSource(source, this.location.name, (rel) =>
       platform.assetUrl(this.location!.root, rel),
     );
     await measureAssets(project);
@@ -364,7 +418,11 @@ export class Workspace {
     if (openPrefab && project.prefabs.some((p) => p.name === openPrefab)) {
       this.store.openPrefab(openPrefab);
     }
-    this.store.setPersister((next) => this.scheduleSave(next));
+    // A reload re-reads the folder, so it re-answers the question too: still
+    // somebody else's repo means autosave stays off, and re-installing it here
+    // would undo the whole guard on the first external edit.
+    this.deferredWrite = deferWrite;
+    if (!deferWrite) this.store.setPersister((next) => this.scheduleSave(next));
     this.emit();
   }
 
@@ -385,3 +443,4 @@ export class Workspace {
     return this.git[rel];
   }
 }
+

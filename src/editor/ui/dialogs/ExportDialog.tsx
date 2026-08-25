@@ -17,6 +17,11 @@ import { useEditor, useStoreVersion } from "../context";
 const TARGETS: { id: ExportTarget; label: string; blurb: string }[] = [
   { id: "sceneJson", label: "Scene JSON", blurb: "The format the editor and the game both read." },
   { id: "tsSceneClass", label: "TypeScript Scene class", blurb: "preload() + create(), meant to be read in review." },
+  {
+    id: "tsSceneModule",
+    label: "Object builder",
+    blurb: "Functions your own scene calls — for a project that already has one.",
+  },
   { id: "both", label: "Both", blurb: "JSON for data, a class for behaviour." },
 ];
 
