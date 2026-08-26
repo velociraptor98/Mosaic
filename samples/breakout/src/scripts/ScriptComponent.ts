@@ -132,6 +132,18 @@ export abstract class ScriptComponent<
   create?(): void;
   /** dt is milliseconds, matching Phaser's own update signature. */
   update?(dt: number, time: number): void;
+  /**
+   * Called when this object touches something the project's collision matrix
+   * pairs it with — under either rule, with the thing it touched.
+   *
+   * The matrix owns WHETHER two groups interact and what physics does about
+   * it; this is how the object finds out. Before it existed a "collide" pair
+   * was wired with no callback at all, so anything that needed a bounce AND to
+   * know it happened had to register a second collider of its own inside
+   * create() — which is two colliders on one pair, the second one running
+   * against bodies the first has already separated.
+   */
+  onContact?(other: Phaser.GameObjects.GameObject, rule: "collide" | "overlap"): void;
   destroy?(): void;
 }
 
@@ -141,6 +153,15 @@ interface Attachment {
   script: ScriptComponent;
   started: boolean;
 }
+
+/**
+ * One participant in a collision, as Arcade's own callback hands it over.
+ *
+ * Taken FROM Phaser's alias rather than spelled out: the union has widened
+ * between versions, and the generated scene passes these straight through, so
+ * writing it by hand here would break against whichever Phaser a project pins.
+ */
+export type ContactSide = Parameters<Phaser.Types.Physics.Arcade.ArcadePhysicsCallback>[0];
 
 /**
  * Runs the scripts attached to a scene's objects.
@@ -159,6 +180,8 @@ export class ScriptHost {
 
   private attachments: Attachment[] = [];
   private byObject = new Map<Phaser.GameObjects.GameObject, ScriptComponent[]>();
+  /** Scripts whose create() has run. A contact before that is dropped. */
+  private started = new WeakSet<ScriptComponent>();
   private scene: Phaser.Scene;
 
   constructor(scene: Phaser.Scene) {
@@ -201,6 +224,48 @@ export class ScriptHost {
     return this.byObject.get(object) ?? [];
   }
 
+  /**
+   * Tells both objects in a matrix-wired pair that they touched.
+   *
+   * Called by the generated scene, once per pair, from the handler the
+   * collision matrix produced. Each side is handed the OTHER object, so a
+   * script never has to work out which of the two it was.
+   */
+  contact(a: ContactSide, b: ContactSide, rule: "collide" | "overlap"): void {
+    this.deliver(a, b, rule);
+    this.deliver(b, a, rule);
+  }
+
+  /**
+   * Both sides are cast to GameObject here, once, so a script's `onContact`
+   * gets the type it actually wants. The matrix only ever pairs GROUPS, so a
+   * participant is always a game object — the Tile arm of the union belongs to
+   * the tile-layer colliders, which never come through this.
+   */
+  private deliver(
+    rawObject: ContactSide,
+    rawOther: ContactSide,
+    rule: "collide" | "overlap",
+  ): void {
+    const object = rawObject as Phaser.GameObjects.GameObject;
+    const other = rawOther as Phaser.GameObjects.GameObject;
+    // A copy: a handler may destroy its own object, which takes its scripts
+    // out of the list we would otherwise still be walking.
+    for (const script of [...(this.byObject.get(object) ?? [])]) {
+      // Physics runs before this host's tick, so the very first contact of a
+      // scene can land before create() has. A script that has not initialised
+      // has no business handling an event.
+      if (!script.enabled || !script.onContact || !this.started.has(script)) continue;
+      try {
+        script.onContact(other, rule);
+      } catch (error) {
+        script.enabled = false;
+        if (this.onError) this.onError({ script, error });
+        else console.error("[mosaic] script disabled after an error in onContact", error);
+      }
+    }
+  }
+
   /** The first script of a given class on an object. */
   get<T extends ScriptComponent>(
     object: Phaser.GameObjects.GameObject,
@@ -229,6 +294,7 @@ export class ScriptHost {
       try {
         if (!attachment.started) {
           attachment.started = true;
+          this.started.add(attachment.script);
           attachment.script.create?.();
         }
         attachment.script.update?.(delta, time);

@@ -35,13 +35,7 @@ comes out the far end actually run? Both are checked in CI:
 
 ## What did not fit
 
-**Step 3 — Import the art.** An existing Phaser atlas (.png + .json) cannot be imported as one. The slicer builds frames from pixels and names them from a pattern, so re-using packed art means either losing its frame names or unpacking it first.
 
-**Step 6 — Place the paddle and the ball.** The original disables ONE side of the world bounds — `setBoundsCollision(true, true, true, false)` — so the ball can fall out of play. Mosaic authors the bounds rectangle and whether a body is kept inside it, but not the four per-side flags, so a Mosaic breakout has no floor to lose the ball through and therefore no way to lose. BallController sets the flag itself, behind a "solid floor" property.
-
-**Step 9 — Lay the wall out.** Nothing in the scene format says "a grid of these". Sixty placements are sixty objects in the scene file and sixty statements in the exported class; changing the wall's shape means moving sixty things rather than editing two numbers.
-
-**Step 11 — The collision matrix, and why this game cannot use it.** The collision matrix cannot express "collide, and tell me". Every interaction that needs a physical response AND a callback has to leave the matrix and move into a script, which is both of breakout's interactions — the entire game.
 
 ## Assets
 

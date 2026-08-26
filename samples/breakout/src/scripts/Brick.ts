@@ -15,23 +15,23 @@ export class Brick extends ScriptComponent {
   @property({ min: 1, max: 5, label: "hits to break" })
   hits = 1;
 
-  @property({ label: "ball object", hint: "name of the object that breaks this brick" })
-  ballName = "Ball";
-
   private left = 1;
 
   create(): void {
     this.left = this.hits;
-    const ball = this.scene.children.getByName(this.ballName) as Phaser.Physics.Arcade.Sprite | null;
-    // Bounce and hook in one call, for the reason BallController gives: the
-    // collision matrix hands a callback to "overlap" pairs and not to
-    // "collide" ones, and a brick needs both.
-    if (ball) this.scene.physics.add.collider(this.object, ball, () => this.hit());
+    // No collider is registered here. ball × brick is authored once in the
+    // project's collision matrix, and every brick hears about its own hit
+    // through onContact below.
 
     // The director counts the wall rather than being told how big it is, so
     // adding a row in the editor needs no matching edit anywhere in code.
     this.scene.events.emit("brick-added");
     this.scene.events.on("wall-restored", this.restore, this);
+  }
+
+  /** ball × brick, from the collision matrix. */
+  onContact(): void {
+    this.hit();
   }
 
   destroy(): void {

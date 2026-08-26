@@ -16,6 +16,7 @@ export type DialogName =
   | "scripttrust"
   | "export"
   | "package"
+  | "grid"
   | "promote"
   | null;
 
@@ -100,6 +101,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "edit.undo", title: "Undo", category: "Edit", binding: `${mod}Z`, run: () => store.undo() },
     { id: "edit.redo", title: "Redo", category: "Edit", binding: `${mod}⇧Z`, run: () => store.redo() },
     { id: "edit.duplicate", title: "Duplicate selection", category: "Edit", binding: `${mod}D`, run: () => store.duplicateObjects(store.view.selection) },
+    { id: "edit.grid", title: "Fill grid from selection…", category: "Edit", binding: `${mod}⇧G`, run: () => { if (store.view.selection.length) openDialog("grid"); else store.setStatus("Select something to stamp first"); } },
     { id: "edit.delete", title: "Delete selection", category: "Edit", binding: "⌫", run: () => store.deleteObjects(store.view.selection) },
     { id: "edit.group", title: "Group selection", category: "Edit", binding: `${mod}G`, run: () => store.groupSelection() },
 

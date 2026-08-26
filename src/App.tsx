@@ -27,6 +27,7 @@ import { CollisionDialog } from "./editor/ui/dialogs/CollisionDialog";
 import { CommandPalette } from "./editor/ui/dialogs/CommandPalette";
 import { ExportDialog } from "./editor/ui/dialogs/ExportDialog";
 import { PackageDialog } from "./editor/ui/dialogs/PackageDialog";
+import { GridDialog } from "./editor/ui/dialogs/GridDialog";
 import { ImportDialog } from "./editor/ui/dialogs/ImportDialog";
 import { ImportPhaserDialog } from "./editor/ui/dialogs/ImportPhaserDialog";
 import { RunProjectDialog } from "./editor/ui/dialogs/RunProjectDialog";
@@ -176,6 +177,7 @@ export default function App() {
         {dialog === "scripttrust" && <ScriptTrustDialog onClose={() => setDialog(null)} />}
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
         {dialog === "package" && <PackageDialog onClose={() => setDialog(null)} />}
+        {dialog === "grid" && <GridDialog onClose={() => setDialog(null)} />}
         {dialog === "promote" && <PromoteDialog onClose={() => setDialog(null)} />}
         {store.ui.prefabPlan && <PropagateDialog onClose={() => setDialog(null)} />}
       </div>

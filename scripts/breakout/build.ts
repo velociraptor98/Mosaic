@@ -10,6 +10,7 @@ import { shapeTextureKey } from "../../src/shared/definitions";
 import { scriptFilePath } from "../../src/shared/scripts";
 import { bodyForSize } from "../../src/shared/size";
 import { DEFAULT_PATHS, type AssetDef, type ProjectConfig } from "../../src/shared/types";
+import { parsePhaserAtlas } from "../../src/editor/assets/atlasJson";
 import { GAME_SCRIPTS } from "./scripts";
 
 /**
@@ -78,30 +79,24 @@ const CONFIG: ProjectConfig = {
 const EXAMPLES = process.env.PHASER_EXAMPLES ?? join(homedir(), "Downloads", "examples-master");
 const ART = join(EXAMPLES, "public", "assets", "games", "breakout");
 
-/** The art the game needs, and what size each piece is. */
-const ART_FILES: { file: string; width: number; height: number }[] = [
-  { file: "ball1.png", width: 22, height: 22 },
-  { file: "paddle1.png", width: 104, height: 24 },
-  { file: "blue1.png", width: 64, height: 32 },
-  { file: "red1.png", width: 64, height: 32 },
-  { file: "green1.png", width: 64, height: 32 },
-  { file: "yellow1.png", width: 64, height: 32 },
-  { file: "silver1.png", width: 64, height: 32 },
-  { file: "purple1.png", width: 64, height: 32 },
-];
+/** The packed sheet the original loads, and the document that names its frames. */
+const SHEET = "breakout.png";
+const SHEET_DOC = "breakout.json";
+const SHEET_KEY = "breakout";
+const SHEET_SIZE = { width: 504, height: 121 };
 
 /**
  * The wall, top row first — the same six colours in the same order as the
  * original's `frame: [ 'blue1', 'red1', ... ]`, with a score attached to each
  * because the original keeps none.
  */
-const ROWS: { variant: string | null; texture: string; points: number }[] = [
-  { variant: null, texture: "blue1", points: 60 },
-  { variant: "Brick_Red", texture: "red1", points: 50 },
-  { variant: "Brick_Green", texture: "green1", points: 40 },
-  { variant: "Brick_Yellow", texture: "yellow1", points: 30 },
-  { variant: "Brick_Silver", texture: "silver1", points: 20 },
-  { variant: "Brick_Purple", texture: "purple1", points: 10 },
+const ROWS: { variant: string | null; frame: string; points: number }[] = [
+  { variant: null, frame: "blue1", points: 60 },
+  { variant: "Brick_Red", frame: "red1", points: 50 },
+  { variant: "Brick_Green", frame: "green1", points: 40 },
+  { variant: "Brick_Yellow", frame: "yellow1", points: 30 },
+  { variant: "Brick_Silver", frame: "silver1", points: 20 },
+  { variant: "Brick_Purple", frame: "purple1", points: 10 },
 ];
 
 /** The original's `gridAlign`, as plain arithmetic: 10 × 6 cells of 64 × 32. */
@@ -169,6 +164,9 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
   store.transact("Scene settings", () => {
     scene.settings.gravityY = 0;
     scene.settings.backgroundColor = "#12141c";
+    // The floor is OPEN. Three walls stop the ball; the fourth lets it go,
+    // which is the only reason a life can be lost.
+    scene.settings.bounds = { left: true, right: true, top: true, bottom: false };
   });
   step({
     n: "2",
@@ -176,47 +174,51 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     body:
       `No gravity: in breakout the ball is not falling, it is travelling. The background is scene ` +
       `data like everything else, so the exported game reads the colour from the same field the ` +
-      `editor writes.`,
-    editor: "Inspector → Scene → Gravity Y = 0, Background #12141c",
-    api: `scene.settings.gravityY = 0`,
+      `editor writes.\n\n` +
+      `The FLOOR IS OPEN. Arcade's world bounds are one rectangle with a flag per side, and three ` +
+      `of the four stop the ball while the fourth lets it through — which is the whole reason a ` +
+      `life can be lost. It is four checkboxes under Scene → World edges, and it lands in the ` +
+      `scene file like the gravity above it.`,
+    editor: "Inspector → Scene → Gravity Y = 0, Background #12141c, World edges → Bottom off",
+    api: `scene.settings.bounds = { left: true, right: true, top: true, bottom: false }`,
   });
 
   // ---------------------------------------------------------------- 3. art
-  const assets: AssetDef[] = ART_FILES.map(({ file, width, height }) => {
-    const bytes = readFileSync(join(ART, file));
-    const rel = `assets/${file}`;
-    write(rel, bytes.toString("base64"), "base64");
-    const key = file.replace(/\.png$/, "");
-    return {
-      id: `asset-${key}`,
-      key,
-      kind: "image",
-      path: rel,
-      url: `data:image/png;base64,${bytes.toString("base64")}`,
-      width,
-      height,
-    };
-  });
+  // The sheet and the document that names its frames, imported together the
+  // way the picker takes them.
+  const sheetBytes = readFileSync(join(ART, SHEET));
+  write(`assets/${SHEET}`, sheetBytes.toString("base64"), "base64");
+  write(`assets/${SHEET_DOC}`, readFileSync(join(ART, SHEET_DOC), "utf8"));
+
+  const frames = parsePhaserAtlas(readFileSync(join(ART, SHEET_DOC), "utf8"));
+  if (!frames?.length) throw new Error(`${SHEET_DOC} is not a Phaser atlas document.`);
+
+  const assets: AssetDef[] = [
+    {
+      id: `asset-${SHEET_KEY}`,
+      key: SHEET_KEY,
+      kind: "atlas",
+      path: `assets/${SHEET}`,
+      url: `data:image/png;base64,${sheetBytes.toString("base64")}`,
+      width: SHEET_SIZE.width,
+      height: SHEET_SIZE.height,
+      frames,
+    },
+  ];
   store.importAssets(assets);
 
   step({
     n: "3",
     title: "Import the art",
     body:
-      `Eight PNGs, copied into assets/ the way every import is — Mosaic never references art in ` +
-      `place. One ball, one paddle, six brick colours.\n\n` +
-      `The original loads all eight out of a packed ATLAS instead, with one \`load.atlas\` call. ` +
-      `Mosaic can hold an atlas and does export one, but it can only make an atlas by slicing an ` +
-      `image it already has — by grid, or by flood-filling islands of opaque pixels — and it names ` +
-      `the frames it finds from a pattern (\`frame_0\`, \`frame_1\`, …). There is no way to bring in ` +
-      `the atlas JSON that shipped with the art, so the frame names in it are lost. Eight separate ` +
-      `images say the same thing and keep the names, so that is what this uses.`,
-    editor: "Assets dock → Import… → the eight PNGs",
-    api: `store.importAssets(assets)`,
-    friction:
-      `An existing Phaser atlas (.png + .json) cannot be imported as one. The slicer builds frames ` +
-      `from pixels and names them from a pattern, so re-using packed art means either losing its ` +
-      `frame names or unpacking it first.`,
+      `The sheet and its document, picked together and copied into assets/ — Mosaic never ` +
+      `references art in place. One \`load.atlas\` in the exported game, exactly as the original ` +
+      `does it, and ${frames.length} frames that keep the names the packer gave them.\n\n` +
+      `Those names are the part that matters: the scene says frame "blue1", not frame 7. Mosaic ` +
+      `can still SLICE a sheet it has never seen — by grid, or by flood-filling opaque islands — ` +
+      `but a sheet that arrives already packed is read rather than re-cut.`,
+    editor: "Assets dock → Import… → breakout.png and breakout.json together",
+    api: `store.importAssets([{ kind: "atlas", frames: parsePhaserAtlas(doc) }])`,
   });
 
   // -------------------------------------------------------------- 4. groups
@@ -279,7 +281,8 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     name: "Paddle",
     x: 400,
     y: 550,
-    texture: "paddle1",
+    texture: SHEET_KEY,
+    frame: "paddle1",
     group: "paddle",
     body: bodyForSize(
       { width: 104, height: 24 },
@@ -297,7 +300,8 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     name: "Ball",
     x: 400,
     y: 500,
-    texture: "ball1",
+    texture: SHEET_KEY,
+    frame: "ball1",
     group: "ball",
     body: bodyForSize(
       { width: 22, height: 22 },
@@ -318,7 +322,6 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
   store.setScriptProp(ballId, 0, "launchY", -300);
   store.setScriptProp(ballId, 0, "english", 10);
   store.setScriptProp(ballId, 0, "restHeight", 50);
-  store.setScriptProp(ballId, 0, "solidFloor", false);
 
   step({
     n: "6",
@@ -335,12 +338,6 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     api:
       `store.addObject({ type: "sprite", texture: "ball1", group: "ball", body: { shape: "circle", radius: 11, bounce: 1 } })\n` +
       `store.setScriptProp(ballId, 0, "english", 10)`,
-    friction:
-      `The original disables ONE side of the world bounds — \`setBoundsCollision(true, true, true, ` +
-      `false)\` — so the ball can fall out of play. Mosaic authors the bounds rectangle and whether ` +
-      `a body is kept inside it, but not the four per-side flags, so a Mosaic breakout has no floor ` +
-      `to lose the ball through and therefore no way to lose. BallController sets the flag itself, ` +
-      `behind a "solid floor" property.`,
   });
 
   // -------------------------------------------------------- 7. the Brick prefab
@@ -349,7 +346,8 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     name: "Brick",
     x: brickX(0),
     y: brickY(0),
-    texture: ROWS[0].texture,
+    texture: SHEET_KEY,
+    frame: ROWS[0].frame,
     group: "brick",
     body: bodyForSize(
       { width: CELL_W, height: CELL_H },
@@ -396,7 +394,7 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     store.createVariant("Brick", row.variant);
     store.openPrefab(row.variant);
     const root = store.prefabDoc!.rootId;
-    store.setObjectProp(root, "texture", row.texture, "Set texture");
+    store.setObjectProp(root, "frame", row.frame, "Set frame");
     store.setObjectProp(root, POINTS_PATH, row.points, "Set points");
     store.pushPrefabSave();
     store.closePrefab();
@@ -406,7 +404,7 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     n: "8",
     title: "Five colours, as variants rather than five prefabs",
     body:
-      `Each colour inherits Brick and states only what differs: a texture and a score. Its file ` +
+      `Each colour inherits Brick and states only what differs: a frame and a score. Its file ` +
       `holds a base and a diff — there is no second copy of the object anywhere.\n\n` +
       `That is the whole reason to bother. Changing the body, or what a brick does when it is hit, ` +
       `is one edit on Brick and it reaches all sixty. In the original the six colours are six ` +
@@ -415,28 +413,34 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
     editor: "Prefab tab → Variants → name Brick_Red → Create → set texture and points → Save",
     api:
       `store.createVariant("Brick", "Brick_Red")\n` +
-      `store.setObjectProp(root, "texture", "red1")\n` +
+      `store.setObjectProp(root, "frame", "red1")\n` +
       `store.setObjectProp(root, "${POINTS_PATH}", 50)`,
   });
 
   // -------------------------------------------------------------- 9. the wall
-  let bricks = 1; // the seed brick is already instance one
-  for (let row = 0; row < ROWS.length; row++) {
-    for (let col = 0; col < COLS; col++) {
-      if (row === 0 && col === 0) continue; // the seed
-      const def = ROWS[row];
-      store.addObject({
-        type: "sprite",
-        name: def.variant ?? "Brick",
-        x: brickX(col),
-        y: brickY(row),
-        prefab: def.variant ?? "Brick",
-        overrides: {},
-        texture: def.texture,
-        data: {},
-      });
-      bricks += 1;
-    }
+  // One brick per ROW is placed by hand; Fill grid stamps each into its ten.
+  // The seed from step 7 is already the first cell of the top row.
+  let bricks = 1;
+  const rowSeeds: string[] = [seedBrickId];
+  for (let row = 1; row < ROWS.length; row++) {
+    const def = ROWS[row];
+    const id = store.addObject({
+      type: "sprite",
+      name: def.variant!,
+      x: brickX(0),
+      y: brickY(row),
+      prefab: def.variant!,
+      overrides: {},
+      texture: SHEET_KEY,
+      frame: def.frame,
+      data: {},
+    })!;
+    rowSeeds.push(id);
+    bricks += 1;
+  }
+  for (const seed of rowSeeds) {
+    store.setSelection([seed]);
+    bricks += store.fillGrid([seed], { cols: COLS, rows: 1, dx: CELL_W, dy: 0 });
   }
 
   step({
@@ -446,15 +450,12 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
       `${bricks} instances on a ${COLS} × ${ROWS.length} grid of ${CELL_W} × ${CELL_H} cells, the first centred at ` +
       `(${GRID_X}, ${GRID_Y}) — the same arithmetic the original hands to \`gridAlign\`. Each one is a node ` +
       `referencing a definition with an empty overrides map: a link, not a copy.\n\n` +
-      `In the editor this is six drags with the grid snap on. What it is NOT is a loop, and that ` +
-      `cuts both ways — the wall is now data you can see and rearrange, and it is also ${bricks} lines ` +
-      `in the generated scene where the original had four.`,
-    editor: "Assets dock → click a Brick variant → Place tool (B) → click along the grid",
-    api: `store.addObject({ type: "sprite", prefab: "Brick_Red", x, y, overrides: {} })`,
-    friction:
-      `Nothing in the scene format says "a grid of these". Sixty placements are sixty objects in ` +
-      `the scene file and sixty statements in the exported class; changing the wall's shape means ` +
-      `moving sixty things rather than editing two numbers.`,
+      `Six objects are placed by hand, one per colour, and Fill grid stamps each along its row. ` +
+      `The scene still stores ${bricks} objects rather than a rule that makes them — a level is data, not ` +
+      `a loop, and every brick stays selectable and movable afterwards. What the grid removes is ` +
+      `the fifty-four clicks, not the fifty-four objects.`,
+    editor: "Place one brick per row → select it → Fill grid… → 10 × 1, step 64",
+    api: `store.fillGrid([seed], { cols: ${COLS}, rows: 1, dx: ${CELL_W}, dy: 0 })`,
   });
 
   // ------------------------------------------------------------- 10. the HUD
@@ -487,32 +488,27 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
   });
 
   // ---------------------------------------------------------- 11. collisions
-  store.setCollisionRule("ball", "paddle", "ignore");
-  store.setCollisionRule("ball", "brick", "ignore");
+  store.setCollisionRule("ball", "paddle", "collide");
+  store.setCollisionRule("ball", "brick", "collide");
   store.setCollisionRule("brick", "brick", "ignore");
   store.setCollisionRule("paddle", "brick", "ignore");
 
   step({
     n: "11",
-    title: "The collision matrix, and why this game cannot use it",
+    title: "Author the collision matrix once",
     body:
-      `Both of breakout's collisions need the same two things at once: a bounce, and a callback. ` +
-      `The ball has to come off the paddle at an angle that depends on where it hit, and a brick ` +
-      `has to know it was the one that was hit.\n\n` +
-      `The matrix can only give one or the other. A pair marked "collide" is emitted as ` +
-      `\`physics.add.collider(a, b)\` with no handler; only a pair marked "overlap" gets a generated ` +
-      `callback, and an overlap does not bounce. Marking these pairs "collide" and ALSO registering ` +
-      `a collider in a script would put two colliders on the same pair, and the second one runs ` +
-      `against bodies the first has already separated.\n\n` +
-      `So both pairs are left ignored and the scripts register the colliders themselves — one call ` +
-      `each, bounce and hook together. The groups are still worth authoring: they are what the ` +
-      `export builds, and what a later rule would be written against.`,
+      `Both of breakout's collisions are the same shape: a bounce, and something that wants to know ` +
+      `it happened. The ball has to leave the paddle at an angle that depends on where it hit, and ` +
+      `a brick has to know it was the one that was hit.\n\n` +
+      `Two rules cover the whole game — ball collides with paddle, ball collides with brick — and ` +
+      `they are project data, authored in one grid rather than scattered through create(). The ` +
+      `export turns each into a collider AND a handler, and the handler tells the scripts on both ` +
+      `objects that they touched. So a brick's behaviour lives on the Brick PREFAB and reaches all ` +
+      `sixty instances without the scene naming any of them.\n\n` +
+      `Bricks ignore each other, and the paddle ignores bricks; saying so is what keeps sixty ` +
+      `immovable bodies from being tested against each other every step.`,
     editor: "Inspector → Physics → Edit collision matrix…",
-    api: `store.setCollisionRule("ball", "brick", "ignore")`,
-    friction:
-      `The collision matrix cannot express "collide, and tell me". Every interaction that needs a ` +
-      `physical response AND a callback has to leave the matrix and move into a script, which is ` +
-      `both of breakout's interactions — the entire game.`,
+    api: `store.setCollisionRule("ball", "brick", "collide")`,
   });
 
   // ------------------------------------------------------------- 12. scripts

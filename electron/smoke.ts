@@ -858,6 +858,7 @@ export class Patrol extends ScriptComponent {
   await newProjectFlow(win);
   await codeAtTheRoot(win);
   await packagingGame(win);
+  await atlasImport(win);
 
   console.log(failures === 0 ? "\nDesktop end-to-end passed" : `\n${failures} desktop check(s) failed`);
   app.exit(failures === 0 ? 0 : 1);
@@ -1404,6 +1405,94 @@ new Phaser.Game({
     } finally {
       preview.destroy();
     }
+  } catch (err) {
+    failures += 1;
+    console.log(`  ✗ threw: ${(err as Error).stack ?? err}`);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Importing art that is already packed.
+ *
+ * The slicer could only ever invent names — `frame_0`, `frame_1` — so art that
+ * arrived with its own atlas document lost the only part of it that a scene
+ * refers to. Both documented shapes are checked, because which one you get is
+ * decided by the packer and not by the person importing.
+ */
+async function atlasImport(win: BrowserWindow): Promise<void> {
+  const root = await fs.mkdtemp(path.join(app.getPath("temp"), "mosaic-atlas-"));
+  console.log(`\nImporting a packed atlas (${root})`);
+
+  const PNG = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  try {
+    await evaluate(win, `window.mosaicDebug.workspace.open({ root: ${JSON.stringify(root)}, name: "atlas" })`);
+    await wait(900);
+
+    const src = path.join(root, "incoming");
+    await fs.mkdir(src, { recursive: true });
+
+    // TexturePacker's default, and what the Phaser examples ship.
+    await fs.writeFile(path.join(src, "hash.png"), PNG);
+    await fs.writeFile(
+      path.join(src, "hash.json"),
+      JSON.stringify({
+        frames: {
+          blue1: { frame: { x: 386, y: 2, w: 64, h: 32 } },
+          ball1: { frame: { x: 452, y: 2, w: 22, h: 22 }, pivot: { x: 0.25, y: 0.75 } },
+        },
+        meta: { image: "hash.png" },
+      }),
+    );
+
+    // The array form, which names frames with `filename`.
+    await fs.writeFile(path.join(src, "list.png"), PNG);
+    await fs.writeFile(
+      path.join(src, "list.json"),
+      JSON.stringify({
+        frames: [
+          { filename: "paddle1", frame: { x: 0, y: 0, w: 104, h: 24 } },
+          { filename: "paddle2", frame: { x: 0, y: 24, w: 104, h: 24 } },
+        ],
+      }),
+    );
+
+    // A plain image with a `.json` beside it that is NOT an atlas: it must be
+    // left alone rather than turned into an atlas with no frames.
+    await fs.writeFile(path.join(src, "plain.png"), PNG);
+    await fs.writeFile(path.join(src, "plain.json"), JSON.stringify({ hello: "not an atlas" }));
+
+    const copy = (names: string[]) =>
+      evaluate<{ key: string; kind: string; frames?: { name: string; w: number; pivotX: number }[] }[]>(
+        win,
+        `window.mosaicDebug.platform.copyAssets(${JSON.stringify(root)}, ${JSON.stringify(
+          names.map((n) => path.join(src, n)),
+        )})`,
+      );
+
+    const hash = await copy(["hash.png", "hash.json"]);
+    ok("the document does not become an asset of its own", hash.length === 1, `${hash.length} asset(s)`);
+    ok("the image comes in as an atlas", hash[0]?.kind === "atlas", hash[0]?.kind);
+    const names = (hash[0]?.frames ?? []).map((f) => f.name);
+    ok("with the names the packer wrote, not invented ones",
+       names.includes("blue1") && names.includes("ball1"), names.join(", "));
+    const blue = hash[0]?.frames?.find((f) => f.name === "blue1");
+    ok("and the real frame rectangles", blue?.w === 64, JSON.stringify(blue));
+    const ball = hash[0]?.frames?.find((f) => f.name === "ball1");
+    ok("keeping a pivot the document set", ball?.pivotX === 0.25, String(ball?.pivotX));
+
+    const list = await copy(["list.png", "list.json"]);
+    ok("the array form is read too", list[0]?.kind === "atlas",
+       (list[0]?.frames ?? []).map((f) => f.name).join(", "));
+
+    const plain = await copy(["plain.png", "plain.json"]);
+    ok("a .json that is not an atlas leaves the image alone",
+       plain.length === 1 && plain[0]?.kind !== "atlas" && !plain[0]?.frames, plain[0]?.kind);
   } catch (err) {
     failures += 1;
     console.log(`  ✗ threw: ${(err as Error).stack ?? err}`);

@@ -5,6 +5,7 @@ import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../../shared/size";
 import { worldTransform } from "../../shared/transform";
 import {
   animRepeat,
+  boundsAreClosed,
   type AssetDef,
   type ProjectData,
   type SceneData,
@@ -13,7 +14,7 @@ import {
 } from "../../shared/types";
 import { MANIFEST_PATH, toManifest } from "../project/serialize";
 import { bindArgs } from "../../shared/prefabBinding";
-import type { PrefabSource } from "../../shared/types";
+import type { CollisionRule, PrefabSource } from "../../shared/types";
 
 export interface GeneratedFile {
   path: string;
@@ -202,8 +203,16 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
   const used = new Set<string>();
   const varsById = new Map<string, string>();
   const groupVars = new Map<string, string>();
-  /** Overlap pairs the matrix asked for, so the class can declare their hooks. */
-  const overlapHandlers: { name: string; a: string; b: string }[] = [];
+  /**
+   * Pairs the matrix asked for, so the class can declare their hooks.
+   *
+   * BOTH rules get one. A "collide" pair used to be emitted as a bare
+   * `physics.add.collider(a, b)` with nowhere to hang behaviour, so anything
+   * that needed a physical response AND to know it happened — a brick that
+   * breaks, a ball that leaves a paddle at an angle — could not be authored
+   * here at all and had to be re-registered inside a script.
+   */
+  const pairHandlers: { name: string; a: string; b: string; rule: CollisionRule }[] = [];
   /** Body configuration, held back until every group exists. */
   const bodyLines: string[] = [];
   const usedPrefabClasses = new Set<string>();
@@ -277,6 +286,14 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
   L.push(
     `    this.physics.world.setBounds(0, 0, ${scene.settings.width}, ${scene.settings.height});`,
   );
+  // Only when a side is actually open: every closed rectangle is Arcade's own
+  // default, and emitting it would be a line that says nothing.
+  if (!boundsAreClosed(scene.settings.bounds)) {
+    const b = scene.settings.bounds!;
+    L.push(
+      `    this.physics.world.setBoundsCollision(${b.left}, ${b.right}, ${b.top}, ${b.bottom});`,
+    );
+  }
   if (scene.settings.gravityY) {
     L.push(`    this.physics.world.gravity.y = ${scene.settings.gravityY};`);
   }
@@ -420,10 +437,9 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
         emitted.add(key);
         const fn = rule === "overlap" ? "overlap" : "collider";
         const name = `on${className(a)}${className(b)}`;
-        if (rule === "overlap") overlapHandlers.push({ name, a, b });
-        const handler = rule === "overlap" ? `, this.${name}` : "";
+        pairHandlers.push({ name, a, b, rule });
         pairLines.push(
-          `    this.physics.add.${fn}(${groupVars.get(a)}, ${groupVars.get(b)}${handler});`,
+          `    this.physics.add.${fn}(${groupVars.get(a)}, ${groupVars.get(b)}, this.${name});`,
         );
       }
     }
@@ -481,9 +497,13 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
   L.push(`    // Your own wiring goes here — it survives regeneration.`);
   L.push(`    // </keep>`);
 
+  const hasScripts = sceneHasScripts(project, scene);
+
   L = handlerBody;
-  for (const handler of overlapHandlers) {
-    L.push(`  /** ${handler.a} × ${handler.b} — authored as "overlap" in the collision matrix. */`);
+  for (const handler of pairHandlers) {
+    L.push(
+      `  /** ${handler.a} × ${handler.b} — authored as "${handler.rule}" in the collision matrix. */`,
+    );
     // Phaser's own alias, rather than spelled-out parameters: it has widened
     // between versions, and the emitted class has to compile against whichever
     // one the project depends on.
@@ -493,15 +513,20 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
     L.push(`  ) => {`);
     L.push(`    // Cues authored on either object. Anything conditional is`);
     L.push(`    // behaviour and belongs below, or in a script.`);
-    L.push(`    this.playOverlapCues(${handler.a}, ${handler.b});`);
+    L.push(`    this.playContactCues(${handler.a}, ${handler.b});`);
+    // The scripts on either object hear about it, so behaviour attached to a
+    // PREFAB reaches every instance without the scene naming any of them.
+    if (hasScripts) {
+      L.push(`    this.scripts.contact(${handler.a}, ${handler.b}, ${q(handler.rule)});`);
+    }
     L.push(`    // <keep id="${handler.name}">`);
     L.push(`    // </keep>`);
     L.push(`  };`);
     L.push(``);
   }
-  if (overlapHandlers.length) {
-    L.push(`  /** Plays the \`overlap\` cue either object declared, if it has one. */`);
-    L.push(`  private playOverlapCues(...parts: unknown[]): void {`);
+  if (pairHandlers.length) {
+    L.push(`  /** Plays the contact cue either object declared, if it has one. */`);
+    L.push(`  private playContactCues(...parts: unknown[]): void {`);
     L.push(`    for (const part of parts) {`);
     L.push(`      const key = (part as Phaser.GameObjects.GameObject)?.getData?.("__sfxOverlap");`);
     L.push(`      if (typeof key === "string" && this.cache.audio.exists(key)) this.sound.play(key);`);
@@ -510,7 +535,7 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
     L.push(``);
   }
   const fields: string[] = [];
-  if (sceneHasScripts(project, scene)) fields.push(`  scripts!: ScriptHost;`);
+  if (hasScripts) fields.push(`  scripts!: ScriptHost;`);
   // A scene holds sprites and text, so the map says so. Callers reaching for
   // a body still cast — Sprite never had one either.
   fields.push(
@@ -672,7 +697,7 @@ function assembleModule(
     ...(hasHandlers
       ? [
           ``,
-          `function playOverlapCues(this: Host, ...parts: unknown[]): void {`,
+          `function playContactCues(this: Host, ...parts: unknown[]): void {`,
           `  for (const part of parts) {`,
           `    const key = (part as Phaser.GameObjects.GameObject)?.getData?.("__sfxOverlap");`,
           `    if (typeof key === "string" && this.cache.audio.exists(key)) this.sound.play(key);`,

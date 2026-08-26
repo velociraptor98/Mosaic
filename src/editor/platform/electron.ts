@@ -1,6 +1,7 @@
 import type { MosaicApi } from "../../../electron/contract";
 import type { AssetDef } from "../../shared/types";
 import { uid } from "../store/ids";
+import { atlasSidecarPath, parsePhaserAtlas } from "../assets/atlasJson";
 import type {
   Platform,
   ProjectChange,
@@ -86,11 +87,11 @@ export function createElectronPlatform(api: MosaicApi): Platform {
     bundleScripts: (root, entries) => api.bundleScripts(root, entries),
 
     async importAssets(root: string): Promise<AssetDef[]> {
-      return toAssetDefs(root, await api.importAssets(root));
+      return withAtlases(root, await api.importAssets(root));
     },
 
     async copyAssets(root: string, sourcePaths: string[]): Promise<AssetDef[]> {
-      return toAssetDefs(root, await api.copyAssets(root, sourcePaths));
+      return withAtlases(root, await api.copyAssets(root, sourcePaths));
     },
 
     pathForFile: (file: File) => api.pathForFile(file),
@@ -131,6 +132,32 @@ export function createElectronPlatform(api: MosaicApi): Platform {
       void api.setTitle(title);
     },
   };
+
+  /**
+   * Art that arrived with its own atlas document comes in AS an atlas.
+   *
+   * The `.json` beside a `.png` is the packer's output, and reading it is the
+   * difference between frames called `blue1` and frames called `frame_7`. The
+   * document itself is not an asset — it is metadata about one — so it never
+   * becomes an entry of its own.
+   */
+  async function withAtlases(root: string, files: { rel: string }[]): Promise<AssetDef[]> {
+    const defs = toAssetDefs(
+      root,
+      files.filter((f) => !/\.json$/i.test(f.rel)),
+    );
+    for (const def of defs) {
+      if (def.kind === "audio") continue;
+      const sidecar = atlasSidecarPath(def.path);
+      const text = await api.readText(root, sidecar).catch(() => null);
+      if (!text) continue;
+      const frames = parsePhaserAtlas(text);
+      if (!frames?.length) continue;
+      def.kind = "atlas";
+      def.frames = frames;
+    }
+    return defs;
+  }
 
   function toAssetDefs(root: string, files: { rel: string }[]): AssetDef[] {
     return files.map((file) => ({

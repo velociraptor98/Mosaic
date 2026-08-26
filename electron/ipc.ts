@@ -469,7 +469,9 @@ export function registerIpc(): void {
       title: "Import assets",
       properties: ["openFile", "multiSelections"],
       filters: [
-        { name: "Art", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] },
+        // The atlas document goes in the Art filter beside the sheet it
+        // describes: they are picked together or the frames are lost.
+        { name: "Art", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "json"] },
         { name: "Audio", extensions: ["mp3", "ogg", "wav", "m4a"] },
       ],
     });

@@ -4,7 +4,7 @@ import Phaser from "phaser";
 
 export class Brick_Purple extends Phaser.Physics.Arcade.Sprite {
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "purple1");
+    super(scene, x, y, "breakout", "purple1");
     scene.add.existing(this);
     scene.physics.add.existing(this);
     this.applyBody();

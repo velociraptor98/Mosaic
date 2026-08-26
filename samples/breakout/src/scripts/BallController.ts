@@ -5,11 +5,10 @@ import { ScriptComponent, property } from "./ScriptComponent";
  * The ball, and with it the shape of a life: docked on the paddle, launched by
  * a click, lost when it falls past the floor.
  *
- * It owns the ball/paddle collider itself rather than leaving it to the
- * project's collision matrix. The matrix can say that two groups collide, but
- * a "collide" pair is emitted without a callback — only "overlap" pairs get
- * one — and the angle the ball leaves the paddle at is the whole feel of
- * breakout. One collider registered here is both the bounce and the hook.
+ * The bounce off the paddle is the collision matrix's — ball × paddle is
+ * authored as "collide" once, in the project, rather than as a collider this
+ * class registers for itself. What arrives here is `onContact`, with the thing
+ * that was hit, and the angle the ball leaves at is the whole feel of breakout.
  */
 export class BallController extends ScriptComponent {
   @property({ label: "paddle object", hint: "name of the object the ball rests on" })
@@ -32,27 +31,15 @@ export class BallController extends ScriptComponent {
   })
   english = 10;
 
-  @property({
-    label: "solid floor",
-    hint: "off lets the ball fall out of play, which is what costs a life",
-  })
-  solidFloor = false;
-
   private paddle: Phaser.Physics.Arcade.Sprite | null = null;
   private docked = true;
   private over = false;
 
   create(): void {
-    // Arcade's world bounds are one rectangle with a flag per side, and the
-    // floor has to be open for a ball to ever be lost. Mosaic authors the
-    // rectangle — width, height and whether a body is kept inside it — but not
-    // the four flags, so the fourth is set here.
-    this.scene.physics.world.setBoundsCollision(true, true, true, this.solidFloor);
-
+    // The open floor is SCENE data — Inspector → Scene → World edges — and the
+    // ball/paddle collider is the project's collision matrix. Neither is set
+    // up here any more; this class only says what to do about them.
     this.paddle = this.scene.children.getByName(this.paddleName) as Phaser.Physics.Arcade.Sprite | null;
-    if (this.paddle) {
-      this.scene.physics.add.collider(this.object, this.paddle, () => this.offPaddle());
-    }
 
     this.scene.input.on("pointerup", this.launch, this);
     this.scene.events.on("ball-reset", this.dock, this);
@@ -74,6 +61,11 @@ export class BallController extends ScriptComponent {
     // exist, and a ball that keeps falling would announce its loss every frame.
     this.dock();
     this.scene.events.emit("ball-lost");
+  }
+
+  /** ball × paddle, from the collision matrix. */
+  onContact(other: Phaser.GameObjects.GameObject): void {
+    if (other === this.paddle) this.offPaddle();
   }
 
   destroy(): void {

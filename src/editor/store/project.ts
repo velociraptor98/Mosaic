@@ -874,6 +874,55 @@ export class ProjectStore {
   }
 
   /**
+   * Stamps the selection into a grid, in one undoable step.
+   *
+   * Laying out a wall, a row of pickups or a floor of tiles-as-objects used to
+   * be one click per object, and the result was a scene file that recorded
+   * sixty placements and nothing about the fact that they were a grid. This
+   * does not change what is stored — the scene still holds sixty objects,
+   * because a level is data and not a loop — it changes what it costs to say.
+   *
+   * The originals stay put and become the grid's first cell, so filling a grid
+   * from something already positioned does not move it.
+   */
+  fillGrid(
+    ids: string[],
+    opts: { cols: number; rows: number; dx: number; dy: number },
+  ): number {
+    const scene = this.scene;
+    if (!scene || !ids.length) return 0;
+    const cols = Math.max(1, Math.floor(opts.cols));
+    const rows = Math.max(1, Math.floor(opts.rows));
+    if (cols === 1 && rows === 1) return 0;
+
+    const sources = ids
+      .map((id) => scene.objects.find((o) => o.id === id))
+      .filter((o): o is SceneObject => !!o);
+    if (!sources.length) return 0;
+
+    const created: string[] = [];
+    this.transact(`Fill ${cols} × ${rows} grid`, () => {
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          if (col === 0 && row === 0) continue; // the originals are cell 0,0
+          for (const src of sources) {
+            const copy = structuredClone(src);
+            copy.id = uid(src.type);
+            copy.name = uniqueName(src.name, scene.objects.map((o) => o.name));
+            copy.x = src.x + col * opts.dx;
+            copy.y = src.y + row * opts.dy;
+            scene.objects.push(copy);
+            created.push(copy.id);
+          }
+        }
+      }
+      this.view.selection = [...ids, ...created];
+    });
+    this.setStatus(`Filled ${cols} × ${rows} — ${created.length} added`);
+    return created.length;
+  }
+
+  /**
    * The one write path for object properties. Prefab instances route
    * non-instance-owned paths into `overrides` instead of the object itself,
    * so the link to the definition survives the edit.

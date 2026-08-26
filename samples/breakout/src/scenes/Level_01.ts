@@ -20,14 +20,7 @@ export class Level_01 extends Phaser.Scene {
 
   preload(): void {
     this.load.image("shape-diamond", "assets/shape-diamond.png");  // editor placeholder — replace with real art
-    this.load.image("ball1", "assets/ball1.png");
-    this.load.image("paddle1", "assets/paddle1.png");
-    this.load.image("blue1", "assets/blue1.png");
-    this.load.image("red1", "assets/red1.png");
-    this.load.image("green1", "assets/green1.png");
-    this.load.image("yellow1", "assets/yellow1.png");
-    this.load.image("silver1", "assets/silver1.png");
-    this.load.image("purple1", "assets/purple1.png");
+    this.load.atlas("breakout", "assets/breakout.png", "assets/breakout.atlas.json");
     // <keep id="preload">
     // </keep>
   }
@@ -35,6 +28,7 @@ export class Level_01 extends Phaser.Scene {
   create(): void {
     this.cameras.main.setBackgroundColor("#12141c");
     this.physics.world.setBounds(0, 0, 800, 600);
+    this.physics.world.setBoundsCollision(true, true, true, false);
     this.scripts = new ScriptHost(this);
 
     // layer 0: Objects (objects)
@@ -42,18 +36,38 @@ export class Level_01 extends Phaser.Scene {
     director.setName("Director").setDepth(0);
     this.scripts.add(director, new BreakoutDirector(), { "lives": 3, "clearBonus": 500, "rebuildWall": true });
     this.objects["Director"] = director;
-    const paddle = this.physics.add.sprite(400, 550, "paddle1");
+    const paddle = this.physics.add.sprite(400, 550, "breakout", "paddle1");
     paddle.setName("Paddle").setDepth(0);
     this.scripts.add(paddle, new PaddleController(), {});
     this.objects["Paddle"] = paddle;
-    const ball = this.physics.add.sprite(400, 500, "ball1");
+    const ball = this.physics.add.sprite(400, 500, "breakout", "ball1");
     ball.setName("Ball").setDepth(0);
-    this.scripts.add(ball, new BallController(), { "launchX": -75, "launchY": -300, "english": 10, "restHeight": 50, "solidFloor": false });
+    this.scripts.add(ball, new BallController(), { "launchX": -75, "launchY": -300, "english": 10, "restHeight": 50 });
     this.objects["Ball"] = ball;
     const brick = new Brick(this, 112, 100);
     brick.setName("Brick").setDepth(0);
     this.scripts.add(brick, new Brick2(), { "points": 60, "hits": 1 });
     this.objects["Brick"] = brick;
+    const brick_Red = new Brick_Red(this, 112, 132);
+    brick_Red.setName("Brick_Red").setDepth(0);
+    this.scripts.add(brick_Red, new Brick2(), { "points": 50, "hits": 1 });
+    this.objects["Brick_Red"] = brick_Red;
+    const brick_Green = new Brick_Green(this, 112, 164);
+    brick_Green.setName("Brick_Green").setDepth(0);
+    this.scripts.add(brick_Green, new Brick2(), { "points": 40, "hits": 1 });
+    this.objects["Brick_Green"] = brick_Green;
+    const brick_Yellow = new Brick_Yellow(this, 112, 196);
+    brick_Yellow.setName("Brick_Yellow").setDepth(0);
+    this.scripts.add(brick_Yellow, new Brick2(), { "points": 30, "hits": 1 });
+    this.objects["Brick_Yellow"] = brick_Yellow;
+    const brick_Silver = new Brick_Silver(this, 112, 228);
+    brick_Silver.setName("Brick_Silver").setDepth(0);
+    this.scripts.add(brick_Silver, new Brick2(), { "points": 20, "hits": 1 });
+    this.objects["Brick_Silver"] = brick_Silver;
+    const brick_Purple = new Brick_Purple(this, 112, 260);
+    brick_Purple.setName("Brick_Purple").setDepth(0);
+    this.scripts.add(brick_Purple, new Brick2(), { "points": 10, "hits": 1 });
+    this.objects["Brick_Purple"] = brick_Purple;
     const brick_2 = new Brick(this, 176, 100);
     brick_2.setName("Brick 2").setDepth(0);
     this.scripts.add(brick_2, new Brick2(), { "points": 60, "hits": 1 });
@@ -90,10 +104,6 @@ export class Level_01 extends Phaser.Scene {
     brick_10.setName("Brick 10").setDepth(0);
     this.scripts.add(brick_10, new Brick2(), { "points": 60, "hits": 1 });
     this.objects["Brick 10"] = brick_10;
-    const brick_Red = new Brick_Red(this, 112, 132);
-    brick_Red.setName("Brick_Red").setDepth(0);
-    this.scripts.add(brick_Red, new Brick2(), { "points": 50, "hits": 1 });
-    this.objects["Brick_Red"] = brick_Red;
     const brick_Red_2 = new Brick_Red(this, 176, 132);
     brick_Red_2.setName("Brick_Red 2").setDepth(0);
     this.scripts.add(brick_Red_2, new Brick2(), { "points": 50, "hits": 1 });
@@ -130,10 +140,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Red_10.setName("Brick_Red 10").setDepth(0);
     this.scripts.add(brick_Red_10, new Brick2(), { "points": 50, "hits": 1 });
     this.objects["Brick_Red 10"] = brick_Red_10;
-    const brick_Green = new Brick_Green(this, 112, 164);
-    brick_Green.setName("Brick_Green").setDepth(0);
-    this.scripts.add(brick_Green, new Brick2(), { "points": 40, "hits": 1 });
-    this.objects["Brick_Green"] = brick_Green;
     const brick_Green_2 = new Brick_Green(this, 176, 164);
     brick_Green_2.setName("Brick_Green 2").setDepth(0);
     this.scripts.add(brick_Green_2, new Brick2(), { "points": 40, "hits": 1 });
@@ -170,10 +176,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Green_10.setName("Brick_Green 10").setDepth(0);
     this.scripts.add(brick_Green_10, new Brick2(), { "points": 40, "hits": 1 });
     this.objects["Brick_Green 10"] = brick_Green_10;
-    const brick_Yellow = new Brick_Yellow(this, 112, 196);
-    brick_Yellow.setName("Brick_Yellow").setDepth(0);
-    this.scripts.add(brick_Yellow, new Brick2(), { "points": 30, "hits": 1 });
-    this.objects["Brick_Yellow"] = brick_Yellow;
     const brick_Yellow_2 = new Brick_Yellow(this, 176, 196);
     brick_Yellow_2.setName("Brick_Yellow 2").setDepth(0);
     this.scripts.add(brick_Yellow_2, new Brick2(), { "points": 30, "hits": 1 });
@@ -210,10 +212,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Yellow_10.setName("Brick_Yellow 10").setDepth(0);
     this.scripts.add(brick_Yellow_10, new Brick2(), { "points": 30, "hits": 1 });
     this.objects["Brick_Yellow 10"] = brick_Yellow_10;
-    const brick_Silver = new Brick_Silver(this, 112, 228);
-    brick_Silver.setName("Brick_Silver").setDepth(0);
-    this.scripts.add(brick_Silver, new Brick2(), { "points": 20, "hits": 1 });
-    this.objects["Brick_Silver"] = brick_Silver;
     const brick_Silver_2 = new Brick_Silver(this, 176, 228);
     brick_Silver_2.setName("Brick_Silver 2").setDepth(0);
     this.scripts.add(brick_Silver_2, new Brick2(), { "points": 20, "hits": 1 });
@@ -250,10 +248,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Silver_10.setName("Brick_Silver 10").setDepth(0);
     this.scripts.add(brick_Silver_10, new Brick2(), { "points": 20, "hits": 1 });
     this.objects["Brick_Silver 10"] = brick_Silver_10;
-    const brick_Purple = new Brick_Purple(this, 112, 260);
-    brick_Purple.setName("Brick_Purple").setDepth(0);
-    this.scripts.add(brick_Purple, new Brick2(), { "points": 10, "hits": 1 });
-    this.objects["Brick_Purple"] = brick_Purple;
     const brick_Purple_2 = new Brick_Purple(this, 176, 260);
     brick_Purple_2.setName("Brick_Purple 2").setDepth(0);
     this.scripts.add(brick_Purple_2, new Brick2(), { "points": 10, "hits": 1 });
@@ -305,7 +299,7 @@ export class Level_01 extends Phaser.Scene {
     this.groups["paddle"] = paddleGroup;
     const ballGroup = this.physics.add.group([ball]);
     this.groups["ball"] = ballGroup;
-    const brickGroup = this.physics.add.group([brick, brick_2, brick_3, brick_4, brick_5, brick_6, brick_7, brick_8, brick_9, brick_10, brick_Red, brick_Red_2, brick_Red_3, brick_Red_4, brick_Red_5, brick_Red_6, brick_Red_7, brick_Red_8, brick_Red_9, brick_Red_10, brick_Green, brick_Green_2, brick_Green_3, brick_Green_4, brick_Green_5, brick_Green_6, brick_Green_7, brick_Green_8, brick_Green_9, brick_Green_10, brick_Yellow, brick_Yellow_2, brick_Yellow_3, brick_Yellow_4, brick_Yellow_5, brick_Yellow_6, brick_Yellow_7, brick_Yellow_8, brick_Yellow_9, brick_Yellow_10, brick_Silver, brick_Silver_2, brick_Silver_3, brick_Silver_4, brick_Silver_5, brick_Silver_6, brick_Silver_7, brick_Silver_8, brick_Silver_9, brick_Silver_10, brick_Purple, brick_Purple_2, brick_Purple_3, brick_Purple_4, brick_Purple_5, brick_Purple_6, brick_Purple_7, brick_Purple_8, brick_Purple_9, brick_Purple_10]);
+    const brickGroup = this.physics.add.group([brick, brick_Red, brick_Green, brick_Yellow, brick_Silver, brick_Purple, brick_2, brick_3, brick_4, brick_5, brick_6, brick_7, brick_8, brick_9, brick_10, brick_Red_2, brick_Red_3, brick_Red_4, brick_Red_5, brick_Red_6, brick_Red_7, brick_Red_8, brick_Red_9, brick_Red_10, brick_Green_2, brick_Green_3, brick_Green_4, brick_Green_5, brick_Green_6, brick_Green_7, brick_Green_8, brick_Green_9, brick_Green_10, brick_Yellow_2, brick_Yellow_3, brick_Yellow_4, brick_Yellow_5, brick_Yellow_6, brick_Yellow_7, brick_Yellow_8, brick_Yellow_9, brick_Yellow_10, brick_Silver_2, brick_Silver_3, brick_Silver_4, brick_Silver_5, brick_Silver_6, brick_Silver_7, brick_Silver_8, brick_Silver_9, brick_Silver_10, brick_Purple_2, brick_Purple_3, brick_Purple_4, brick_Purple_5, brick_Purple_6, brick_Purple_7, brick_Purple_8, brick_Purple_9, brick_Purple_10]);
     this.groups["brick"] = brickGroup;
 
     // bodies, after their groups: a group applies its own defaults
@@ -319,6 +313,11 @@ export class Level_01 extends Phaser.Scene {
     ball.body.setBounce(1, 1);
     ball.body.setCollideWorldBounds(true);
     brick.applyBody();
+    brick_Red.applyBody();
+    brick_Green.applyBody();
+    brick_Yellow.applyBody();
+    brick_Silver.applyBody();
+    brick_Purple.applyBody();
     brick_2.applyBody();
     brick_3.applyBody();
     brick_4.applyBody();
@@ -328,7 +327,6 @@ export class Level_01 extends Phaser.Scene {
     brick_8.applyBody();
     brick_9.applyBody();
     brick_10.applyBody();
-    brick_Red.applyBody();
     brick_Red_2.applyBody();
     brick_Red_3.applyBody();
     brick_Red_4.applyBody();
@@ -338,7 +336,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Red_8.applyBody();
     brick_Red_9.applyBody();
     brick_Red_10.applyBody();
-    brick_Green.applyBody();
     brick_Green_2.applyBody();
     brick_Green_3.applyBody();
     brick_Green_4.applyBody();
@@ -348,7 +345,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Green_8.applyBody();
     brick_Green_9.applyBody();
     brick_Green_10.applyBody();
-    brick_Yellow.applyBody();
     brick_Yellow_2.applyBody();
     brick_Yellow_3.applyBody();
     brick_Yellow_4.applyBody();
@@ -358,7 +354,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Yellow_8.applyBody();
     brick_Yellow_9.applyBody();
     brick_Yellow_10.applyBody();
-    brick_Silver.applyBody();
     brick_Silver_2.applyBody();
     brick_Silver_3.applyBody();
     brick_Silver_4.applyBody();
@@ -368,7 +363,6 @@ export class Level_01 extends Phaser.Scene {
     brick_Silver_8.applyBody();
     brick_Silver_9.applyBody();
     brick_Silver_10.applyBody();
-    brick_Purple.applyBody();
     brick_Purple_2.applyBody();
     brick_Purple_3.applyBody();
     brick_Purple_4.applyBody();
@@ -379,6 +373,10 @@ export class Level_01 extends Phaser.Scene {
     brick_Purple_9.applyBody();
     brick_Purple_10.applyBody();
 
+    // collision matrix (authored once, in the project)
+    this.physics.add.collider(ballGroup, paddleGroup, this.onBallPaddle);
+    this.physics.add.collider(ballGroup, brickGroup, this.onBallBrick);
+
     // <keep id="create">
     // Your own wiring goes here — it survives regeneration.
     // </keep>
@@ -387,6 +385,40 @@ export class Level_01 extends Phaser.Scene {
   update(_time: number, _delta: number): void {
     // <keep id="update">
     // </keep>
+  }
+
+  /** ball × paddle — authored as "collide" in the collision matrix. */
+  onBallPaddle: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (
+    ball,
+    paddle,
+  ) => {
+    // Cues authored on either object. Anything conditional is
+    // behaviour and belongs below, or in a script.
+    this.playContactCues(ball, paddle);
+    this.scripts.contact(ball, paddle, "collide");
+    // <keep id="onBallPaddle">
+    // </keep>
+  };
+
+  /** ball × brick — authored as "collide" in the collision matrix. */
+  onBallBrick: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (
+    ball,
+    brick,
+  ) => {
+    // Cues authored on either object. Anything conditional is
+    // behaviour and belongs below, or in a script.
+    this.playContactCues(ball, brick);
+    this.scripts.contact(ball, brick, "collide");
+    // <keep id="onBallBrick">
+    // </keep>
+  };
+
+  /** Plays the contact cue either object declared, if it has one. */
+  private playContactCues(...parts: unknown[]): void {
+    for (const part of parts) {
+      const key = (part as Phaser.GameObjects.GameObject)?.getData?.("__sfxOverlap");
+      if (typeof key === "string" && this.cache.audio.exists(key)) this.sound.play(key);
+    }
   }
 
   scripts!: ScriptHost;

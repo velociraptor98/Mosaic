@@ -9,7 +9,13 @@ import {
 } from "../../shared/prefabs";
 import type { InspectorTab } from "../store/project";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS, bodyForSize, objectSize } from "../../shared/size";
-import { DEFAULT_CAMERA, type AssetDef, type SceneObject, type TileLayer } from "../../shared/types";
+import {
+  DEFAULT_CAMERA,
+  DEFAULT_WORLD_BOUNDS,
+  type AssetDef,
+  type SceneObject,
+  type TileLayer,
+} from "../../shared/types";
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
 import { PrefabPanel } from "./PrefabPanel";
 import { ScriptsTab } from "./ScriptsTab";
@@ -833,6 +839,25 @@ function SceneTab() {
         value={scene.settings.backgroundColor}
         onCommit={(v) => set({ backgroundColor: v })}
       />
+
+      <div className="section-title">World edges</div>
+      <div className="hint">
+        Which sides stop a body. Open one to let things leave the world — a ball past the floor, a
+        bullet off the top.
+      </div>
+      <div className="grid2">
+        {(["left", "right", "top", "bottom"] as const).map((side) => {
+          const bounds = scene.settings.bounds ?? DEFAULT_WORLD_BOUNDS;
+          return (
+            <CheckField
+              key={side}
+              label={side[0].toUpperCase() + side.slice(1)}
+              value={bounds[side]}
+              onCommit={(v) => set({ bounds: { ...bounds, [side]: v } })}
+            />
+          );
+        })}
+      </div>
 
       <CameraFields />
       <MusicFields />

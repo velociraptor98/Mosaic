@@ -163,8 +163,12 @@ export interface SoundRefs {
   /** Played once, when the object is created. */
   spawn?: string;
   /**
-   * Played when this object overlaps something the collision matrix pairs it
-   * with. Either participant's cue fires.
+   * Played when this object touches something the collision matrix pairs it
+   * with, under either rule. Either participant's cue fires.
+   *
+   * Named `overlap` because that was the only rule it could ever fire on: a
+   * "collide" pair was wired without a callback, so there was nothing to hang
+   * a cue on. The field keeps its name so no scene has to be rewritten.
    */
   overlap?: string;
 }
@@ -366,6 +370,32 @@ export const DEFAULT_CAMERA: CameraDef = {
   deadzoneHeight: 0,
 };
 
+/**
+ * Which sides of the world rectangle stop a body.
+ *
+ * Arcade's bounds are one rectangle with a flag per side, and Mosaic used to
+ * author only the rectangle — so a game that needs an open edge could not say
+ * so. A breakout ball has to be able to fall past the floor; without that the
+ * game runs, looks right, and cannot be lost.
+ *
+ * Absent means all four, which is Arcade's own default and what every scene
+ * written before this was built against.
+ */
+export interface WorldBounds {
+  left: boolean;
+  right: boolean;
+  top: boolean;
+  bottom: boolean;
+}
+
+export const DEFAULT_WORLD_BOUNDS: WorldBounds = { left: true, right: true, top: true, bottom: true };
+
+/** True when every side stops a body, i.e. nothing needs emitting. */
+export function boundsAreClosed(bounds?: WorldBounds): boolean {
+  if (!bounds) return true;
+  return bounds.left && bounds.right && bounds.top && bounds.bottom;
+}
+
 export interface SceneSettings {
   width: number;
   height: number;
@@ -374,6 +404,8 @@ export interface SceneSettings {
   gridSize: number;
   /** Absent on scenes written before the camera was authorable. */
   camera?: CameraDef;
+  /** Absent on scenes written before the edges were authorable: all four. */
+  bounds?: WorldBounds;
   /** Looping background music for the scene. */
   music?: { key: string; volume: number; loop: boolean };
 }

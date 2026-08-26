@@ -101,6 +101,12 @@ check(
   scene?.settings.gravityY === 0 && scene?.settings.backgroundColor === "#12141c",
   `gravity ${scene?.settings.gravityY}, background ${scene?.settings.backgroundColor}`,
 );
+const edges = scene?.settings.bounds;
+check(
+  "the open floor survives the trip",
+  !!edges && edges.left && edges.right && edges.top && !edges.bottom,
+  edges ? `left/right/top closed, bottom open` : "no world edges recorded",
+);
 const hud = scene?.objects.find((o) => o.name === "HUD");
 check(
   "text objects keep their own settings",
@@ -121,10 +127,11 @@ check(
 const red = resolvePrefab(project, "Brick_Red");
 check(
   "a variant still resolves through its base",
-  red?.root.texture === "red1" &&
+  red?.root.texture === "breakout" &&
+    red?.root.frame === "red1" &&
     red?.root.body?.immovable === true &&
     red?.root.scripts?.[0]?.props.points === 50,
-  red ? `red1 · immovable from Brick · 50 points of its own` : "did not resolve",
+  red ? `frame red1 · immovable from Brick · 50 points of its own` : "did not resolve",
 );
 
 const base = project.prefabs.find((p) => p.name === "Brick");
@@ -150,12 +157,23 @@ check(
 );
 
 // ---- assets --------------------------------------------------------------
-const artKeys = ["ball1", "paddle1", "blue1", "red1", "green1", "yellow1", "silver1", "purple1"];
+const sheet = project.assets.find((a) => a.key === "breakout");
 check(
-  "the art comes back with its keys and sizes",
-  artKeys.every((k) => project.assets.some((a) => a.key === k)) &&
-    project.assets.find((a) => a.key === "paddle1")?.width === 104,
-  `${project.assets.length} assets · paddle1 is 104×24`,
+  "the packed sheet comes back as an atlas",
+  sheet?.kind === "atlas" && sheet.width === 504,
+  sheet ? `${sheet.kind} · ${sheet.width}×${sheet.height}` : "missing",
+);
+const frameNames = (sheet?.frames ?? []).map((f) => f.name);
+check(
+  "with the packer's own frame names",
+  ["blue1", "red1", "paddle1", "ball1"].every((n) => frameNames.includes(n)),
+  `${frameNames.length} frames`,
+);
+const paddleFrame = sheet?.frames?.find((f) => f.name === "paddle1");
+check(
+  "and the frame rectangles the document gave",
+  paddleFrame?.w === 104 && paddleFrame.h === 24,
+  paddleFrame ? `paddle1 is ${paddleFrame.w}×${paddleFrame.h}` : "missing",
 );
 
 // ---- the script index ----------------------------------------------------
@@ -164,8 +182,8 @@ check(
 const index = buildIndex(readScripts("src"));
 const expected: Record<string, string[]> = {
   PaddleController: ["edgeMargin", "followLag"],
-  BallController: ["paddleName", "launchX", "launchY", "restHeight", "english", "solidFloor"],
-  Brick: ["points", "hits", "ballName"],
+  BallController: ["paddleName", "launchX", "launchY", "restHeight", "english"],
+  Brick: ["points", "hits"],
   BreakoutDirector: ["lives", "clearBonus", "rebuildWall"],
 };
 for (const [name, fields] of Object.entries(expected)) {

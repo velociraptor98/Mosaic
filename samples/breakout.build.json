@@ -11,17 +11,16 @@
     {
       "n": "2",
       "title": "Set the court up",
-      "body": "No gravity: in breakout the ball is not falling, it is travelling. The background is scene data like everything else, so the exported game reads the colour from the same field the editor writes.",
-      "editor": "Inspector → Scene → Gravity Y = 0, Background #12141c",
-      "api": "scene.settings.gravityY = 0"
+      "body": "No gravity: in breakout the ball is not falling, it is travelling. The background is scene data like everything else, so the exported game reads the colour from the same field the editor writes.\n\nThe FLOOR IS OPEN. Arcade's world bounds are one rectangle with a flag per side, and three of the four stop the ball while the fourth lets it through — which is the whole reason a life can be lost. It is four checkboxes under Scene → World edges, and it lands in the scene file like the gravity above it.",
+      "editor": "Inspector → Scene → Gravity Y = 0, Background #12141c, World edges → Bottom off",
+      "api": "scene.settings.bounds = { left: true, right: true, top: true, bottom: false }"
     },
     {
       "n": "3",
       "title": "Import the art",
-      "body": "Eight PNGs, copied into assets/ the way every import is — Mosaic never references art in place. One ball, one paddle, six brick colours.\n\nThe original loads all eight out of a packed ATLAS instead, with one `load.atlas` call. Mosaic can hold an atlas and does export one, but it can only make an atlas by slicing an image it already has — by grid, or by flood-filling islands of opaque pixels — and it names the frames it finds from a pattern (`frame_0`, `frame_1`, …). There is no way to bring in the atlas JSON that shipped with the art, so the frame names in it are lost. Eight separate images say the same thing and keep the names, so that is what this uses.",
-      "editor": "Assets dock → Import… → the eight PNGs",
-      "api": "store.importAssets(assets)",
-      "friction": "An existing Phaser atlas (.png + .json) cannot be imported as one. The slicer builds frames from pixels and names them from a pattern, so re-using packed art means either losing its frame names or unpacking it first."
+      "body": "The sheet and its document, picked together and copied into assets/ — Mosaic never references art in place. One `load.atlas` in the exported game, exactly as the original does it, and 21 frames that keep the names the packer gave them.\n\nThose names are the part that matters: the scene says frame \"blue1\", not frame 7. Mosaic can still SLICE a sheet it has never seen — by grid, or by flood-filling opaque islands — but a sheet that arrives already packed is read rather than re-cut.",
+      "editor": "Assets dock → Import… → breakout.png and breakout.json together",
+      "api": "store.importAssets([{ kind: \"atlas\", frames: parsePhaserAtlas(doc) }])"
     },
     {
       "n": "4",
@@ -42,8 +41,7 @@
       "title": "Place the paddle and the ball",
       "body": "Both are ordinary objects with a body authored in the Inspector. The paddle is immovable, so the ball bounces off it instead of shoving it; the ball is a CIRCLE body with bounce 1, which is the only way it leaves a wall as fast as it arrived.\n\nThe four numbers that decide how the game feels — launch velocity, how far the ball rests above the paddle, and how much sideways speed a corner hit adds — are script properties, so they land in the scene file. In the original they are literals inside create() and hitPaddle().",
       "editor": "Place tool (B) → Paddle and Ball · Inspector → Body → circle, bounce 1, immovable",
-      "api": "store.addObject({ type: \"sprite\", texture: \"ball1\", group: \"ball\", body: { shape: \"circle\", radius: 11, bounce: 1 } })\nstore.setScriptProp(ballId, 0, \"english\", 10)",
-      "friction": "The original disables ONE side of the world bounds — `setBoundsCollision(true, true, true, false)` — so the ball can fall out of play. Mosaic authors the bounds rectangle and whether a body is kept inside it, but not the four per-side flags, so a Mosaic breakout has no floor to lose the ball through and therefore no way to lose. BallController sets the flag itself, behind a \"solid floor\" property."
+      "api": "store.addObject({ type: \"sprite\", texture: \"ball1\", group: \"ball\", body: { shape: \"circle\", radius: 11, bounce: 1 } })\nstore.setScriptProp(ballId, 0, \"english\", 10)"
     },
     {
       "n": "7",
@@ -55,17 +53,16 @@
     {
       "n": "8",
       "title": "Five colours, as variants rather than five prefabs",
-      "body": "Each colour inherits Brick and states only what differs: a texture and a score. Its file holds a base and a diff — there is no second copy of the object anywhere.\n\nThat is the whole reason to bother. Changing the body, or what a brick does when it is hit, is one edit on Brick and it reaches all sixty. In the original the six colours are six frame names in one array and there is nothing to change: the behaviour is a method on the scene, and the only thing a brick \"is\" is a frame.",
+      "body": "Each colour inherits Brick and states only what differs: a frame and a score. Its file holds a base and a diff — there is no second copy of the object anywhere.\n\nThat is the whole reason to bother. Changing the body, or what a brick does when it is hit, is one edit on Brick and it reaches all sixty. In the original the six colours are six frame names in one array and there is nothing to change: the behaviour is a method on the scene, and the only thing a brick \"is\" is a frame.",
       "editor": "Prefab tab → Variants → name Brick_Red → Create → set texture and points → Save",
-      "api": "store.createVariant(\"Brick\", \"Brick_Red\")\nstore.setObjectProp(root, \"texture\", \"red1\")\nstore.setObjectProp(root, \"scripts.0.props.points\", 50)"
+      "api": "store.createVariant(\"Brick\", \"Brick_Red\")\nstore.setObjectProp(root, \"frame\", \"red1\")\nstore.setObjectProp(root, \"scripts.0.props.points\", 50)"
     },
     {
       "n": "9",
       "title": "Lay the wall out",
-      "body": "60 instances on a 10 × 6 grid of 64 × 32 cells, the first centred at (112, 100) — the same arithmetic the original hands to `gridAlign`. Each one is a node referencing a definition with an empty overrides map: a link, not a copy.\n\nIn the editor this is six drags with the grid snap on. What it is NOT is a loop, and that cuts both ways — the wall is now data you can see and rearrange, and it is also 60 lines in the generated scene where the original had four.",
-      "editor": "Assets dock → click a Brick variant → Place tool (B) → click along the grid",
-      "api": "store.addObject({ type: \"sprite\", prefab: \"Brick_Red\", x, y, overrides: {} })",
-      "friction": "Nothing in the scene format says \"a grid of these\". Sixty placements are sixty objects in the scene file and sixty statements in the exported class; changing the wall's shape means moving sixty things rather than editing two numbers."
+      "body": "60 instances on a 10 × 6 grid of 64 × 32 cells, the first centred at (112, 100) — the same arithmetic the original hands to `gridAlign`. Each one is a node referencing a definition with an empty overrides map: a link, not a copy.\n\nSix objects are placed by hand, one per colour, and Fill grid stamps each along its row. The scene still stores 60 objects rather than a rule that makes them — a level is data, not a loop, and every brick stays selectable and movable afterwards. What the grid removes is the fifty-four clicks, not the fifty-four objects.",
+      "editor": "Place one brick per row → select it → Fill grid… → 10 × 1, step 64",
+      "api": "store.fillGrid([seed], { cols: 10, rows: 1, dx: 64, dy: 0 })"
     },
     {
       "n": "10",
@@ -76,11 +73,10 @@
     },
     {
       "n": "11",
-      "title": "The collision matrix, and why this game cannot use it",
-      "body": "Both of breakout's collisions need the same two things at once: a bounce, and a callback. The ball has to come off the paddle at an angle that depends on where it hit, and a brick has to know it was the one that was hit.\n\nThe matrix can only give one or the other. A pair marked \"collide\" is emitted as `physics.add.collider(a, b)` with no handler; only a pair marked \"overlap\" gets a generated callback, and an overlap does not bounce. Marking these pairs \"collide\" and ALSO registering a collider in a script would put two colliders on the same pair, and the second one runs against bodies the first has already separated.\n\nSo both pairs are left ignored and the scripts register the colliders themselves — one call each, bounce and hook together. The groups are still worth authoring: they are what the export builds, and what a later rule would be written against.",
+      "title": "Author the collision matrix once",
+      "body": "Both of breakout's collisions are the same shape: a bounce, and something that wants to know it happened. The ball has to leave the paddle at an angle that depends on where it hit, and a brick has to know it was the one that was hit.\n\nTwo rules cover the whole game — ball collides with paddle, ball collides with brick — and they are project data, authored in one grid rather than scattered through create(). The export turns each into a collider AND a handler, and the handler tells the scripts on both objects that they touched. So a brick's behaviour lives on the Brick PREFAB and reaches all sixty instances without the scene naming any of them.\n\nBricks ignore each other, and the paddle ignores bricks; saying so is what keeps sixty immovable bodies from being tested against each other every step.",
       "editor": "Inspector → Physics → Edit collision matrix…",
-      "api": "store.setCollisionRule(\"ball\", \"brick\", \"ignore\")",
-      "friction": "The collision matrix cannot express \"collide, and tell me\". Every interaction that needs a physical response AND a callback has to leave the matrix and move into a script, which is both of breakout's interactions — the entire game."
+      "api": "store.setCollisionRule(\"ball\", \"brick\", \"collide\")"
     },
     {
       "n": "12",
@@ -164,7 +160,7 @@
     },
     {
       "rel": "src/scripts/ScriptComponent.ts",
-      "bytes": 9032
+      "bytes": 12065
     },
     {
       "rel": "anims.json",
@@ -175,36 +171,12 @@
       "bytes": 712
     },
     {
-      "rel": "assets/ball1.png",
-      "bytes": 643
+      "rel": "assets/breakout.png",
+      "bytes": 8598
     },
     {
-      "rel": "assets/paddle1.png",
-      "bytes": 994
-    },
-    {
-      "rel": "assets/blue1.png",
-      "bytes": 369
-    },
-    {
-      "rel": "assets/red1.png",
-      "bytes": 365
-    },
-    {
-      "rel": "assets/green1.png",
-      "bytes": 372
-    },
-    {
-      "rel": "assets/yellow1.png",
-      "bytes": 363
-    },
-    {
-      "rel": "assets/silver1.png",
-      "bytes": 353
-    },
-    {
-      "rel": "assets/purple1.png",
-      "bytes": 370
+      "rel": "assets/breakout.json",
+      "bytes": 4043
     },
     {
       "rel": "src/scripts/PaddleController.ts",
@@ -212,11 +184,11 @@
     },
     {
       "rel": "src/scripts/BallController.ts",
-      "bytes": 4162
+      "bytes": 3862
     },
     {
       "rel": "src/scripts/Brick.ts",
-      "bytes": 2311
+      "bytes": 2097
     },
     {
       "rel": "src/scripts/BreakoutDirector.ts",
@@ -224,11 +196,11 @@
     },
     {
       "rel": "README.md",
-      "bytes": 3237
+      "bytes": 1964
     },
     {
       "rel": "phaser.editor.json",
-      "bytes": 6048
+      "bytes": 8663
     },
     {
       "rel": "mosaic.config.json",
@@ -236,59 +208,63 @@
     },
     {
       "rel": "src/scenes/Level_01.scene.json",
-      "bytes": 28801
+      "bytes": 35245
     },
     {
       "rel": "src/prefabs/Brick.prefab.json",
-      "bytes": 855
+      "bytes": 880
     },
     {
       "rel": "src/prefabs/Brick_Red.prefab.json",
-      "bytes": 195
+      "bytes": 193
     },
     {
       "rel": "src/prefabs/Brick_Green.prefab.json",
-      "bytes": 199
+      "bytes": 197
     },
     {
       "rel": "src/prefabs/Brick_Yellow.prefab.json",
-      "bytes": 201
+      "bytes": 199
     },
     {
       "rel": "src/prefabs/Brick_Silver.prefab.json",
-      "bytes": 201
+      "bytes": 199
     },
     {
       "rel": "src/prefabs/Brick_Purple.prefab.json",
-      "bytes": 201
+      "bytes": 199
     },
     {
       "rel": "src/scenes/Level_01.ts",
-      "bytes": 21112
+      "bytes": 22263
     },
     {
       "rel": "src/prefabs/Brick.ts",
-      "bytes": 1044
+      "bytes": 1056
     },
     {
       "rel": "src/prefabs/Brick_Green.ts",
-      "bytes": 1057
+      "bytes": 1069
     },
     {
       "rel": "src/prefabs/Brick_Purple.ts",
-      "bytes": 1060
+      "bytes": 1072
     },
     {
       "rel": "src/prefabs/Brick_Red.ts",
-      "bytes": 1051
+      "bytes": 1063
     },
     {
       "rel": "src/prefabs/Brick_Silver.ts",
-      "bytes": 1060
+      "bytes": 1072
     },
     {
       "rel": "src/prefabs/Brick_Yellow.ts",
-      "bytes": 1060
+      "bytes": 1072
+    },
+    {
+      "rel": "assets/breakout.atlas.json",
+      "bytes": 8406
     }
   ],
   "stats": {
@@ -297,7 +273,7 @@
     "prefabs": 6,
     "variants": 5,
     "scripts": 4,
-    "assets": 8,
-    "undoDepth": 97
+    "assets": 1,
+    "undoDepth": 50
   }
 }

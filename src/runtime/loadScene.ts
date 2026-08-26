@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { resolveObject, resolvePrefab } from "../shared/prefabs";
 import { bindArgs, boundArgValues } from "../shared/prefabBinding";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../shared/size";
+import { boundsAreClosed } from "../shared/types";
 import { objectsById as indexObjects, worldTransform } from "../shared/transform";
 import { collectLoaderManifest } from "../shared/manifest";
 import { scriptsOf } from "../shared/scripts";
@@ -199,7 +200,7 @@ export function buildScene(
     }
   });
 
-  const pairs = withPhysics ? wireCollisions(scene, project, groups, tileLayers) : [];
+  const pairs = withPhysics ? wireCollisions(scene, project, groups, tileLayers, host) : [];
   applyCamera(scene, data);
   startMusic(scene, data);
 
@@ -348,6 +349,10 @@ export function applySettings(
   if (scene.cameras?.main) scene.cameras.main.setBackgroundColor(s.backgroundColor);
   if (withPhysics && scene.physics?.world) {
     scene.physics.world.setBounds(0, 0, s.width, s.height);
+    if (!boundsAreClosed(s.bounds)) {
+      const b = s.bounds!;
+      scene.physics.world.setBoundsCollision(b.left, b.right, b.top, b.bottom);
+    }
     scene.physics.world.gravity.y = s.gravityY;
   }
 }
@@ -407,8 +412,8 @@ export function applyBody(sprite: Phaser.GameObjects.Sprite, obj: SceneObject): 
   body.setCollideWorldBounds(def.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS);
 }
 
-/** Fires the `overlap` cue of either object in a wired pair. */
-function playOverlapCues(scene: Phaser.Scene): Phaser.Types.Physics.Arcade.ArcadePhysicsCallback {
+/** Fires the contact cue of either object in a wired pair. */
+function playContactCues(scene: Phaser.Scene): Phaser.Types.Physics.Arcade.ArcadePhysicsCallback {
   return (a, b) => {
     for (const side of [a, b]) {
       const key = (side as Phaser.GameObjects.GameObject).getData?.("__sfxOverlap");
@@ -426,6 +431,8 @@ function wireCollisions(
   project: ProjectData,
   groups: Map<string, Phaser.Physics.Arcade.Group>,
   tileLayers: Map<string, Phaser.Tilemaps.TilemapLayer>,
+  /** Null when the caller built the scene without scripts, as the probe does. */
+  host: ScriptHost | null,
 ): { a: string; b: string; rule: string }[] {
   const seen = new Set<string>();
   const pairs: { a: string; b: string; rule: string }[] = [];
@@ -439,11 +446,17 @@ function wireCollisions(
       const ga = groups.get(a);
       const gb = groups.get(b);
       if (!ga || !gb) continue;
-      // An overlap plays whichever participant declared a cue. Anything
+      // Either rule plays whichever participant declared a cue. Anything
       // conditional is behaviour and belongs in a script; "these two touching
-      // makes a sound" is content.
-      if (rule === "overlap") scene.physics.add.overlap(ga, gb, playOverlapCues(scene));
-      else scene.physics.add.collider(ga, gb);
+      // makes a sound" is content, and a collide is a touch — it just used to
+      // be the one kind the cue could never fire on.
+      const cues = playContactCues(scene);
+      const contact: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (x, y) => {
+        cues(x, y);
+        host?.contact(x, y, rule as "collide" | "overlap");
+      };
+      if (rule === "overlap") scene.physics.add.overlap(ga, gb, contact);
+      else scene.physics.add.collider(ga, gb, contact);
       pairs.push({ a, b, rule });
     }
   }

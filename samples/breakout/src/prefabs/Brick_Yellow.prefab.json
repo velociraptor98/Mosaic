@@ -6,7 +6,7 @@
   ],
   "base": "Brick",
   "diff": {
-    "texture": "yellow1",
+    "frame": "yellow1",
     "scripts.0.props.points": 30
   }
 }

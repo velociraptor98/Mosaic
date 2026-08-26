@@ -15,7 +15,8 @@
     "originX": 0.5,
     "originY": 0.5,
     "visible": true,
-    "texture": "blue1",
+    "texture": "breakout",
+    "frame": "blue1",
     "group": "brick",
     "body": {
       "shape": "box",
@@ -41,7 +42,7 @@
         }
       }
     ],
-    "lid": "nmta6t1k31",
+    "lid": "nmta82vng1",
     "children": []
   }
 }

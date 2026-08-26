@@ -82,124 +82,203 @@
       "generated": true
     },
     {
-      "id": "asset-ball1",
-      "key": "ball1",
-      "kind": "image",
-      "path": "assets/ball1.png",
-      "width": 22,
-      "height": 22
-    },
-    {
-      "id": "asset-paddle1",
-      "key": "paddle1",
-      "kind": "image",
-      "path": "assets/paddle1.png",
-      "width": 104,
-      "height": 24
-    },
-    {
-      "id": "asset-blue1",
-      "key": "blue1",
-      "kind": "image",
-      "path": "assets/blue1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-red1",
-      "key": "red1",
-      "kind": "image",
-      "path": "assets/red1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-green1",
-      "key": "green1",
-      "kind": "image",
-      "path": "assets/green1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-yellow1",
-      "key": "yellow1",
-      "kind": "image",
-      "path": "assets/yellow1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-silver1",
-      "key": "silver1",
-      "kind": "image",
-      "path": "assets/silver1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-purple1",
-      "key": "purple1",
-      "kind": "image",
-      "path": "assets/purple1.png",
-      "width": 64,
-      "height": 32
-    },
-    {
-      "id": "asset-placeholder_tiles",
-      "key": "placeholder_tiles",
-      "kind": "image",
-      "path": "assets/placeholder-tiles.png",
-      "width": 256,
-      "height": 32
-    },
-    {
-      "id": "asset-shape_box",
-      "key": "shape_box",
-      "kind": "image",
-      "path": "assets/shape-box.png",
-      "width": 32,
-      "height": 32
-    },
-    {
-      "id": "asset-shape_capsule",
-      "key": "shape_capsule",
-      "kind": "image",
-      "path": "assets/shape-capsule.png",
-      "width": 28,
-      "height": 40
-    },
-    {
-      "id": "asset-shape_circle",
-      "key": "shape_circle",
-      "kind": "image",
-      "path": "assets/shape-circle.png",
-      "width": 32,
-      "height": 32
-    },
-    {
-      "id": "asset-shape_diamond",
-      "key": "shape_diamond",
-      "kind": "image",
-      "path": "assets/shape-diamond.png",
-      "width": 24,
-      "height": 24
-    },
-    {
-      "id": "asset-shape_star",
-      "key": "shape_star",
-      "kind": "image",
-      "path": "assets/shape-star.png",
-      "width": 24,
-      "height": 24
-    },
-    {
-      "id": "asset-shape_triangle",
-      "key": "shape_triangle",
-      "kind": "image",
-      "path": "assets/shape-triangle.png",
-      "width": 28,
-      "height": 36
+      "id": "asset-breakout",
+      "key": "breakout",
+      "kind": "atlas",
+      "path": "assets/breakout.png",
+      "width": 504,
+      "height": 121,
+      "frames": [
+        {
+          "name": "ball1",
+          "x": 452,
+          "y": 2,
+          "w": 22,
+          "h": 22,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "ball2",
+          "x": 476,
+          "y": 2,
+          "w": 22,
+          "h": 22,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "blue1",
+          "x": 386,
+          "y": 2,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "blue2",
+          "x": 108,
+          "y": 53,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "button",
+          "x": 2,
+          "y": 2,
+          "w": 190,
+          "h": 49,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "buttonOver",
+          "x": 194,
+          "y": 2,
+          "w": 190,
+          "h": 49,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "green1",
+          "x": 2,
+          "y": 79,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "green2",
+          "x": 174,
+          "y": 53,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "paddle1",
+          "x": 386,
+          "y": 36,
+          "w": 104,
+          "h": 24,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "paddle2",
+          "x": 2,
+          "y": 53,
+          "w": 104,
+          "h": 24,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "particle1",
+          "x": 492,
+          "y": 26,
+          "w": 10,
+          "h": 10,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "particle2",
+          "x": 492,
+          "y": 38,
+          "w": 10,
+          "h": 10,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "particle3",
+          "x": 68,
+          "y": 79,
+          "w": 20,
+          "h": 19,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "purple1",
+          "x": 240,
+          "y": 53,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "purple2",
+          "x": 306,
+          "y": 53,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "red1",
+          "x": 372,
+          "y": 62,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "red2",
+          "x": 438,
+          "y": 62,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "silver1",
+          "x": 90,
+          "y": 87,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "silver2",
+          "x": 156,
+          "y": 87,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "yellow1",
+          "x": 222,
+          "y": 87,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "yellow2",
+          "x": 288,
+          "y": 87,
+          "w": 64,
+          "h": 32,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        }
+      ]
     }
   ],
   "prefabs": [
@@ -220,7 +299,8 @@
         "originX": 0.5,
         "originY": 0.5,
         "visible": true,
-        "texture": "blue1",
+        "texture": "breakout",
+        "frame": "blue1",
         "group": "brick",
         "body": {
           "shape": "box",
@@ -246,36 +326,10 @@
             }
           }
         ],
-        "lid": "nmta6t1k31",
+        "lid": "nmta82vng1",
         "children": []
       },
       "file": "src/prefabs/Brick.prefab.json"
-    },
-    {
-      "name": "Brick_Green",
-      "exposed": [
-        "scripts.0.props.points",
-        "scripts.0.props.hits"
-      ],
-      "base": "Brick",
-      "diff": {
-        "texture": "green1",
-        "scripts.0.props.points": 40
-      },
-      "file": "src/prefabs/Brick_Green.prefab.json"
-    },
-    {
-      "name": "Brick_Purple",
-      "exposed": [
-        "scripts.0.props.points",
-        "scripts.0.props.hits"
-      ],
-      "base": "Brick",
-      "diff": {
-        "texture": "purple1",
-        "scripts.0.props.points": 10
-      },
-      "file": "src/prefabs/Brick_Purple.prefab.json"
     },
     {
       "name": "Brick_Red",
@@ -285,23 +339,23 @@
       ],
       "base": "Brick",
       "diff": {
-        "texture": "red1",
+        "frame": "red1",
         "scripts.0.props.points": 50
       },
       "file": "src/prefabs/Brick_Red.prefab.json"
     },
     {
-      "name": "Brick_Silver",
+      "name": "Brick_Green",
       "exposed": [
         "scripts.0.props.points",
         "scripts.0.props.hits"
       ],
       "base": "Brick",
       "diff": {
-        "texture": "silver1",
-        "scripts.0.props.points": 20
+        "frame": "green1",
+        "scripts.0.props.points": 40
       },
-      "file": "src/prefabs/Brick_Silver.prefab.json"
+      "file": "src/prefabs/Brick_Green.prefab.json"
     },
     {
       "name": "Brick_Yellow",
@@ -311,10 +365,36 @@
       ],
       "base": "Brick",
       "diff": {
-        "texture": "yellow1",
+        "frame": "yellow1",
         "scripts.0.props.points": 30
       },
       "file": "src/prefabs/Brick_Yellow.prefab.json"
+    },
+    {
+      "name": "Brick_Silver",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "frame": "silver1",
+        "scripts.0.props.points": 20
+      },
+      "file": "src/prefabs/Brick_Silver.prefab.json"
+    },
+    {
+      "name": "Brick_Purple",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "frame": "purple1",
+        "scripts.0.props.points": 10
+      },
+      "file": "src/prefabs/Brick_Purple.prefab.json"
     }
   ],
   "anims": [],
@@ -326,16 +406,16 @@
   "collision": {
     "ball": {
       "ball": "ignore",
-      "paddle": "ignore",
-      "brick": "ignore"
+      "paddle": "collide",
+      "brick": "collide"
     },
     "paddle": {
-      "ball": "ignore",
+      "ball": "collide",
       "paddle": "ignore",
       "brick": "ignore"
     },
     "brick": {
-      "ball": "ignore",
+      "ball": "collide",
       "paddle": "ignore",
       "brick": "ignore"
     }
