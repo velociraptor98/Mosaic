@@ -11,7 +11,8 @@ still in the tree, which specifies workflow 10 below.
 
 Mosaic is a **desktop app**. It opens a project *folder*, treats the scene
 files in it as the source of truth, watches them for edits made elsewhere, and
-shows git status per file. The same renderer also builds for the browser, as a
+shows git status per file. It also builds the finished game into a folder you
+can ship, without a terminal. The same renderer builds for the browser too, as a
 zero-install demo with no folder access.
 
 ## Run it
@@ -22,9 +23,18 @@ npm install
 npm run dev:app     # the desktop app (Electron + Vite dev server)
 npm run dev         # the browser demo at the printed URL
 
-npm run smoke:all   # both test suites
-npm run smoke       # headless pass over the editor's logic (180 checks)
-npm run smoke:app   # boots the real shell against a real folder (106 checks)
+npm run smoke:all   # every suite below, in order
+npm run smoke       # headless pass over the editor's logic (334 checks)
+npm run smoke:app   # boots the real shell against a real folder (176 checks)
+
+npm run verify:export   # compiles + bundles all three exported samples
+npm run verify:parity   # play-test path vs generated path, per sample
+npm run roundtrip:breakout  # reopens an exported folder the way the editor does
+npm run playtest:breakout   # builds the exported game and PLAYS it
+
+npm run sample      # build the Coin Rush sample by driving the editor
+npm run anim-lab    # build the Anim Lab sample
+npm run breakout    # rebuild Phaser's breakout example as a Mosaic project
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
@@ -34,7 +44,7 @@ npm run dist        # installers: dmg / nsis / AppImage for the host platform
 npm run smoke:packed  # runs the desktop suite against the PACKAGED app (macOS arm64)
 ```
 
-## The ten workflows, and where they live
+## The eleven workflows, and where they live
 
 ### 1. Project & scenes — `project/workspace.ts`, `project/serialize.ts`, `store/project.ts`
 The editor opens a *folder*, not a file — `readProject(dir)` parses
@@ -63,6 +73,12 @@ Snap targets are the tile grid ∪ the edges of on-screen objects, with a 6px
 *screen-space* threshold divided by zoom so it holds at any magnification.
 Holding **Alt** suspends snapping for a single drag instead of toggling it.
 
+**Fill grid** (`⌘⇧G`) stamps the selection across a grid in one undoable step,
+defaulting the step to the selection's own footprint. It deliberately adds no
+"repeat" to the scene format: a level is data, not a loop, so it still writes
+one object per cell and every one stays selectable and movable afterwards.
+What it removes is the fifty-four clicks, not the fifty-four objects.
+
 Outliner rows drag to reparent. World position is preserved
 (`local = parentInverse × world`) and cycles are rejected. Containers carry
 their own transform, and clicking a child picks the container until the
@@ -83,7 +99,7 @@ terrain is authored once. Visibility and lock are scene data, not editor
 preferences: a locked layer ignores every pointer event and hit-testing walks
 visible ∧ unlocked layers top-down.
 
-### 4. Asset import & atlas slicing — `assets/slice.ts`, `dialogs/ImportDialog`, `dialogs/AtlasDialog`
+### 4. Asset import & atlases — `assets/slice.ts`, `assets/atlasJson.ts`, `dialogs/ImportDialog`, `dialogs/AtlasDialog`
 Type is inferred per file and shown for correction *before* the copy. Files are
 copied into the project (as data URLs), never referenced from outside it.
 
@@ -92,6 +108,14 @@ transparency (flood-filled islands, tight bounding boxes). The overlay draws
 real frame boundaries over the art before you commit. Names come from a
 `{i}` pattern with optional zero padding; pivots are per sheet, and both the
 place tool and the body editor read them.
+
+Art that arrives **already packed** is read rather than re-cut. Pick a sheet
+and its `.json` together and the image comes in as an atlas carrying the
+packer's own frame names — all three shapes Phaser accepts (JSON hash, JSON
+array, and `textures[0]` multi-atlas), because which one you get is decided by
+the packer and not by the person importing. The document itself never becomes
+an asset of its own: it is metadata about one. Invented names were the whole
+problem — a scene says `frame: "blue1"`, and `frame_7` is not that.
 
 ### 5. Prefabs & instancing — `shared/prefabs.ts`, `shared/propagate.ts`
 Making one object into many, in seven steps: **promote, isolate, compose,
@@ -204,8 +228,29 @@ and the numbers stay live in the Inspector during the drag.
 
 Pair rules are authored once per project in the collision matrix
 (`collide | overlap | ignore`, symmetric) instead of being scattered through
-`create()`. Export emits deduplicated `addCollider` / `addOverlap` calls, with
-a handler argument for overlap pairs.
+`create()`. Export emits deduplicated `addCollider` / `addOverlap` calls —
+**both with a handler**, and both with a keep region.
+
+A `collide` pair used to be emitted bare, with nowhere to hang behaviour, so
+anything that needed a physical response *and* to know it happened had to
+register a second collider inside a script — two colliders on one pair, the
+second running against bodies the first had already separated. Rebuilding
+Phaser's breakout example is what made that unmissable: its two collisions are
+the entire game, and both of them had to leave the feature built to describe
+them.
+
+The handler tells the **scripts on both objects** that they touched, through
+`onContact(other, rule)`, each side handed the other one. So a brick's
+behaviour lives on the Brick prefab and reaches all sixty instances without the
+scene naming any of them. It is also what finally lets a `sounds.overlap` cue
+fire on a collide, which it never could before.
+
+**World edges** are scene data too. Arcade's bounds are one rectangle with a
+flag per side, and Mosaic used to author only the rectangle — so a game that
+needs an open edge could not say so. A breakout built on it ran, looked right,
+and was unlosable, which is the bad kind of failure. Four checkboxes under
+Scene; absent means all four closed, which is Arcade's own default and what
+every scene written before this was built against.
 
 ### 8. Play-test in editor — `phaser/playtest.ts`, `phaser/PlayScene.ts`
 RUN snapshots the editor state (it does not mutate it), then boots the scene
@@ -257,6 +302,12 @@ them **statically** — Mosaic never executes your game code to find out what it
 exposes, which is also why the index survives a file that does not compile
 (the fields grey out and the last good metadata stays).
 
+- **Contacts arrive as events.** A script implements `onContact(other, rule)`
+  and hears about anything the project's collision matrix pairs its object
+  with, handed the thing it touched. The matrix owns *whether* two groups
+  interact and what physics does about it; this is how the object finds out.
+  A contact that lands before `create()` has run is dropped rather than
+  delivered to a script that has not initialised.
 - **Order is execution order.** Rows run top to bottom, drag or ↑↓ to reorder,
   and the order is written back to the file. The checkbox is *enabled* state,
   not deletion: a disabled script keeps its values and is still constructed at
@@ -303,11 +354,45 @@ exposes, which is also why the index survives a file that does not compile
 - **Export wires it up.** The generated scene constructs one `ScriptHost`, then
   `this.scripts.add(player, new PlayerController(), { moveSpeed: 220 })` in list
   order, with `, false` for a disabled script. Two classes of one name in
-  different folders are imported under distinct aliases. `runtime/scripts.ts`
+  different folders are imported under distinct aliases — and so is a script
+  that shares its name with a **prefab**, which is the case that actually bit:
+  `Brick` the prefab and `Brick` the behaviour is the obvious way to name that
+  object, and it emitted two imports of one name and a file that would not
+  compile, whose first error named neither of them. `runtime/scripts.ts`
   is the base class, the `@property` decorator and the host — one file, type
   checked here, copied verbatim into your project as
   `src/scripts/ScriptComponent.ts`, so what the editor parses and what your
   game runs cannot drift apart.
+
+### 11. Ship the game — `electron/packageGame.ts`, `dialogs/PackageDialog`
+Export scene… writes source. **Export game…** (`⌘⇧E`) writes the thing you send
+someone: one folder — `index.html`, a single `game.js` with Phaser linked into
+it, and a copy of `assets/` — that runs with nothing installed. "The game is
+finished" used to be the point where Mosaic handed you back to a terminal.
+
+It reuses the bundler Mosaic already carries. `bundleScripts` compiles script
+classes for the play-test and `bundleEntry` compiles a project's own entry to
+run it; this compiles the whole game for keeps. The difference that matters is
+Phaser: those two deliberately leave it **external**, because the editor already
+has an instance and a second copy would break every `instanceof`. A shipped
+build has no editor to borrow from, so here it is linked in — the project's own
+copy when it has one, Mosaic's when the folder has never had `npm install` run
+in it, which is what lets a folder that has only ever been opened in the editor
+build at all. The report says which was used. Phaser is handed to the bundler as
+*source* rather than as a path, because in a packaged Mosaic it lives inside an
+asar: transparent to Node's fs, and not to the bundler's own file reads.
+
+Building is destructive inside its output folder, so the wipe is licensed
+narrowly: the path has to be inside the project, it cannot be `src/`, `assets/`,
+`node_modules/` or `.git/`, and a folder that already holds files has to carry
+the `.mosaic-build` marker Mosaic writes. A folder Mosaic did not write is
+refused, not emptied.
+
+`Zip when done` writes `<outDir>.zip` with `index.html` at the archive root,
+which is what a host that takes a zip expects. The archive is written by hand
+with `zlib` — stored or deflated per file, whichever is smaller — because a
+packaging dependency in an app whose whole pitch is that your game does not need
+one would be an odd thing to add.
 
 ## The New Project flow
 
@@ -377,6 +462,7 @@ electron/
   main.ts        window + app lifecycle; registers the asset protocol and IPC
   appIcon.ts     the mark, rasterised into the window and dock icon
   bundleScripts.ts  compiles the project's script classes for the play-test
+  packageGame.ts    bundles the whole game into a shippable folder, and zips it
   preload.ts     the ONLY bridge: contextBridge -> window.mosaic
   contract.ts    channel names + payload types, shared by main and renderer
   ipc.ts         fs, native dialogs, chokidar watcher, git status
@@ -402,7 +488,10 @@ content**, not by a time window — a window races any edit made shortly after a
 save and swallows it silently. If a file changes on disk while the scene has
 unsaved edits, Mosaic says so instead of overwriting either side.
 
-## Packaging
+## Packaging Mosaic itself
+
+(For packaging *your game*, see workflow 11 — that is `Export game…`, and it
+needs none of the below.)
 
 `npm run pack` writes an unsigned app to `release/`; `npm run dist` writes
 installers. The whole desktop suite can be run against the *packaged* bundle
@@ -421,6 +510,10 @@ Three details the config exists for:
   and a `.node` cannot be loaded from inside an asar.
 - **`directories.output: "release"`.** electron-builder defaults to `dist/`,
   which is where the renderer bundle already lives.
+- **`node_modules/phaser` is listed in `files`.** `Export game…` links Phaser
+  into a project that may have none of its own, so the copy it falls back to has
+  to survive packaging. Specifying `files` at all replaces electron-builder's
+  default, which would otherwise have brought it along.
 
 The bundle icon comes from `npm run icon`, which writes `build/icon.png` at
 1024² from the same geometry the UI and the running app draw — electron-builder
@@ -548,7 +641,9 @@ src/
     phaser/         EditorScene.ts (tools, snapping, handles, body editing),
                     PlayScene.ts, playtest.ts, PhaserHost.tsx, snapping.ts,
                     textures.ts
-    assets/slice.ts grid + auto-detect slicing, frame naming
+    assets/         slice.ts (grid + auto-detect slicing, frame naming),
+                    atlasJson.ts (reading an atlas document that already
+                    exists, in any of the three shapes Phaser accepts)
     scripts/        parse.ts (@property declarations, statically), registry.ts
                     (the index, kept warm by the watcher), runtime.ts (the
                     compiled classes + per-project trust), stub.ts (templates)
@@ -569,7 +664,57 @@ scripts/sample-game/
                    builds the samples by driving the editor: Coin Rush (a
                    playable game, and the build guide) and Anim Lab (built to
                    exercise the animation feature rather than to be a game)
+scripts/breakout/  rebuilds Phaser's own breakout example as a Mosaic project,
+                   to answer whether a whole game somebody else already wrote
+                   fits the model. build.ts authors it through the editor's
+                   API and logs every step; roundtrip.ts reopens the written
+                   folder the way Workspace.open does; playtest.mjs bundles the
+                   exported game and plays it in Chromium
 ```
+
+### Rebuilding somebody else's game
+
+Every workflow above is checked against a game Mosaic did not design.
+`npm run breakout` rebuilds Phaser's own `breakout.js` example — the wall, the
+ball, the paddle, the rules — as a Mosaic project, authored entirely through
+the editor's own API: `planScaffold` plans the folder, `ProjectStore` performs
+each edit as a real undoable transaction, `projectToFiles` and `generateFiles`
+write the result. There is no script-only path into the project format, so
+anything the editor cannot express does not get quietly written anyway — the
+builder records those as **friction** in its step log and prints them when it
+finishes.
+
+The first run printed four. Closing them is most of what the physics, atlas and
+grid notes above describe:
+
+| Friction | Now |
+|---|---|
+| the matrix could not say "collide, *and* tell me" | `collide` pairs get a handler; scripts get `onContact` |
+| world bounds were one rectangle, not four sides | `Scene → World edges` |
+| an existing Phaser atlas could not be imported | picked with its `.json`, frame names kept |
+| sixty placements were sixty clicks | `Fill grid` — the same scene in 50 edits instead of 98 |
+
+The same exercise is what turned up the duplicate-identifier bug in the
+generator: naming a prefab and its behaviour the same thing — the obvious
+choice — emitted a file that would not compile.
+
+### What the four export suites each prove
+
+They are deliberately different questions, and passing one says nothing about
+the next:
+
+| | |
+|---|---|
+| `verify:export` | the generated code typechecks under `strict` and bundles |
+| `verify:parity` | the play-test path and the shipped build assemble the same scene |
+| `roundtrip:breakout` | a folder Mosaic wrote, Mosaic can open again — scenes, prefab diffs, exposure, `@property` fields |
+| `playtest:breakout` | the built game is **playable**: bricks break, lives are lost, the round ends |
+
+The last one exists because nothing in the repo had ever executed a script
+component. Compilation and scene-assembly were both covered; behaviour was not,
+and in a project like Breakout every rule of the game lives in a `create()` or
+an `update()`. It earned its place on its first run, catching a wall that
+rebuilt itself correctly on screen while the HUD read `BRICKS 0`.
 
 ### Why the play-test and the export are checked against each other
 
@@ -622,8 +767,18 @@ inside the keep markers survives every regeneration.
 
 - **Browser build only:** the project lives in `localStorage` with assets
   inlined as data URLs, so a large project will exceed the quota (the status
-  bar says so), and there is no folder, no watching and no git. The desktop
-  build has none of these limits.
+  bar says so), and there is no folder, no watching, no git and no
+  `Export game…`. The desktop build has none of these limits.
+- `Export game…` targets the **web**: a folder, and optionally a zip. Wrapping
+  that into a `.app`/`.exe` would mean shipping and extracting an Electron
+  runtime per platform, which is a different feature and not a flag on this one.
+- The atlas document is paired with its image **by filename** — `kit.png` next
+  to `kit.json`. Picking both at once is the normal case and works; importing
+  them separately, or into a folder where the name already exists and gets
+  suffixed, will not pair them.
+- `sounds.overlap` keeps its name now that it fires on collide pairs too. The
+  field is older than the callback, and renaming it would rewrite every scene
+  that has one for no gain.
 - The desktop app packages **unsigned**. `npm run pack` produces a working
   `.app`, but code signing, notarization and auto-update are not set up, so
   macOS quarantines a downloaded build (`xattr -dr com.apple.quarantine` clears
