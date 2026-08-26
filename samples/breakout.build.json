@@ -1,0 +1,303 @@
+{
+  "root": "samples/breakout",
+  "steps": [
+    {
+      "n": "1",
+      "title": "Make the project folder",
+      "body": "New project… plans the folder before it writes a byte of it: 19 files. The EMPTY template is the right start — breakout has no player, no gravity and no terrain, and every other template ships at least one of the three.\n\nThe canvas is 800 × 600, the original's exactly, and pixelArt is off: this art is drawn at 1:1 with soft edges and nearest-neighbour filtering would only make it crunchy.",
+      "editor": "New project… → name \"Breakout\", template Empty, TypeScript, Vite, 800 × 600",
+      "api": "planScaffold({ name: \"Breakout\", template: \"empty\", config: { canvas: { width: 800, height: 600 } } })"
+    },
+    {
+      "n": "2",
+      "title": "Set the court up",
+      "body": "No gravity: in breakout the ball is not falling, it is travelling. The background is scene data like everything else, so the exported game reads the colour from the same field the editor writes.",
+      "editor": "Inspector → Scene → Gravity Y = 0, Background #12141c",
+      "api": "scene.settings.gravityY = 0"
+    },
+    {
+      "n": "3",
+      "title": "Import the art",
+      "body": "Eight PNGs, copied into assets/ the way every import is — Mosaic never references art in place. One ball, one paddle, six brick colours.\n\nThe original loads all eight out of a packed ATLAS instead, with one `load.atlas` call. Mosaic can hold an atlas and does export one, but it can only make an atlas by slicing an image it already has — by grid, or by flood-filling islands of opaque pixels — and it names the frames it finds from a pattern (`frame_0`, `frame_1`, …). There is no way to bring in the atlas JSON that shipped with the art, so the frame names in it are lost. Eight separate images say the same thing and keep the names, so that is what this uses.",
+      "editor": "Assets dock → Import… → the eight PNGs",
+      "api": "store.importAssets(assets)",
+      "friction": "An existing Phaser atlas (.png + .json) cannot be imported as one. The slicer builds frames from pixels and names them from a pattern, so re-using packed art means either losing its frame names or unpacking it first."
+    },
+    {
+      "n": "4",
+      "title": "Name the collision groups this game actually has",
+      "body": "The default five — player, solid, pickup, hazard, trigger — are a platformer's vocabulary and none of them fits. They are removed and replaced with ball, paddle and brick.\n\nGroups are project data, so this is done once and every scene added later starts with the same three.",
+      "editor": "Inspector → Physics → Groups → remove the five, add ball / paddle / brick",
+      "api": "store.removeGroup(\"player\")\nstore.addGroup(\"ball\")"
+    },
+    {
+      "n": "5",
+      "title": "Give the round an owner",
+      "body": "A marker object carrying BreakoutDirector, which hides itself at runtime — the same arrangement Coin Rush uses. The original has no such object because it has no such concept: the rules live in the scene class, mixed in with the wall and the ball.\n\nIt is added FIRST on purpose. Scripts start in the order their objects were added, so the director is listening before any brick announces itself.",
+      "editor": "Place tool (B) → a marker at the centre · Scripts tab → + BreakoutDirector",
+      "api": "store.attachScript([directorId], { name: \"BreakoutDirector\", src: \"src/scripts/BreakoutDirector.ts\" })"
+    },
+    {
+      "n": "6",
+      "title": "Place the paddle and the ball",
+      "body": "Both are ordinary objects with a body authored in the Inspector. The paddle is immovable, so the ball bounces off it instead of shoving it; the ball is a CIRCLE body with bounce 1, which is the only way it leaves a wall as fast as it arrived.\n\nThe four numbers that decide how the game feels — launch velocity, how far the ball rests above the paddle, and how much sideways speed a corner hit adds — are script properties, so they land in the scene file. In the original they are literals inside create() and hitPaddle().",
+      "editor": "Place tool (B) → Paddle and Ball · Inspector → Body → circle, bounce 1, immovable",
+      "api": "store.addObject({ type: \"sprite\", texture: \"ball1\", group: \"ball\", body: { shape: \"circle\", radius: 11, bounce: 1 } })\nstore.setScriptProp(ballId, 0, \"english\", 10)",
+      "friction": "The original disables ONE side of the world bounds — `setBoundsCollision(true, true, true, false)` — so the ball can fall out of play. Mosaic authors the bounds rectangle and whether a body is kept inside it, but not the four per-side flags, so a Mosaic breakout has no floor to lose the ball through and therefore no way to lose. BallController sets the flag itself, behind a \"solid floor\" property."
+    },
+    {
+      "n": "7",
+      "title": "Build one brick, then promote it",
+      "body": "A prefab starts as something already on screen. One brick is built in the scene — sprite, immovable body, Brick attached, worth 60 — and promoted. Promoting rewrites that scene node IN PLACE, keeping its id, so it becomes the first of the sixty rather than being replaced by a copy of itself.\n\nTwo fields are exposed: points and hits. An exposed field is editable per instance and per variant; an unexposed one never appears in a level inspector at all. Everything else about a brick — its body, its behaviour — belongs to the definition, which is what keeps sixty bricks from drifting into sixty different objects.",
+      "editor": "Select the brick → Prefab tab → Create prefab from selection… → Expose points, hits",
+      "api": "store.createPrefab({ name: \"Brick\", objectId: seedBrickId, keepAsInstance: true })\nstore.toggleExposed(\"scripts.0.props.points\")"
+    },
+    {
+      "n": "8",
+      "title": "Five colours, as variants rather than five prefabs",
+      "body": "Each colour inherits Brick and states only what differs: a texture and a score. Its file holds a base and a diff — there is no second copy of the object anywhere.\n\nThat is the whole reason to bother. Changing the body, or what a brick does when it is hit, is one edit on Brick and it reaches all sixty. In the original the six colours are six frame names in one array and there is nothing to change: the behaviour is a method on the scene, and the only thing a brick \"is\" is a frame.",
+      "editor": "Prefab tab → Variants → name Brick_Red → Create → set texture and points → Save",
+      "api": "store.createVariant(\"Brick\", \"Brick_Red\")\nstore.setObjectProp(root, \"texture\", \"red1\")\nstore.setObjectProp(root, \"scripts.0.props.points\", 50)"
+    },
+    {
+      "n": "9",
+      "title": "Lay the wall out",
+      "body": "60 instances on a 10 × 6 grid of 64 × 32 cells, the first centred at (112, 100) — the same arithmetic the original hands to `gridAlign`. Each one is a node referencing a definition with an empty overrides map: a link, not a copy.\n\nIn the editor this is six drags with the grid snap on. What it is NOT is a loop, and that cuts both ways — the wall is now data you can see and rearrange, and it is also 60 lines in the generated scene where the original had four.",
+      "editor": "Assets dock → click a Brick variant → Place tool (B) → click along the grid",
+      "api": "store.addObject({ type: \"sprite\", prefab: \"Brick_Red\", x, y, overrides: {} })",
+      "friction": "Nothing in the scene format says \"a grid of these\". Sixty placements are sixty objects in the scene file and sixty statements in the exported class; changing the wall's shape means moving sixty things rather than editing two numbers."
+    },
+    {
+      "n": "10",
+      "title": "Author the HUD as text objects",
+      "body": "The score readout and the end-of-round banner are objects in the scene, positioned on the canvas like everything else, and pinned to the camera.\n\nThe director finds them by name and writes into them. It does not create them — where the score sits and what size it is are content decisions, and content belongs in the scene.",
+      "editor": "Toolbar → Text (T) · Inspector → Text → pin to camera",
+      "api": "store.addText(\"SCORE 0    LIVES 3\", { x: 16, y: 14 })"
+    },
+    {
+      "n": "11",
+      "title": "The collision matrix, and why this game cannot use it",
+      "body": "Both of breakout's collisions need the same two things at once: a bounce, and a callback. The ball has to come off the paddle at an angle that depends on where it hit, and a brick has to know it was the one that was hit.\n\nThe matrix can only give one or the other. A pair marked \"collide\" is emitted as `physics.add.collider(a, b)` with no handler; only a pair marked \"overlap\" gets a generated callback, and an overlap does not bounce. Marking these pairs \"collide\" and ALSO registering a collider in a script would put two colliders on the same pair, and the second one runs against bodies the first has already separated.\n\nSo both pairs are left ignored and the scripts register the colliders themselves — one call each, bounce and hook together. The groups are still worth authoring: they are what the export builds, and what a later rule would be written against.",
+      "editor": "Inspector → Physics → Edit collision matrix…",
+      "api": "store.setCollisionRule(\"ball\", \"brick\", \"ignore\")",
+      "friction": "The collision matrix cannot express \"collide, and tell me\". Every interaction that needs a physical response AND a callback has to leave the matrix and move into a script, which is both of breakout's interactions — the entire game."
+    },
+    {
+      "n": "12",
+      "title": "Write the four classes",
+      "body": "Mosaic never edits class source — it reads @property declarations out of it and renders them, and the values land in the scene. The four files are written into src/scripts/ and the editor indexes them; the fields set back in steps 5 and 6 are already waiting for them.\n\nNothing here reaches for another script. Bricks and the ball emit scene events and the director listens, so a brick does not need to know that a score exists — which is exactly what the original cannot do, because `hitBrick` is a method on the scene that reaches straight into `this.bricks`.",
+      "editor": "Scripts tab → + Add → Create script… (or write the file; the watcher re-indexes)",
+      "api": "src/scripts/PaddleController.ts  — follows the pointer, clamped to the court\nsrc/scripts/BallController.ts  — docks, launches, bounces off the paddle, and announces a lost ball\nsrc/scripts/Brick.ts  — takes hits, breaks, and puts itself back when the wall is rebuilt\nsrc/scripts/BreakoutDirector.ts  — score, lives, HUD, and the end of the round"
+    },
+    {
+      "n": "13",
+      "title": "Save, and export the scene class",
+      "body": "Saving writes plain JSON: the manifest, the scene, and one file per prefab under src/prefabs/. Export then emits the Phaser scene class beside it, plus a class per prefab — six brick classes, one per variant, each constructing its own texture and body.\n\nThe scene CONSTRUCTS those classes, so behaviour authored on a prefab actually runs. Hand-written code inside a // <keep> region survives every later re-export.",
+      "editor": "Export scene… → both · or ⌘S to save the folder",
+      "api": "projectToFiles(store.project)\ngenerateFiles(store.project, scene, \"tsSceneClass\")"
+    }
+  ],
+  "files": [
+    {
+      "rel": "package.json",
+      "bytes": 307
+    },
+    {
+      "rel": "mosaic.config.json",
+      "bytes": 251
+    },
+    {
+      "rel": "phaser.editor.json",
+      "bytes": 2678
+    },
+    {
+      "rel": "index.html",
+      "bytes": 444
+    },
+    {
+      "rel": "vite.config.ts",
+      "bytes": 143
+    },
+    {
+      "rel": "src/main.ts",
+      "bytes": 583
+    },
+    {
+      "rel": "src/scenes/Level_01.ts",
+      "bytes": 910
+    },
+    {
+      "rel": "src/scenes/Level_01.scene.json",
+      "bytes": 345
+    },
+    {
+      "rel": "assets/placeholder-tiles.png",
+      "bytes": 32868
+    },
+    {
+      "rel": "assets/shape-capsule.png",
+      "bytes": 4588
+    },
+    {
+      "rel": "assets/shape-box.png",
+      "bytes": 4196
+    },
+    {
+      "rel": "assets/shape-circle.png",
+      "bytes": 4196
+    },
+    {
+      "rel": "assets/shape-triangle.png",
+      "bytes": 4136
+    },
+    {
+      "rel": "assets/shape-star.png",
+      "bytes": 2396
+    },
+    {
+      "rel": "assets/shape-diamond.png",
+      "bytes": 2396
+    },
+    {
+      "rel": "tsconfig.json",
+      "bytes": 331
+    },
+    {
+      "rel": "src/scripts/ScriptComponent.ts",
+      "bytes": 9032
+    },
+    {
+      "rel": "anims.json",
+      "bytes": 3
+    },
+    {
+      "rel": "README.md",
+      "bytes": 712
+    },
+    {
+      "rel": "assets/ball1.png",
+      "bytes": 643
+    },
+    {
+      "rel": "assets/paddle1.png",
+      "bytes": 994
+    },
+    {
+      "rel": "assets/blue1.png",
+      "bytes": 369
+    },
+    {
+      "rel": "assets/red1.png",
+      "bytes": 365
+    },
+    {
+      "rel": "assets/green1.png",
+      "bytes": 372
+    },
+    {
+      "rel": "assets/yellow1.png",
+      "bytes": 363
+    },
+    {
+      "rel": "assets/silver1.png",
+      "bytes": 353
+    },
+    {
+      "rel": "assets/purple1.png",
+      "bytes": 370
+    },
+    {
+      "rel": "src/scripts/PaddleController.ts",
+      "bytes": 1790
+    },
+    {
+      "rel": "src/scripts/BallController.ts",
+      "bytes": 4162
+    },
+    {
+      "rel": "src/scripts/Brick.ts",
+      "bytes": 2311
+    },
+    {
+      "rel": "src/scripts/BreakoutDirector.ts",
+      "bytes": 3542
+    },
+    {
+      "rel": "README.md",
+      "bytes": 3237
+    },
+    {
+      "rel": "phaser.editor.json",
+      "bytes": 6048
+    },
+    {
+      "rel": "mosaic.config.json",
+      "bytes": 251
+    },
+    {
+      "rel": "src/scenes/Level_01.scene.json",
+      "bytes": 28801
+    },
+    {
+      "rel": "src/prefabs/Brick.prefab.json",
+      "bytes": 855
+    },
+    {
+      "rel": "src/prefabs/Brick_Red.prefab.json",
+      "bytes": 195
+    },
+    {
+      "rel": "src/prefabs/Brick_Green.prefab.json",
+      "bytes": 199
+    },
+    {
+      "rel": "src/prefabs/Brick_Yellow.prefab.json",
+      "bytes": 201
+    },
+    {
+      "rel": "src/prefabs/Brick_Silver.prefab.json",
+      "bytes": 201
+    },
+    {
+      "rel": "src/prefabs/Brick_Purple.prefab.json",
+      "bytes": 201
+    },
+    {
+      "rel": "src/scenes/Level_01.ts",
+      "bytes": 21112
+    },
+    {
+      "rel": "src/prefabs/Brick.ts",
+      "bytes": 1044
+    },
+    {
+      "rel": "src/prefabs/Brick_Green.ts",
+      "bytes": 1057
+    },
+    {
+      "rel": "src/prefabs/Brick_Purple.ts",
+      "bytes": 1060
+    },
+    {
+      "rel": "src/prefabs/Brick_Red.ts",
+      "bytes": 1051
+    },
+    {
+      "rel": "src/prefabs/Brick_Silver.ts",
+      "bytes": 1060
+    },
+    {
+      "rel": "src/prefabs/Brick_Yellow.ts",
+      "bytes": 1060
+    }
+  ],
+  "stats": {
+    "objects": 65,
+    "bricks": 60,
+    "prefabs": 6,
+    "variants": 5,
+    "scripts": 4,
+    "assets": 8,
+    "undoDepth": 97
+  }
+}

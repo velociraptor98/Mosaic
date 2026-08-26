@@ -44,6 +44,18 @@ export const browserPlatform: Platform = {
   async bundleEntry() {
     return { code: null, error: "Running a project's own game needs the desktop app." };
   },
+
+  canPackage: false,
+  async packageGame() {
+    return {
+      ok: false,
+      error: "Packaging a game needs the desktop app — the browser build has no folder to write.",
+      ms: 0,
+      warnings: [],
+      files: [],
+      totalBytes: 0,
+    };
+  },
   async writeFiles(): Promise<WriteOutcome> {
     return { written: [], failed: [] };
   },

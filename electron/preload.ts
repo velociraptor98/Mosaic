@@ -29,6 +29,7 @@ const api: MosaicApi = {
   findGameEntries: (root) => ipcRenderer.invoke(IPC.findGameEntries, root),
   recordScene: (root, entry) => ipcRenderer.invoke(IPC.recordScene, root, entry),
   bundleEntry: (root, entry) => ipcRenderer.invoke(IPC.bundleEntry, root, entry),
+  packageGame: (request) => ipcRenderer.invoke(IPC.packageGame, request),
   importAssets: (root) => ipcRenderer.invoke(IPC.importAssets, root),
   copyAssets: (root, sources) => ipcRenderer.invoke(IPC.copyAssets, root, sources),
 

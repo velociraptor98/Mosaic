@@ -1,0 +1,343 @@
+{
+  "name": "Breakout",
+  "scenes": [
+    {
+      "key": "Level_01",
+      "name": "Level 01",
+      "file": "src/scenes/Level_01.scene.json"
+    }
+  ],
+  "assets": [
+    {
+      "id": "tileset-placeholder",
+      "key": "placeholder-tiles",
+      "kind": "tileset",
+      "path": "assets/placeholder-tiles.png",
+      "width": 256,
+      "height": 32,
+      "frameWidth": 32,
+      "frameHeight": 32,
+      "margin": 0,
+      "spacing": 0,
+      "tileCollides": [
+        1,
+        4,
+        5,
+        6
+      ],
+      "generated": true
+    },
+    {
+      "id": "asset-shape-capsule",
+      "key": "shape-capsule",
+      "kind": "image",
+      "path": "assets/shape-capsule.png",
+      "width": 28,
+      "height": 40,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-box",
+      "key": "shape-box",
+      "kind": "image",
+      "path": "assets/shape-box.png",
+      "width": 32,
+      "height": 32,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-circle",
+      "key": "shape-circle",
+      "kind": "image",
+      "path": "assets/shape-circle.png",
+      "width": 32,
+      "height": 32,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-triangle",
+      "key": "shape-triangle",
+      "kind": "image",
+      "path": "assets/shape-triangle.png",
+      "width": 28,
+      "height": 36,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-star",
+      "key": "shape-star",
+      "kind": "image",
+      "path": "assets/shape-star.png",
+      "width": 24,
+      "height": 24,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-diamond",
+      "key": "shape-diamond",
+      "kind": "image",
+      "path": "assets/shape-diamond.png",
+      "width": 24,
+      "height": 24,
+      "generated": true
+    },
+    {
+      "id": "asset-ball1",
+      "key": "ball1",
+      "kind": "image",
+      "path": "assets/ball1.png",
+      "width": 22,
+      "height": 22
+    },
+    {
+      "id": "asset-paddle1",
+      "key": "paddle1",
+      "kind": "image",
+      "path": "assets/paddle1.png",
+      "width": 104,
+      "height": 24
+    },
+    {
+      "id": "asset-blue1",
+      "key": "blue1",
+      "kind": "image",
+      "path": "assets/blue1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-red1",
+      "key": "red1",
+      "kind": "image",
+      "path": "assets/red1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-green1",
+      "key": "green1",
+      "kind": "image",
+      "path": "assets/green1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-yellow1",
+      "key": "yellow1",
+      "kind": "image",
+      "path": "assets/yellow1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-silver1",
+      "key": "silver1",
+      "kind": "image",
+      "path": "assets/silver1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-purple1",
+      "key": "purple1",
+      "kind": "image",
+      "path": "assets/purple1.png",
+      "width": 64,
+      "height": 32
+    },
+    {
+      "id": "asset-placeholder_tiles",
+      "key": "placeholder_tiles",
+      "kind": "image",
+      "path": "assets/placeholder-tiles.png",
+      "width": 256,
+      "height": 32
+    },
+    {
+      "id": "asset-shape_box",
+      "key": "shape_box",
+      "kind": "image",
+      "path": "assets/shape-box.png",
+      "width": 32,
+      "height": 32
+    },
+    {
+      "id": "asset-shape_capsule",
+      "key": "shape_capsule",
+      "kind": "image",
+      "path": "assets/shape-capsule.png",
+      "width": 28,
+      "height": 40
+    },
+    {
+      "id": "asset-shape_circle",
+      "key": "shape_circle",
+      "kind": "image",
+      "path": "assets/shape-circle.png",
+      "width": 32,
+      "height": 32
+    },
+    {
+      "id": "asset-shape_diamond",
+      "key": "shape_diamond",
+      "kind": "image",
+      "path": "assets/shape-diamond.png",
+      "width": 24,
+      "height": 24
+    },
+    {
+      "id": "asset-shape_star",
+      "key": "shape_star",
+      "kind": "image",
+      "path": "assets/shape-star.png",
+      "width": 24,
+      "height": 24
+    },
+    {
+      "id": "asset-shape_triangle",
+      "key": "shape_triangle",
+      "kind": "image",
+      "path": "assets/shape-triangle.png",
+      "width": 28,
+      "height": 36
+    }
+  ],
+  "prefabs": [
+    {
+      "name": "Brick",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "root": {
+        "name": "Brick",
+        "type": "sprite",
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "originX": 0.5,
+        "originY": 0.5,
+        "visible": true,
+        "texture": "blue1",
+        "group": "brick",
+        "body": {
+          "shape": "box",
+          "width": 64,
+          "height": 32,
+          "radius": 16,
+          "offsetX": 0,
+          "offsetY": 0,
+          "immovable": true,
+          "allowGravity": false,
+          "bounce": 0,
+          "collideWorldBounds": false
+        },
+        "data": {},
+        "scripts": [
+          {
+            "class": "Brick",
+            "src": "src/scripts/Brick.ts",
+            "enabled": true,
+            "props": {
+              "points": 60,
+              "hits": 1
+            }
+          }
+        ],
+        "lid": "nmta6t1k31",
+        "children": []
+      },
+      "file": "src/prefabs/Brick.prefab.json"
+    },
+    {
+      "name": "Brick_Green",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "texture": "green1",
+        "scripts.0.props.points": 40
+      },
+      "file": "src/prefabs/Brick_Green.prefab.json"
+    },
+    {
+      "name": "Brick_Purple",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "texture": "purple1",
+        "scripts.0.props.points": 10
+      },
+      "file": "src/prefabs/Brick_Purple.prefab.json"
+    },
+    {
+      "name": "Brick_Red",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "texture": "red1",
+        "scripts.0.props.points": 50
+      },
+      "file": "src/prefabs/Brick_Red.prefab.json"
+    },
+    {
+      "name": "Brick_Silver",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "texture": "silver1",
+        "scripts.0.props.points": 20
+      },
+      "file": "src/prefabs/Brick_Silver.prefab.json"
+    },
+    {
+      "name": "Brick_Yellow",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "texture": "yellow1",
+        "scripts.0.props.points": 30
+      },
+      "file": "src/prefabs/Brick_Yellow.prefab.json"
+    }
+  ],
+  "anims": [],
+  "groups": [
+    "ball",
+    "paddle",
+    "brick"
+  ],
+  "collision": {
+    "ball": {
+      "ball": "ignore",
+      "paddle": "ignore",
+      "brick": "ignore"
+    },
+    "paddle": {
+      "ball": "ignore",
+      "paddle": "ignore",
+      "brick": "ignore"
+    },
+    "brick": {
+      "ball": "ignore",
+      "paddle": "ignore",
+      "brick": "ignore"
+    }
+  }
+}

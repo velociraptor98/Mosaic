@@ -36,6 +36,7 @@ export const IPC = {
   findGameEntries: "mosaic:findGameEntries",
   recordScene: "mosaic:recordScene",
   bundleEntry: "mosaic:bundleEntry",
+  packageGame: "mosaic:packageGame",
 } as const;
 
 /** Pushed from main -> renderer when watched files change on disk. */
@@ -177,6 +178,49 @@ export interface FileChange {
   kind: ChangeKind;
 }
 
+/** What Export game… asks the main process to build. */
+export interface PackageRequest {
+  root: string;
+  /** Project-relative entry point, e.g. "src/main.ts". */
+  entry: string;
+  /** Project-relative output folder, e.g. "build/web". */
+  outDir: string;
+  /** Project-relative asset folder, from mosaic.config.json. */
+  assetsDir: string;
+  minify: boolean;
+  copyAssets: boolean;
+  /** Also write <outDir>.zip, with index.html at the archive root. */
+  zip: boolean;
+  /** Used only when the project has no index.html of its own. */
+  title: string;
+  background: string;
+}
+
+export interface PackagedFile {
+  rel: string;
+  bytes: number;
+}
+
+/** Which Phaser was linked in, and whose copy it was. */
+export interface PhaserChoice {
+  file: string;
+  version: string;
+  source: "project" | "editor";
+}
+
+export interface PackageResult {
+  ok: boolean;
+  error?: string;
+  /** Absolute path of the folder that was written. */
+  outDir?: string;
+  zipPath?: string;
+  ms: number;
+  warnings: string[];
+  files: PackagedFile[];
+  phaser?: PhaserChoice;
+  totalBytes: number;
+}
+
 /** Porcelain-ish status codes, keyed by project-relative path. */
 export type GitStatus = Record<string, string>;
 
@@ -202,6 +246,8 @@ export interface MosaicApi {
   recordScene(root: string, entry: string): Promise<SceneRecording>;
   /** Compiles an entry point so the renderer can run the project's own game. */
   bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+  /** Bundles the whole game into a folder that runs with nothing installed. */
+  packageGame(request: PackageRequest): Promise<PackageResult>;
   importAssets(root: string): Promise<AssetFileInfo[]>;
   copyAssets(root: string, sourcePaths: string[]): Promise<AssetFileInfo[]>;
 

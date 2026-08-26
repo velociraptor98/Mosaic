@@ -210,7 +210,23 @@ function emitScene(project: ProjectData, scene: SceneData, mode: SceneEmitMode):
   const objectKeys = new Set<string>();
   /** Script classes this scene constructs, keyed by src::class. */
   const scriptImports = new Map<string, { alias: string; module: string }>();
-  const scriptAliases = new Set<string>();
+  /**
+   * Module-scope identifiers already spoken for, so a script imported later
+   * takes an alias instead of shadowing one.
+   *
+   * Seeded with the PREFAB class names before anything is emitted. A brick
+   * prefab called `Brick` whose behaviour is a script called `Brick` is the
+   * obvious way to author that object, and it used to emit two imports of the
+   * same name — a file that does not compile, and whose first error is a
+   * duplicate identifier rather than anything the author would recognise.
+   */
+  const scriptAliases = new Set<string>([
+    "Phaser",
+    "ScriptHost",
+    "sceneData",
+    cls,
+    ...usedPrefabs(project, scene).map(className),
+  ]);
 
   /** Keys of `this.objects`, kept unique even when two objects share a name. */
   const objectKey = (name: string, fallback: string): string => {

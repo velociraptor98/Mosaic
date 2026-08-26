@@ -857,6 +857,7 @@ export class Patrol extends ScriptComponent {
 
   await newProjectFlow(win);
   await codeAtTheRoot(win);
+  await packagingGame(win);
 
   console.log(failures === 0 ? "\nDesktop end-to-end passed" : `\n${failures} desktop check(s) failed`);
   app.exit(failures === 0 ? 0 : 1);
@@ -1214,6 +1215,200 @@ async function newProjectFlow(win: BrowserWindow): Promise<void> {
     console.log(`  ✗ threw: ${(err as Error).stack ?? err}`);
   } finally {
     await fs.rm(parent, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * Export game… — the build, end to end.
+ *
+ * Driven through the real preload bridge, so this exercises the whole path the
+ * button does: renderer -> IPC -> the packager -> the filesystem. Then it LOADS
+ * what was written, in a window of its own, because a build that produces files
+ * and not a running game is a build that passed on a technicality.
+ */
+async function packagingGame(win: BrowserWindow): Promise<void> {
+  const root = await fs.mkdtemp(path.join(app.getPath("temp"), "mosaic-pack-"));
+  console.log(`\nExport game (${root})`);
+
+  try {
+    await evaluate(win, `window.mosaicDebug.workspace.open({ root: ${JSON.stringify(root)}, name: "pack" })`);
+    await wait(900);
+
+    // Opening an EMPTY folder scaffolds the project DATA — a manifest, a scene
+    // — but no entry point, so there is nothing to compile yet. The pieces a
+    // build needs are written here, and between them they cover what the
+    // packager has to get right: `import Phaser`, a relative import across
+    // folders, a legacy decorator, and TypeScript that no tsc ever touches.
+    await fs.mkdir(path.join(root, "src/scenes"), { recursive: true });
+    await fs.mkdir(path.join(root, "src/scripts"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src/scripts/Spin.ts"),
+      `type Options = { min?: number; max?: number };
+export function property(_options: Options = {}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return function (_target: unknown, _key: string): any { return undefined; };
+}
+
+export class Spin {
+  @property({ min: 0, max: 360 })
+  speed = 90;
+
+  step(target: { angle: number }, dt: number): void {
+    target.angle += (this.speed * dt) / 1000;
+  }
+}
+`,
+    );
+    await fs.writeFile(
+      path.join(root, "src/scenes/Packed.ts"),
+      `import Phaser from "phaser";
+import { Spin } from "../scripts/Spin";
+
+export class Packed extends Phaser.Scene {
+  constructor() { super("Packed"); }
+  create(): void {
+    const mark = this.add.text(20, 20, "packed", { fontFamily: "monospace" });
+    const spin = new Spin();
+    this.events.on("update", (_t: number, dt: number) => spin.step(mark, dt));
+  }
+}
+`,
+    );
+    await fs.writeFile(
+      path.join(root, "src/main.ts"),
+      `import Phaser from "phaser";
+import { Packed } from "./scenes/Packed";
+
+new Phaser.Game({
+  type: Phaser.CANVAS,
+  width: 320,
+  height: 200,
+  scene: [Packed],
+  audio: { noAudio: true },
+});
+`,
+    );
+    // A real asset, so the copy has something to carry.
+    await fs.mkdir(path.join(root, "assets"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "assets/dot.png"),
+      Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "base64",
+      ),
+    );
+    ok("a project to build", await exists(path.join(root, "src/main.ts")));
+
+    const pack = (patch: string) =>
+      evaluate<{
+        ok: boolean;
+        error?: string;
+        outDir?: string;
+        zipPath?: string;
+        files: { rel: string; bytes: number }[];
+        phaser?: { version: string; source: string };
+        warnings: string[];
+        ms: number;
+      }>(
+        win,
+        `window.mosaic.packageGame(Object.assign({
+           root: ${JSON.stringify(root)},
+           entry: "src/main.ts",
+           outDir: "build/web",
+           assetsDir: "assets",
+           minify: true,
+           copyAssets: true,
+           zip: false,
+           title: "Pack",
+           background: "#101010",
+         }, ${patch}))`,
+      );
+
+    const built = await pack("{}");
+    ok("it builds", built.ok, built.error);
+    ok("index.html comes first, at the root of the build",
+       await exists(path.join(root, "build/web/index.html")));
+    ok("the whole game is one script", await exists(path.join(root, "build/web/game.js")));
+    ok("the assets come with it", await exists(path.join(root, "build/web/assets/dot.png")));
+
+    const gameJs = await fs.stat(path.join(root, "build/web/game.js")).catch(() => null);
+    // A bundle this size can only mean Phaser was linked in rather than left
+    // as an unresolved import, which is the difference between a folder that
+    // runs and one that throws the moment it loads.
+    ok("Phaser is linked in, not left external",
+       !!gameJs && gameJs.size > 800_000,
+       gameJs ? `${(gameJs.size / 1024 / 1024).toFixed(2)} MB` : "missing");
+    ok("and it says whose copy it used",
+       built.phaser?.source === "editor", JSON.stringify(built.phaser));
+    ok("it reports no warnings on a clean project",
+       built.ok && built.warnings.length === 0, built.warnings.join(" · "));
+
+    // --- the folder guards ----------------------------------------------
+    const intoSrc = await pack('{ outDir: "src" }');
+    ok("it refuses to build into src/", !intoSrc.ok && /Refusing/.test(intoSrc.error ?? ""), intoSrc.error);
+
+    const outside = await pack('{ outDir: "../escape" }');
+    ok("it refuses to build outside the project", !outside.ok, outside.error);
+
+    const missing = await pack('{ entry: "src/nope.ts" }');
+    ok("a missing entry is a sentence, not a stack trace",
+       !missing.ok && /does not exist/.test(missing.error ?? ""), missing.error);
+
+    await fs.mkdir(path.join(root, "mine"), { recursive: true });
+    await fs.writeFile(path.join(root, "mine/notes.txt"), "please do not delete me");
+    const notOurs = await pack('{ outDir: "mine" }');
+    ok("it refuses to clear a folder it did not write", !notOurs.ok, notOurs.error);
+    ok("and that folder is untouched", await exists(path.join(root, "mine/notes.txt")));
+
+    // Rebuilding into its OWN folder is fine, and leaves nothing stale behind.
+    await fs.writeFile(path.join(root, "build/web/stale.txt"), "from an older build");
+    const again = await pack("{}");
+    ok("rebuilding replaces its own output", again.ok, again.error);
+    ok("and stale files from the last build are gone",
+       !(await exists(path.join(root, "build/web/stale.txt"))));
+
+    // --- the zip ---------------------------------------------------------
+    const zipped = await pack("{ zip: true }");
+    ok("it can zip the build", zipped.ok && !!zipped.zipPath, zipped.error);
+    if (zipped.zipPath) {
+      const archive = await fs.readFile(zipped.zipPath).catch(() => null);
+      ok("the archive is a real zip", !!archive && archive.subarray(0, 2).toString() === "PK",
+         archive ? `${(archive.length / 1024).toFixed(0)} kB` : "missing");
+      // Hosts that take a zip want index.html at the top level, not nested.
+      ok("with index.html at its root", !!archive && archive.includes("index.html"));
+    }
+
+    // --- does it actually run? -------------------------------------------
+    const preview = new BrowserWindow({ show: false, width: 640, height: 400 });
+    try {
+      const errors: string[] = [];
+      preview.webContents.on("console-message", (e) => {
+        if (e && e.level === "error") errors.push(e.message);
+      });
+      await preview.loadFile(path.join(root, "build/web/index.html"));
+      const booted = await evaluate<{ canvas?: number[]; timeout?: boolean }>(
+        preview,
+        `new Promise((res) => {
+           const t0 = Date.now();
+           const poll = () => {
+             const c = document.querySelector("canvas");
+             if (c && c.width > 0) return res({ canvas: [c.width, c.height] });
+             if (Date.now() - t0 > 10000) return res({ timeout: true });
+             setTimeout(poll, 100);
+           };
+           poll();
+         })`,
+      );
+      ok("the built folder actually runs", !booted.timeout, JSON.stringify(booted));
+      ok("with nothing in the console", errors.length === 0, errors.slice(0, 2).join(" | "));
+    } finally {
+      preview.destroy();
+    }
+  } catch (err) {
+    failures += 1;
+    console.log(`  ✗ threw: ${(err as Error).stack ?? err}`);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true }).catch(() => {});
   }
 }
 

@@ -1,0 +1,12 @@
+{
+  "name": "Brick_Green",
+  "exposed": [
+    "scripts.0.props.points",
+    "scripts.0.props.hits"
+  ],
+  "base": "Brick",
+  "diff": {
+    "texture": "green1",
+    "scripts.0.props.points": 40
+  }
+}

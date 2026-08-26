@@ -1,3 +1,4 @@
+import type { PackageRequest, PackageResult } from "../../../electron/contract";
 import type {
   CreateResult,
   EditorOpen,
@@ -95,6 +96,8 @@ export interface ProjectChange {
   kind: ChangeKind;
 }
 
+export type { PackageRequest, PackageResult, PackagedFile, PhaserChoice } from "../../../electron/contract";
+
 export interface Platform {
   readonly kind: "browser" | "electron";
   /** "darwin" | "win32" | "linux", or "" in the browser. */
@@ -130,6 +133,15 @@ export interface Platform {
   recordScene(root: string, entry: string): Promise<SceneRecordingResult>;
   /** Compiles the project's entry point so the editor can run its real game. */
   bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+
+  // --- Shipping the game -------------------------------------------------
+  /** True when this platform can build a shippable folder. */
+  readonly canPackage: boolean;
+  /**
+   * Bundles the whole game into a folder that runs with nothing installed.
+   * Destructive inside its own output folder, and nowhere else.
+   */
+  packageGame(request: PackageRequest): Promise<PackageResult>;
 
   /** Native picker on desktop; copies the chosen files into assets/. */
   importAssets(root: string): Promise<AssetDef[]>;

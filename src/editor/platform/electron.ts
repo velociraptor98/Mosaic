@@ -73,6 +73,9 @@ export function createElectronPlatform(api: MosaicApi): Platform {
     recordScene: (root, entry) => api.recordScene(root, entry),
     bundleEntry: (root, entry) => api.bundleEntry(root, entry),
 
+    canPackage: true,
+    packageGame: (request) => api.packageGame(request),
+
     async writeFiles(root, files): Promise<WriteOutcome> {
       return api.writeFiles(root, files);
     },

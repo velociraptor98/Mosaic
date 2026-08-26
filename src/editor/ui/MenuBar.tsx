@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { startPlaytest, stopAndPrompt } from "../commands";
 import { MosaicLockup } from "./Logo";
 import { useEditor, useStoreVersion } from "./context";
+import { platform } from "../platform";
 
 /**
  * Menu bar + transport. RUN boots the scene into the canvas you were editing;
@@ -115,9 +116,16 @@ export function MenuBar() {
         )}
       </div>
 
-      <button className="primary" onClick={() => openDialog("export")}>
+      <button className="ghost" onClick={() => openDialog("export")}>
         Export scene…
       </button>
+
+      {/* The source, then the thing you send someone. */}
+      {platform.canPackage && (
+        <button className="primary" onClick={() => openDialog("package")} title="Build a folder you can ship (⌘⇧E)">
+          Export game…
+        </button>
+      )}
 
       {scene && store.isDirty(scene.key) && <span className="tag-outline">unsaved</span>}
     </header>

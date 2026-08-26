@@ -15,6 +15,7 @@ export type DialogName =
   | "attachscript"
   | "scripttrust"
   | "export"
+  | "package"
   | "promote"
   | null;
 
@@ -61,6 +62,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
         { id: "project.runGame", title: "Run the project's own game", category: "Project", run: () => { if (workspace.gameEntry) openDialog("runproject"); } },
         { id: "project.reload", title: "Reload project from disk", category: "Project", run: () => void workspace.reload() },
         { id: "project.close", title: "Close project", category: "Project", binding: `${mod}W`, run: () => workspace.close() },
+        { id: "project.package", title: "Export game (build a folder you can ship)…", category: "Project", binding: `${mod}⇧E`, run: () => openDialog("package") },
         { id: "project.reveal", title: "Reveal project in file manager", category: "Project", run: () => workspace.reveal() },
         { id: "project.git", title: "Refresh git status", category: "Project", run: () => void workspace.refreshGit() },
       ]

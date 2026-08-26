@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
 import { bundleScripts } from "./bundleScripts";
+import { packageGame } from "./packageGame";
 import { bundleEntry, findGameEntries, recordScene } from "./recordScene";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -29,6 +30,8 @@ import {
   type WriteRequest,
   type WriteResultIpc,
   type SceneRecording,
+  type PackageRequest,
+  type PackageResult,
 } from "./contract";
 
 const execFileAsync = promisify(execFile);
@@ -407,6 +410,31 @@ export function registerIpc(): void {
       // bundler, so a renderer cannot ask for a file outside the project.
       for (const entry of entries) resolveInside(root, entry.src);
       return bundleScripts(root, entries);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.packageGame,
+    async (_e, request: PackageRequest): Promise<PackageResult> => {
+      // The path bounds are enforced again inside the packager, which is where
+      // the folder is actually cleared — but a request naming a path outside
+      // the project should not get that far. Caught rather than thrown: a
+      // rejected invoke() surfaces as an unhandled error in the renderer,
+      // where what the dialog needs is a sentence it can show.
+      try {
+        resolveInside(request.root, request.entry);
+        resolveInside(request.root, request.outDir);
+      } catch (err) {
+        return {
+          ok: false,
+          error: (err as Error).message,
+          ms: 0,
+          warnings: [],
+          files: [],
+          totalBytes: 0,
+        };
+      }
+      return packageGame(request);
     },
   );
 
