@@ -6,7 +6,8 @@ import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
 import { bundleScripts } from "./bundleScripts";
 import { packageGame } from "./packageGame";
-import { bundleEntry, findGameEntries, recordScene } from "./recordScene";
+import { findGameEntries, recordScene } from "./recordScene";
+import { startDevServer, stopAllDevServers, stopDevServer } from "./devServer";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import {
@@ -32,6 +33,7 @@ import {
   type SceneRecording,
   type PackageRequest,
   type PackageResult,
+  type DevServerResult,
 } from "./contract";
 
 const execFileAsync = promisify(execFile);
@@ -452,17 +454,11 @@ export function registerIpc(): void {
     },
   );
 
-  ipcMain.handle(
-    IPC.bundleEntry,
-    async (_e, root: string, entry: string): Promise<{ code: string | null; error?: string }> => {
-      resolveInside(root, entry);
-      try {
-        return { code: await bundleEntry(root, entry) };
-      } catch (err) {
-        return { code: null, error: (err as Error).message };
-      }
-    },
+  ipcMain.handle(IPC.devServerStart, async (_e, root: string): Promise<DevServerResult> =>
+    startDevServer(root),
   );
+
+  ipcMain.handle(IPC.devServerStop, async (_e, root: string) => stopDevServer(root));
 
   ipcMain.handle(IPC.importAssets, async (_e, root: string): Promise<AssetFileInfo[]> => {
     const result = await dialog.showOpenDialog({
@@ -710,9 +706,20 @@ export function registerIpc(): void {
     child.on("close", (code) => send({ root, done: true, code }));
   });
 
+  // A dev server runs in its own process group, so it outlives a main process
+  // that is killed rather than quit. These are the ways that happens.
+  process.once("exit", stopAllDevServers);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(signal, () => {
+      stopAllDevServers();
+      app.quit();
+    });
+  }
+
   app.on("will-quit", () => {
     for (const watcher of watchers.values()) void watcher.close();
     watchers.clear();
+    stopAllDevServers();
   });
 }
 

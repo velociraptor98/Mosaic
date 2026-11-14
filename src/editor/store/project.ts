@@ -129,7 +129,6 @@ export interface UiState {
   inspectorTab: InspectorTab;
   animKey: string | null;
   status: string;
-  watchExport: boolean;
   /**
    * The read-only source drawer: which file it shows, and which class's
    * declarations are highlighted in it. Editing happens in the user's own
@@ -185,7 +184,6 @@ export class ProjectStore {
     inspectorTab: "object",
     animKey: null,
     status: "Ready",
-    watchExport: false,
     sourceView: null,
     scriptRelink: null,
     prefabPlan: null,
@@ -1785,6 +1783,32 @@ export class ProjectStore {
       }
       // An inherited script's value can only be un-set back to the prefab's.
       this.revertOverrideIn(obj, scriptPropPath(index, name));
+    });
+  }
+
+  /**
+   * Sets one `@property` field of the object's own class.
+   *
+   * Stored on the object rather than as an override: the class is the
+   * project's code, not part of the prefab's exposure contract, and a field the
+   * developer chose to publish with a decorator does not need publishing twice.
+   */
+  setClassProp(id: string, name: string, value: unknown): void {
+    const obj = this.objectById(id);
+    if (!obj) return;
+    this.transact(`Set ${name}`, () => {
+      obj.props = { ...(obj.props ?? {}), [name]: value };
+    });
+  }
+
+  /** Back to the prefab's value, or to the default the class declares. */
+  clearClassProp(id: string, name: string): void {
+    const obj = this.objectById(id);
+    if (!obj?.props || !(name in obj.props)) return;
+    this.transact(`Clear ${name}`, () => {
+      const { [name]: _dropped, ...rest } = obj.props!;
+      if (Object.keys(rest).length) obj.props = rest;
+      else delete obj.props;
     });
   }
 

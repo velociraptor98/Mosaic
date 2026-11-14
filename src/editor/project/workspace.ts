@@ -1,7 +1,9 @@
 import type { ProjectData } from "../../shared/types";
+import { generateProjectFiles, type GeneratedFile, type Language } from "../export/generate";
 import { setProjectRoot } from "../export/write";
+import { propertiesOf } from "../scripts/parse";
 import { platform } from "../platform";
-import type { ProjectChange, ProjectLocation, RecentEntry } from "../platform/types";
+import type { DiskFile, ProjectChange, ProjectLocation, RecentEntry } from "../platform/types";
 import { ScriptRegistry } from "../scripts/registry";
 import { ScriptRuntime } from "../scripts/runtime";
 import { SCRIPT_EXT } from "../../shared/scripts";
@@ -70,6 +72,19 @@ export class Workspace {
   /** The entry the user picked, when the folder offers more than one. */
   selectedGameEntry: string | null = null;
 
+  /**
+   * The language layout files are written in: the project's own setting, or
+   * what the folder implies when it has not said.
+   */
+  language: Language = "ts";
+  /**
+   * `yours` files already looked at this session. Each is checked against the
+   * disk once — written if it is missing, left alone forever if it is not —
+   * and never read again, because a file that is yours is not Mosaic's to keep
+   * inspecting.
+   */
+  private settled = new Set<string>();
+
   /** Bumped on every change, so React can subscribe with useSyncExternalStore. */
   revision = 0;
   /**
@@ -85,6 +100,8 @@ export class Workspace {
   scriptRuntime = new ScriptRuntime();
   /** Set by the play-test, so a source edit can reach a running scene. */
   onScriptsChanged: ((rels: string[]) => void) | null = null;
+  /** Set by the play-test, so a closing project takes its dev server with it. */
+  onClosing: ((root: string) => void) | null = null;
   /**
    * Scene files that changed on disk under unsaved edits of ours. Writing one
    * would throw away whatever the other change was, so a prefab push marks
@@ -184,6 +201,7 @@ export class Workspace {
     this.location = location;
     setProjectRoot(location.root);
     this.issues = issues;
+    this.language = project.config.language ?? (await inferLanguage(location.root));
     this.store.loadProject(project);
 
     // Autosave is what makes the editor feel like it edits a folder rather
@@ -218,6 +236,7 @@ export class Workspace {
   }
 
   close(opts: { keepStore?: boolean } = {}): void {
+    if (this.location) this.onClosing?.(this.location.root);
     this.stopWatch?.();
     this.stopWatch = null;
     this.location = null;
@@ -227,6 +246,8 @@ export class Workspace {
     this.gameEntries = [];
     this.selectedGameEntry = null;
     this.scriptRuntime.reset();
+    this.settled.clear();
+    this.selfWrites.clear();
     setProjectRoot(null);
     if (!opts.keepStore) {
       this.store.setPersister(null);
@@ -288,7 +309,9 @@ export class Workspace {
     }
     this.saving = true;
     this.emit();
-    const files = projectToFiles(project);
+    // The layout is not a separate export: it is part of what saving a scene
+    // means, so the game on disk is never a step behind the editor.
+    const files = [...projectToFiles(project), ...(await this.codeFiles(project))];
     // Remember the last few payloads per path, not just the newest. Two saves
     // in quick succession race their own watcher events: the event for the
     // first arrives after the second has been recorded but before its bytes
@@ -311,6 +334,95 @@ export class Workspace {
     void this.refreshGit();
     this.emit();
   }
+
+  /**
+   * The code a save writes beside the scene data.
+   *
+   * Two rules, one per kind of file. A generated file is rewritten — but only
+   * when its bytes changed, because a dev server reloads on every write and
+   * moving one sprite should not reload fifty scenes. A file that is yours is
+   * written when it does not exist, and otherwise not at all.
+   */
+  private async codeFiles(project: ProjectData): Promise<DiskFile[]> {
+    const root = this.location?.root;
+    if (!root) return [];
+    const generated = generateProjectFiles(project, {
+      language: this.language,
+      declared: this.declaredProps,
+    });
+    const out: DiskFile[] = [];
+    const created: string[] = [];
+
+    for (const file of generated) {
+      if (file.owner === "generated") {
+        const last = this.selfWrites.get(file.path);
+        if (last?.[0] === file.contents) continue;
+        if (!last && (await platform.readText(root, file.path)) === file.contents) {
+          this.selfWrites.set(file.path, [file.contents]);
+          continue;
+        }
+        out.push({ rel: file.path, contents: file.contents });
+        continue;
+      }
+
+      if (this.settled.has(file.path)) continue;
+      this.settled.add(file.path);
+      if (this.alreadyWired(file)) continue;
+      const onDisk = await platform.readText(root, file.path);
+      if (onDisk === null || isUntouchedLegacy(onDisk)) {
+        out.push({ rel: file.path, contents: file.contents });
+        created.push(file.path);
+      } else if (isLegacyGenerated(onDisk)) {
+        this.issues.push(
+          `${file.path} was generated by an older Mosaic and holds code you wrote inside its keep markers. It is yours now and will not be rewritten — import from ./${file.path.split("/").pop()!.replace(/\.(ts|js)$/, ".layout")} to pick up what the editor authors.`,
+        );
+      }
+    }
+
+    if (created.length) {
+      // A scene class is only half-made until the game knows about it, and
+      // the game's scene list is a file Mosaic does not write to.
+      const scene = created.find((rel) => rel.startsWith("src/scenes/"));
+      const cls = scene?.split("/").pop()!.replace(/\.(ts|js)$/, "");
+      this.store.setStatus(
+        scene && this.lastSavedAt
+          ? `Wrote ${scene} — yours from here on. Add ${cls} to your game's scene list to run it.`
+          : created.length === 1
+            ? `Wrote ${created[0]} — yours from here on`
+            : `Wrote ${created.length} starter files — yours from here on`,
+      );
+    }
+    return out;
+  }
+
+  /**
+   * True when the project already has its own class for this file's job.
+   *
+   * An imported project keeps its scenes wherever it kept them, and dropping a
+   * second `MainGame` into src/scenes because the first one is not where
+   * Mosaic would have put it is the editor arguing with the codebase. So a
+   * starter is skipped when something already imports the layout, or a class
+   * of that name already exists somewhere else.
+   */
+  private alreadyWired(file: GeneratedFile): boolean {
+    const stem = file.path.split("/").pop()!.replace(/\.(ts|js)$/, "");
+    for (const [src, contents] of this.scripts.sources) {
+      if (src === file.path) continue;
+      if (contents.includes(`${stem}.layout`)) return true;
+    }
+    return this.scripts.index.classes.some(
+      (c) => c.name === stem && c.src !== file.path && !/\.layout\.(ts|js)$/.test(c.src),
+    );
+  }
+
+  /** The `@property` fields a class declares right now, bases included. */
+  private declaredProps = (src: string, className: string): Set<string> | null => {
+    const index = this.scripts.index;
+    const cls =
+      index.byKey.get(`${src}::${className}`) ?? index.classes.find((c) => c.name === className);
+    if (!cls) return null;
+    return new Set(propertiesOf(index, cls).map((p) => p.name));
+  };
 
   // ------------------------------------------------------------ watching
 
@@ -444,3 +556,36 @@ export class Workspace {
   }
 }
 
+
+/**
+ * TypeScript when the folder says so, JavaScript when it is a JS project, and
+ * TypeScript again when it is nothing yet — which is what a new Mosaic project
+ * is scaffolded as.
+ */
+async function inferLanguage(root: string): Promise<Language> {
+  if ((await platform.readText(root, "tsconfig.json")) !== null) return "ts";
+  if ((await platform.readText(root, "package.json")) !== null) return "js";
+  return "ts";
+}
+
+/** A scene or prefab class written by the generator Mosaic used to have. */
+function isLegacyGenerated(source: string): boolean {
+  return /^\/\/ GENERATED by Mosaic from /.test(source) && source.includes("// <keep id=");
+}
+
+/**
+ * The same, with nothing of the user's in it — so it can be replaced by the
+ * new starting point without losing anything.
+ */
+function isUntouchedLegacy(source: string): boolean {
+  if (!isLegacyGenerated(source)) return false;
+  const region = /^[ \t]*\/\/[ \t]*<keep[ \t]+id="[^"]+">[ \t]*\n([\s\S]*?)^[ \t]*\/\/[ \t]*<\/keep>[ \t]*$/gm;
+  let match: RegExpExecArray | null;
+  while ((match = region.exec(source))) {
+    const body = match[1]
+      .split("\n")
+      .filter((line) => line.trim() && !line.includes("it survives regeneration"));
+    if (body.length) return false;
+  }
+  return true;
+}

@@ -57,7 +57,6 @@ function GitBadge({ code }: { code: string | undefined }) {
 
 function ProjectTree() {
   const { store, workspace, openDialog } = useEditor();
-  const gameEntry = workspace.gameEntry ?? "";
   useWorkspace(workspace);
   useScripts(workspace.scripts);
   const git = workspace.git;
@@ -113,39 +112,6 @@ function ProjectTree() {
         <button className="block" onClick={() => openDialog("importphaser")}>
           Import a scene from this Phaser project…
         </button>
-      )}
-
-      {/*
-        RUN plays the scene as the editor holds it. This plays the game as the
-        project runs it — its own scene classes, its own update loop. They are
-        different questions, so they are different buttons rather than a mode.
-      */}
-      {workspace.gameEntries.length > 0 && (
-        <>
-          <button
-            className="block"
-            onClick={() => openDialog("runproject")}
-            title={`Runs ${gameEntry} — the project's own game, with its own behaviour`}
-          >
-            Run the project's own game…
-          </button>
-          {/* More than one file constructs a game here, so which is a question
-              only the user can answer. */}
-          {workspace.gameEntries.length > 1 && (
-            <select
-              className="block"
-              value={gameEntry}
-              onChange={(e) => workspace.setGameEntry(e.target.value)}
-              title="Which entry point to run"
-            >
-              {workspace.gameEntries.map((rel) => (
-                <option key={rel} value={rel}>
-                  {rel}
-                </option>
-              ))}
-            </select>
-          )}
-        </>
       )}
 
       <div className="tree-group">src/scenes</div>

@@ -5,13 +5,27 @@ import type { ProjectStore } from "../store/project";
 import type { Workspace } from "../project/workspace";
 import { isTrusted, type ScriptCtor } from "../scripts/runtime";
 import type { PlayScene } from "./PlayScene";
-import {
-  runProjectGame,
-  showProjectScene,
-  stopProjectGame,
-  waitForProjectLoad,
-  type ProjectRunResult,
-} from "./projectRun";
+import { platform } from "../platform";
+import type { DevServerResult } from "../platform/types";
+import { className } from "../export/generate";
+
+/**
+ * The project's own game, served by its own dev server.
+ *
+ * `starting` while the server boots, `running` once it has an address, and
+ * `failed` with a code the UI can act on — "not installed" offers the install,
+ * rather than only reporting that something went wrong.
+ */
+export interface GameRun {
+  status: "starting" | "running" | "failed";
+  root: string;
+  url: string | null;
+  error?: string;
+  code?: DevServerResult["code"];
+  log: string;
+  /** Bumped to reload the page without restarting the server. */
+  nonce: number;
+}
 
 export interface PendingPromotion {
   id: string;
@@ -47,72 +61,123 @@ export class Playtest {
     // An edit to a script's source while the scene is running restarts it on
     // the new code — the same thing a dev server does for game code.
     workspace.onScriptsChanged = (rels) => this.onScriptsChanged(rels);
+    workspace.onClosing = (root) => this.shutdownGame(root);
   }
 
   private get playScene(): PlayScene | null {
     return (this.game?.registry.get("playScene") as PlayScene | undefined) ?? null;
   }
 
-  start(): void {
-    void this.startAsync();
+  // ------------------------------------------------------------- the game
+
+  /**
+   * RUN, when the project is a folder: its real game, from its real dev
+   * server, beside the canvas.
+   *
+   * This is deliberately not a mode of the preview below. The preview builds a
+   * scene from Mosaic's data with Mosaic's runtime; this runs the code the
+   * developer wrote, through the bundler they chose, exactly as `npm run dev`
+   * would — because it IS `npm run dev`. The editor stays live next to it:
+   * every save rewrites the layout files, and the dev server reloads.
+   */
+  run: GameRun | null = null;
+  gameRevision = 0;
+  private gameListeners = new Set<() => void>();
+
+  subscribeGame = (fn: () => void): (() => void) => {
+    this.gameListeners.add(fn);
+    return () => this.gameListeners.delete(fn);
+  };
+
+  getGameRevision = (): number => this.gameRevision;
+
+  private setGame(next: GameRun | null): void {
+    this.run = next;
+    this.gameRevision += 1;
+    for (const fn of this.gameListeners) fn();
+  }
+
+  /** True when RUN means the project's game rather than the in-editor preview. */
+  get runsGame(): boolean {
+    return platform.canRunGame && !!this.workspace.location && !this.workspace.deferredWrite;
+  }
+
+  /** The page RUN shows: the server's address, opened on the scene being edited. */
+  gameUrl(): string | null {
+    if (!this.run?.url) return null;
+    try {
+      const url = new URL(this.run.url);
+      const key = this.store.activeSceneKey;
+      if (key) url.searchParams.set("scene", className(key));
+      return url.toString();
+    } catch {
+      return this.run.url;
+    }
+  }
+
+  async startGame(): Promise<void> {
+    const root = this.workspace.location?.root;
+    if (!root) return;
+    if (this.playing) this.stop();
+    this.setGame({ status: "starting", root, url: null, log: "", nonce: 0 });
+    this.store.setStatus("Starting the project's dev server…");
+
+    // The game reads what is on disk, so what is on disk has to be current.
+    await this.workspace.saveNow();
+    const result = await platform.startDevServer(root);
+    // STOP, or a different project, while the server was booting.
+    if (this.run?.root !== root) return;
+
+    if (!result.ok || !result.url) {
+      this.setGame({
+        status: "failed",
+        root,
+        url: null,
+        error: result.error ?? "The dev server did not start.",
+        code: result.code,
+        log: result.log,
+        nonce: 0,
+      });
+      this.store.setStatus(`Could not run the game — ${result.error ?? "the dev server did not start"}`);
+      return;
+    }
+    this.setGame({ status: "running", root, url: result.url, log: result.log, nonce: 0 });
+    this.store.setStatus(`Running the game from ${result.url} — edits reload it as you save`);
+  }
+
+  /** Reloads the page. The server, and whatever it has cached, stays up. */
+  reloadGame(): void {
+    if (this.run?.status !== "running") return;
+    this.setGame({ ...this.run, nonce: this.run.nonce + 1 });
   }
 
   /**
-   * Runs the project's OWN game rather than Mosaic's runtime.
-   *
-   * The two are different answers to the same question and cannot both be
-   * right at once, so this is a separate action rather than a mode of RUN: one
-   * shows you the scene as the editor holds it, the other shows you the game as
-   * the project runs it.
+   * Closes the game. The server is left running: starting one costs seconds,
+   * and the next RUN should not pay for it again. It stops with the project.
    */
-  async startProject(entry: string): Promise<ProjectRunResult> {
-    if (!this.game) return { ok: false, error: "No canvas yet." };
-    const root = this.workspace.location?.root;
-    if (!root) return { ok: false, error: "No project open." };
-
-    this.stop();
-    this.game.scene.stop("EditorScene");
-    this.store.setStatus(`Compiling ${entry}…`);
-
-    const result = await runProjectGame(this.game, root, entry, this.store.activeSceneKey);
-    if (!result.ok) {
-      this.game.scene.start("EditorScene", { store: this.store, bridge: this.bridge });
-      this.store.setStatus(`Could not run ${entry}: ${result.error}`);
-      return result;
-    }
-
-    this.projectRunning = true;
-    this.bridge.send("playtest", { playing: true, paused: false, frame: 0 });
-    this.store.setStatus(
-      `Running the project's own game — ${result.keys?.join(", ")}`,
-    );
-
-    // The chain loads first; the scene the editor is showing is brought
-    // forward once it actually has, not after a guess at how long that takes.
-    if (result.started && result.started !== result.keys?.[0]) {
-      void waitForProjectLoad(this.game, result.keys![0]).then((settled) => {
-        if (!this.projectRunning || !this.game) return;
-        showProjectScene(this.game, result.started!);
-        this.store.setStatus(
-          settled
-            ? `Running ${result.started} from the project's own code`
-            : `Running ${result.started} — the project's loader did not finish, so art may be missing`,
-        );
-      });
-    }
-    return result;
+  stopGame(): void {
+    if (!this.run) return;
+    this.setGame(null);
+    this.store.setStatus("Stopped — the dev server is still up for the next run");
   }
 
-  /** True while the project's own game has the canvas. */
-  projectRunning = false;
+  /** Ends the server too. Called when the project closes. */
+  shutdownGame(root: string): void {
+    if (this.run?.root === root) this.setGame(null);
+    void platform.stopDevServer(root);
+  }
 
-  stopProject(): void {
-    if (!this.game) return;
-    stopProjectGame(this.game);
-    this.projectRunning = false;
-    this.game.scene.start("EditorScene", { store: this.store, bridge: this.bridge });
-    this.bridge.send("playtest", { playing: false, paused: false, frame: 0 });
-    this.store.setStatus("Stopped — back to the editor");
+  // ---------------------------------------------------------- the preview
+
+  /**
+   * Builds the scene from its data, in the editor's own canvas.
+   *
+   * No project code is required for this, which is what it is for: seeing
+   * bodies fall and colliders meet before there is a game to run, and the only
+   * kind of run the browser build has.
+   */
+  start(): void {
+    void this.startAsync();
   }
 
   /**
@@ -262,12 +327,12 @@ export class Playtest {
   }
 
   stop(): PendingPromotion[] {
-    // STOP is one button to the user, so it has to end whichever kind of run
-    // is going. A project run has no volatile edits to promote — the objects
-    // belong to the project's own code, not to the editor's scene data.
-    if (this.projectRunning) {
-      this.stopProject();
-      return [];
+    // STOP is one button to the user, so it ends whichever kind of run is
+    // going. The game has no volatile edits to promote: its objects belong to
+    // the project's own code, not to the editor's scene data.
+    if (this.run) {
+      this.stopGame();
+      if (!this.playing) return [];
     }
     const play = this.playScene;
     const scene = this.store.scene;

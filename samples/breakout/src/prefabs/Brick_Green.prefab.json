@@ -6,6 +6,8 @@
   ],
   "base": "Brick",
   "diff": {
+    "scaleX": 3.13,
+    "scaleY": 2.94,
     "frame": "green1",
     "scripts.0.props.points": 40
   }

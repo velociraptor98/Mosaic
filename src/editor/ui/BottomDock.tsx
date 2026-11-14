@@ -73,8 +73,8 @@ function AssetBrowser() {
         <button className="ghost" onClick={() => openDialog("atlas")}>
           Create atlas…
         </button>
-        <button className="primary" onClick={() => openDialog("export")}>
-          Export scene…
+        <button className="ghost" onClick={() => openDialog("export")}>
+          Code…
         </button>
       </div>
 

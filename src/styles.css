@@ -1580,12 +1580,12 @@ kbd {
   color: var(--color-caution-800);
 }
 
-.export-file.conflict {
-  border-left-color: var(--color-danger);
+.export-file.kept {
+  border-left-color: var(--color-divider);
 }
 
-.export-file.conflict .status {
-  color: var(--color-danger);
+.export-file.kept .status {
+  color: var(--color-text-muted, inherit);
 }
 
 .export-preview {
@@ -3335,4 +3335,101 @@ button.link {
   overflow-x: auto;
   font-size: 11.5px;
   line-height: 1.5;
+}
+
+/* ------------------------------------------------------------ game pane */
+
+/* The project's own game, from its own dev server. It takes half the stage so
+   the canvas beside it stays editable — the point is to move something and
+   watch the game change. */
+.game-pane {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  border-left: 1px solid var(--color-divider);
+}
+
+.game-pane.wide {
+  width: 100%;
+  border-left: none;
+}
+
+.game-pane > header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-divider);
+  background: var(--wash-2);
+  font-size: 11px;
+}
+
+.game-pane .game-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.8;
+}
+
+.game-pane .game-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-divider);
+}
+
+.game-pane .game-dot.running {
+  background: var(--color-accent, #5980a6);
+}
+
+.game-pane .game-dot.starting {
+  background: var(--color-caution-800, #b58a2c);
+}
+
+.game-pane .game-dot.failed {
+  background: var(--color-danger, #b3524a);
+}
+
+.game-pane iframe {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+
+.game-pane .game-message {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-6, 24px);
+  max-width: 46ch;
+}
+
+.game-pane .game-log {
+  flex: none;
+  max-height: 34%;
+  margin: 0;
+  padding: var(--space-3);
+  overflow: auto;
+  border-top: 1px solid var(--color-divider);
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* With the game beside it, the canvas keeps the other half. */
+.canvas-frame:has(.game-pane:not(.wide)) .phaser-host {
+  width: 50%;
 }

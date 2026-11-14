@@ -332,6 +332,34 @@
       "file": "src/prefabs/Brick.prefab.json"
     },
     {
+      "name": "Brick_Green",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "scaleX": 3.13,
+        "scaleY": 2.94,
+        "frame": "green1",
+        "scripts.0.props.points": 40
+      },
+      "file": "src/prefabs/Brick_Green.prefab.json"
+    },
+    {
+      "name": "Brick_Purple",
+      "exposed": [
+        "scripts.0.props.points",
+        "scripts.0.props.hits"
+      ],
+      "base": "Brick",
+      "diff": {
+        "frame": "purple1",
+        "scripts.0.props.points": 10
+      },
+      "file": "src/prefabs/Brick_Purple.prefab.json"
+    },
+    {
       "name": "Brick_Red",
       "exposed": [
         "scripts.0.props.points",
@@ -343,32 +371,6 @@
         "scripts.0.props.points": 50
       },
       "file": "src/prefabs/Brick_Red.prefab.json"
-    },
-    {
-      "name": "Brick_Green",
-      "exposed": [
-        "scripts.0.props.points",
-        "scripts.0.props.hits"
-      ],
-      "base": "Brick",
-      "diff": {
-        "frame": "green1",
-        "scripts.0.props.points": 40
-      },
-      "file": "src/prefabs/Brick_Green.prefab.json"
-    },
-    {
-      "name": "Brick_Yellow",
-      "exposed": [
-        "scripts.0.props.points",
-        "scripts.0.props.hits"
-      ],
-      "base": "Brick",
-      "diff": {
-        "frame": "yellow1",
-        "scripts.0.props.points": 30
-      },
-      "file": "src/prefabs/Brick_Yellow.prefab.json"
     },
     {
       "name": "Brick_Silver",
@@ -384,17 +386,17 @@
       "file": "src/prefabs/Brick_Silver.prefab.json"
     },
     {
-      "name": "Brick_Purple",
+      "name": "Brick_Yellow",
       "exposed": [
         "scripts.0.props.points",
         "scripts.0.props.hits"
       ],
       "base": "Brick",
       "diff": {
-        "frame": "purple1",
-        "scripts.0.props.points": 10
+        "frame": "yellow1",
+        "scripts.0.props.points": 30
       },
-      "file": "src/prefabs/Brick_Purple.prefab.json"
+      "file": "src/prefabs/Brick_Yellow.prefab.json"
     }
   ],
   "anims": [],

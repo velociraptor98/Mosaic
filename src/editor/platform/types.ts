@@ -1,4 +1,4 @@
-import type { PackageRequest, PackageResult } from "../../../electron/contract";
+import type { DevServerResult, PackageRequest, PackageResult } from "../../../electron/contract";
 import type {
   CreateResult,
   EditorOpen,
@@ -96,7 +96,13 @@ export interface ProjectChange {
   kind: ChangeKind;
 }
 
-export type { PackageRequest, PackageResult, PackagedFile, PhaserChoice } from "../../../electron/contract";
+export type {
+  DevServerResult,
+  PackageRequest,
+  PackageResult,
+  PackagedFile,
+  PhaserChoice,
+} from "../../../electron/contract";
 
 export interface Platform {
   readonly kind: "browser" | "electron";
@@ -131,8 +137,16 @@ export interface Platform {
    * for a folder the user has explicitly trusted.
    */
   recordScene(root: string, entry: string): Promise<SceneRecordingResult>;
-  /** Compiles the project's entry point so the editor can run its real game. */
-  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+
+  // --- Running the game --------------------------------------------------
+  /** True when this platform can start the project's own dev server. */
+  readonly canRunGame: boolean;
+  /**
+   * Starts `npm run dev` in the project, or returns the server already
+   * running. Executes the project's code — only for a folder the user trusts.
+   */
+  startDevServer(root: string): Promise<DevServerResult>;
+  stopDevServer(root: string): Promise<void>;
 
   // --- Shipping the game -------------------------------------------------
   /** True when this platform can build a shippable folder. */

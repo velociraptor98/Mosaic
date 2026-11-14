@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { generateFiles, type ExportTarget } from "../../export/generate";
+import { generateSceneFiles } from "../../export/generate";
 import {
   canWriteToDisk,
   chooseFolder,
@@ -14,25 +14,25 @@ import {
 import { Dialog } from "./Dialog";
 import { useEditor, useStoreVersion } from "../context";
 
-const TARGETS: { id: ExportTarget; label: string; blurb: string }[] = [
-  { id: "sceneJson", label: "Scene JSON", blurb: "The format the editor and the game both read." },
-  { id: "tsSceneClass", label: "TypeScript Scene class", blurb: "preload() + create(), meant to be read in review." },
-  {
-    id: "tsSceneModule",
-    label: "Object builder",
-    blurb: "Functions your own scene calls — for a project that already has one.",
-  },
-  { id: "both", label: "Both", blurb: "JSON for data, a class for behaviour." },
-];
+const STATUS_LABEL: Record<FileDiff["status"], string> = {
+  new: "will be written",
+  changed: "changes on save",
+  unchanged: "in step",
+  kept: "not touched",
+};
 
 /**
- * Export targets scene JSON, a typed Scene class, or both. Generated code is
- * meant to be read in review, so the preview is the whole file, and writing
- * shows a diff before it touches anything.
+ * What Mosaic writes for the scene you are looking at.
+ *
+ * On desktop this is a window onto something that already happened: saving
+ * writes these files, so there is no export to run. It is here so the code is
+ * never a mystery — every file, whose it is, and what it currently says.
+ *
+ * The browser build has no folder to save into, so here it also offers to
+ * write them to one you pick, or to download them.
  */
 export function ExportDialog({ onClose }: { onClose: () => void }) {
-  const { store } = useEditor();
-  const [target, setTarget] = useState<ExportTarget>("both");
+  const { store, workspace } = useEditor();
   const [active, setActive] = useState(0);
   const [diffs, setDiffs] = useState<FileDiff[]>([]);
   const [result, setResult] = useState<WriteResult | null>(null);
@@ -41,15 +41,14 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   const version = useStoreVersion(store);
   const scene = store.scene;
+  const language = workspace.language;
   // `version` is the dependency that matters: the store mutates in place, so
   // the project/scene object identities do not change on edit.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const files = useMemo(() => (scene ? generateFiles(store.project, scene, target) : []), [
-    store,
-    scene,
-    target,
-    version,
-  ]);
+  const files = useMemo(
+    () => (scene ? generateSceneFiles(store.project, scene, { language }) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store, scene, language, version],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -59,32 +58,18 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [files]);
-
-  // Watch: every save re-emits, so a running dev server stays in step.
-  useEffect(() => {
-    if (!store.ui.watchExport || !folder) return;
-    let last = "";
-    const timer = window.setInterval(() => {
-      const signature = JSON.stringify(files.map((f) => f.contents.length));
-      if (signature === last) return;
-      last = signature;
-      void diffFiles(files).then((d) => writeFiles(d));
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [store.ui.watchExport, folder, files]);
+  }, [files, workspace.lastSavedAt]);
 
   const current = diffs[active] ?? null;
   const issues = store.validate().filter((i) => i.level === "error");
+  const live = writesGoToProject();
 
-  const doWrite = async (force = false) => {
+  const doWrite = async () => {
     setBusy(true);
     try {
-      const fresh = await diffFiles(files);
-      const res = await writeFiles(fresh, { force });
+      const res = await writeFiles(await diffFiles(files));
       setResult(res);
       setDiffs(await diffFiles(files));
-      store.markSaved();
       store.setStatus(
         res.mode === "disk"
           ? `Wrote ${res.written.length} file(s) to ${folder}`
@@ -97,25 +82,17 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog
-      title="Export to Phaser"
-      subtitle="The generator is pure: the same scene in produces the same bytes out."
+      title="Generated code"
+      subtitle="*.layout files are Mosaic's and rewritten on every save. Everything else is yours."
       onClose={onClose}
       wide
       footer={
         <>
-          <label className="field check inline">
-            <input
-              type="checkbox"
-              checked={store.ui.watchExport}
-              onChange={(e) => store.setUi({ watchExport: e.target.checked })}
-            />
-            <span className="field-label">Watch — re-emit on every change (250ms debounce)</span>
-          </label>
           <div className="toolbar-spacer" />
           <button className="ghost" onClick={onClose}>
             Close
           </button>
-          {canWriteToDisk() && !writesGoToProject() && (
+          {!live && canWriteToDisk() && (
             <button
               className="ghost"
               onClick={async () => setFolder(await chooseFolder())}
@@ -124,37 +101,31 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               {folder ? `Folder: ${folder}` : "Choose folder…"}
             </button>
           )}
-          <button className="primary" disabled={busy} onClick={() => void doWrite(false)}>
-            Write {diffs.filter((d) => d.status !== "unchanged").length} file(s)
-          </button>
+          {!live && (
+            <button className="primary" disabled={busy} onClick={() => void doWrite()}>
+              Write {diffs.filter((d) => d.status === "new" || d.status === "changed").length} file(s)
+            </button>
+          )}
         </>
       }
     >
-      <div className="segmented">
-        {TARGETS.map((t) => (
-          <button key={t.id} className={target === t.id ? "active" : ""} onClick={() => setTarget(t.id)} title={t.blurb}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
       {issues.length > 0 && (
         <div className="banner error">
-          {issues.length} validation error(s) — export will still write, but the game will not run
-          clean: {issues[0].message}
+          {issues.length} validation error(s) — the layout is still written, but the game will not
+          run clean: {issues[0].message}
         </div>
       )}
 
-      {writesGoToProject() ? (
+      {live ? (
         <div className="banner">
-          Writing straight into the open project at <code>{folder}</code> — no picker, no
-          permission prompt.
+          Nothing to export: saving writes these into <code>{folder}</code>, so a running dev server
+          picks each change up as you make it.
         </div>
       ) : (
         !canWriteToDisk() && (
           <div className="banner">
             This browser has no File System Access API, so Write downloads the files instead of
-            writing them into the source tree.
+            writing them into a source tree.
           </div>
         )
       )}
@@ -169,8 +140,9 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
             >
               <span className="path">{diff.path}</span>
               <span className="status">
-                {diff.status}
-                {diff.status !== "unchanged" && ` +${diff.addedLines}/-${diff.removedLines}`}
+                {diff.owner === "generated" ? "generated" : "yours"} · {STATUS_LABEL[diff.status]}
+                {(diff.status === "changed" || diff.status === "new") &&
+                  ` +${diff.addedLines}/-${diff.removedLines}`}
               </span>
             </button>
           ))}
@@ -182,9 +154,11 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <div className="preview-head">
                 <code>{current.path}</code>
                 <span>
-                  {current.status === "conflict"
-                    ? "refuses to clobber — this file has edits outside a // <keep> region"
-                    : `${current.contents.split("\n").length} lines`}
+                  {current.owner === "yours"
+                    ? current.status === "kept"
+                      ? "as it is on disk — Mosaic wrote the first version and has not opened it since"
+                      : "a starting point, written once"
+                    : `${current.contents.split("\n").length} lines, regenerated`}
                 </span>
                 <button className="mini" onClick={() => downloadText(current.path.split("/").pop()!, current.contents)}>
                   download
@@ -193,28 +167,25 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
               <pre>{current.contents}</pre>
             </>
           ) : (
-            <div className="empty">Nothing to export.</div>
+            <div className="empty">Nothing generated for this scene.</div>
           )}
         </div>
       </div>
 
       {result && (
         <div className="banner">
-          {result.written.length} written, {result.skipped.length} unchanged (skipped)
-          {result.refused.length > 0 && (
+          {result.written.length} written, {result.skipped.length} left alone
+          {result.failed.length > 0 && (
             <>
-              , <strong>{result.refused.length} refused</strong> — {result.refused.join(", ")}{" "}
-              <button className="mini" onClick={() => void doWrite(true)}>
-                overwrite anyway
-              </button>
+              , <strong>{result.failed.length} failed</strong> — {result.failed.join(", ")}
             </>
           )}
         </div>
       )}
 
       <p className="hint">
-        Export changes nothing in the scene: the editor and the generated code both read the same
-        scene.json, so there is no round-trip import to lose data in.
+        Your scene's <code>create()</code> calls the layout and gets the objects back by name. A
+        layout file is never merged with anything, so there is nothing in it to protect.
       </p>
     </Dialog>
   );

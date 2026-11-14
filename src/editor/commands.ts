@@ -2,13 +2,13 @@ import { platform } from "./platform";
 import type { Workspace } from "./project/workspace";
 import type { ProjectStore } from "./store/project";
 import type { Playtest } from "./phaser/playtest";
+import { isTrusted } from "./scripts/runtime";
 
 export type DialogName =
   | "palette"
   | "newscene"
   | "import"
   | "importphaser"
-  | "runproject"
   | "atlas"
   | "prefab"
   | "collision"
@@ -60,7 +60,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
         { id: "project.new", title: "New project folder…", category: "Project", binding: `${mod}⇧N`, run: () => void workspace.createAndOpen() },
         { id: "project.save", title: "Save project to disk", category: "Project", binding: `${mod}S`, run: () => void workspace.saveNow() },
         { id: "project.importPhaser", title: "Import scene from a Phaser project…", category: "Project", run: () => openDialog("importphaser") },
-        { id: "project.runGame", title: "Run the project's own game", category: "Project", run: () => { if (workspace.gameEntry) openDialog("runproject"); } },
         { id: "project.reload", title: "Reload project from disk", category: "Project", run: () => void workspace.reload() },
         { id: "project.close", title: "Close project", category: "Project", binding: `${mod}W`, run: () => workspace.close() },
         { id: "project.package", title: "Export game (build a folder you can ship)…", category: "Project", binding: `${mod}⇧E`, run: () => openDialog("package") },
@@ -73,7 +72,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     ...projectCommands,
     { id: "palette.open", title: "Open command palette", category: "General", binding: `${mod}K`, run: () => openDialog("palette") },
     { id: "scene.new", title: "New scene…", category: "Scene", binding: `${mod}N`, run: () => openDialog("newscene") },
-    { id: "scene.export", title: "Export scene…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },
+    { id: "scene.export", title: "Show generated code…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },
     { id: "asset.import", title: "Import assets…", category: "Assets", binding: `${mod}I`, run: () => openDialog("import") },
     { id: "asset.atlas", title: "Slice atlas…", category: "Assets", run: () => openDialog("atlas") },
     { id: "prefab.create", title: "Create prefab from selection…", category: "Prefabs", binding: `${mod}⇧P`, run: () => openDialog("prefab") },
@@ -110,19 +109,42 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
     { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
 
-    { id: "play.run", title: playtest.playing ? "Stop play-test" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (playtest.playing ? stopAndPrompt(ctx) : startPlaytest(ctx)) },
+    { id: "play.run", title: isRunning(playtest) ? "Stop" : playtest.runsGame ? "Run the game" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (isRunning(playtest) ? stopAndPrompt(ctx) : startPlaytest(ctx)) },
+    { id: "play.reload", title: "Reload the running game", category: "Play", run: () => playtest.reloadGame() },
+    { id: "play.preview", title: "Preview the layout in the editor (no game code)", category: "Play", run: () => { if (!playtest.playing) startPreview(ctx); } },
     { id: "play.pause", title: "Pause / resume", category: "Play", binding: "F5", run: () => (playtest.paused ? playtest.resume() : playtest.pause()) },
     { id: "play.step", title: "Step one frame", category: "Play", binding: "F6", run: () => playtest.step() },
   ];
 }
 
+/** True while either kind of run is going. */
+export function isRunning(playtest: Playtest): boolean {
+  return playtest.playing || playtest.run !== null;
+}
+
 /**
  * RUN, through the one door every entry point uses.
  *
- * A scene with behaviour on a project that has not been trusted asks first —
- * pressing play should never be the moment someone else's code starts running.
+ * On a project folder it is the project's own game, from its own dev server.
+ * That executes the project's code, so a folder that has not been trusted asks
+ * first — pressing play should never be the moment someone else's code starts
+ * running.
  */
 export function startPlaytest(ctx: CommandContext): void {
+  if (ctx.playtest.runsGame) {
+    const root = ctx.workspace.location?.root;
+    if (root && !isTrusted(root)) {
+      ctx.openDialog("scripttrust");
+      return;
+    }
+    void ctx.playtest.startGame();
+    return;
+  }
+  startPreview(ctx);
+}
+
+/** The in-editor preview: the scene built from its data, with no game code needed. */
+export function startPreview(ctx: CommandContext): void {
   if (ctx.playtest.needsTrust()) {
     ctx.openDialog("scripttrust");
     return;

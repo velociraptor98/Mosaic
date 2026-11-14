@@ -72,7 +72,10 @@ export function createElectronPlatform(api: MosaicApi): Platform {
     canImportPhaser: true,
     findGameEntries: (root) => api.findGameEntries(root),
     recordScene: (root, entry) => api.recordScene(root, entry),
-    bundleEntry: (root, entry) => api.bundleEntry(root, entry),
+
+    canRunGame: true,
+    startDevServer: (root) => api.devServerStart(root),
+    stopDevServer: (root) => api.devServerStop(root),
 
     canPackage: true,
     packageGame: (request) => api.packageGame(request),

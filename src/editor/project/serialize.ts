@@ -112,6 +112,7 @@ function readConfig(contents: string | null | undefined, issues: string[]): Proj
     scale: parsed.scale ?? DEFAULT_CONFIG.scale,
     physics: parsed.physics ?? DEFAULT_CONFIG.physics,
     pixelArt: parsed.pixelArt ?? DEFAULT_CONFIG.pixelArt,
+    ...(parsed.language === "ts" || parsed.language === "js" ? { language: parsed.language } : {}),
     paths: {
       src: parsed.paths?.src ?? DEFAULT_PATHS.src,
       scenes: parsed.paths?.scenes ?? DEFAULT_PATHS.scenes,
@@ -338,7 +339,10 @@ function reconcileAssets(
 
   for (const asset of declared) {
     if (asset.generated) {
-      // Procedural placeholders have no file; the editor draws them.
+      // Procedural placeholders are drawn by the editor. A scaffolded project
+      // also has them on disk, for the game to load — the same asset, so the
+      // file is claimed here rather than listed a second time below.
+      claimed.add(asset.path);
       out.push({ ...asset, url: "" } as AssetDef);
       continue;
     }

@@ -35,7 +35,8 @@ export const IPC = {
   install: "mosaic:install",
   findGameEntries: "mosaic:findGameEntries",
   recordScene: "mosaic:recordScene",
-  bundleEntry: "mosaic:bundleEntry",
+  devServerStart: "mosaic:devServerStart",
+  devServerStop: "mosaic:devServerStop",
   packageGame: "mosaic:packageGame",
 } as const;
 
@@ -178,6 +179,20 @@ export interface FileChange {
   kind: ChangeKind;
 }
 
+/** What happened when RUN asked for the project's dev server. */
+export interface DevServerResult {
+  ok: boolean;
+  /** Where the game is being served, e.g. "http://localhost:5173/". */
+  url?: string;
+  /** Why it is not, in a form the UI can act on rather than only show. */
+  code?: "no-package" | "no-script" | "not-installed" | "exited" | "timeout" | "spawn";
+  error?: string;
+  /** The tail of what the server printed. */
+  log: string;
+  /** The package.json script that was run. */
+  script?: string;
+}
+
 /** What Export game… asks the main process to build. */
 export interface PackageRequest {
   root: string;
@@ -244,8 +259,9 @@ export interface MosaicApi {
   findGameEntries(root: string): Promise<string[]>;
   /** Runs one of them and reports what its scenes built. */
   recordScene(root: string, entry: string): Promise<SceneRecording>;
-  /** Compiles an entry point so the renderer can run the project's own game. */
-  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+  /** Starts the project's own dev server, or returns the one already running. */
+  devServerStart(root: string): Promise<DevServerResult>;
+  devServerStop(root: string): Promise<void>;
   /** Bundles the whole game into a folder that runs with nothing installed. */
   packageGame(request: PackageRequest): Promise<PackageResult>;
   importAssets(root: string): Promise<AssetFileInfo[]>;

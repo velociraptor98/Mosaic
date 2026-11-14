@@ -1,3 +1,4 @@
+import { trustRoot } from "../../scripts/runtime";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ProjectConfig } from "../../../shared/types";
 import { platform } from "../../platform";
@@ -108,6 +109,10 @@ export function NewProjectFlow({
 
     const opened = await workspace.open({ root, name: opts.name.trim() || slug });
     mark("open Level_01", opened);
+    // A project you just created is yours: asking whether you trust it to run
+    // its own code, the first time you press RUN, would be asking about files
+    // Mosaic wrote a second ago.
+    if (opened) trustRoot(root);
 
     const installing = opts.bundler !== "none" && !!toolchain.npm;
     if (installing) {

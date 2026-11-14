@@ -14,6 +14,7 @@ import type {
   SceneObject,
   ScriptRef,
 } from "../../shared/types";
+import { className, isGeneratedPath, prefabClassPath } from "../export/generate";
 import { platform } from "../platform";
 import type { ScriptProperty } from "../scripts/parse";
 import type { ScriptResolution } from "../scripts/registry";
@@ -76,8 +77,10 @@ export function ScriptsTab() {
 
   return (
     <div className="stack scripts-panel">
+      <ClassProps obj={obj} />
+
       <div className="section-title">
-        Scripts <span className="count">{scripts.length}</span>
+        Script components <span className="count">{scripts.length}</span>
         <button className="mini add" onClick={() => openDialog("attachscript")}>
           + Add
         </button>
@@ -94,8 +97,8 @@ export function ScriptsTab() {
 
       {scripts.length === 0 && (
         <div className="empty">
-          No scripts on {obj.name}. An object with no behaviour shows this section, not a hidden
-          one — nothing about it is implied by absence.
+          No components on {obj.name}. They are optional: behaviour can live in the object's own
+          class, and a component is for behaviour you want to attach to several kinds of object.
         </div>
       )}
 
@@ -120,6 +123,138 @@ export function ScriptsTab() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The object's own class, and the fields it publishes.
+ *
+ * A prefab is backed by a class in the project — an ordinary Phaser sprite
+ * subclass. Anything that class marks `@property` is listed here, and a value
+ * set here is assigned to the field after the constructor runs. Nothing is
+ * attached to anything: the class simply has fields, and this gives them
+ * values.
+ */
+function ClassProps({ obj }: { obj: SceneObject }) {
+  const { store, workspace } = useEditor();
+  const registry = workspace.scripts;
+  const doc = store.prefabDoc;
+  // In prefab edit mode the root IS the definition, so what is set here is the
+  // default every instance starts from.
+  const editingDefinition = !!doc && doc.rootId === obj.id;
+  const name = editingDefinition ? doc.name : obj.prefab;
+  const prefab = resolvePrefab(store.project, name);
+  if (!name || !prefab) return null;
+
+  const where = prefab.source
+    ? {
+        src: prefab.source.module,
+        cls: prefab.source.export === "default" ? prefab.name : prefab.source.export,
+      }
+    : { src: prefabClassPath(prefab.name, workspace.language), cls: className(prefab.name) };
+  const cls =
+    registry.index.byKey.get(`${where.src}::${where.cls}`) ??
+    registry.index.classes.find((c) => c.name === where.cls && !isGeneratedPath(c.src));
+  const properties = cls ? registry.properties(cls) : [];
+  const defaults = (editingDefinition ? {} : prefab.root.props) ?? {};
+  const own = obj.props ?? {};
+  const declared = new Set(properties.map((p) => p.name));
+  const stale = Object.keys(own).filter((key) => !declared.has(key));
+
+  return (
+    <>
+      <div className="section-title">
+        {where.cls} <span className="count">class</span>
+        {cls && (
+          <button className="mini add" onClick={() => void registry.openExternal(cls.src, cls.line)}>
+            Open ↗
+          </button>
+        )}
+      </div>
+      {!cls && (
+        <div className="hint">
+          <code>{where.src}</code> is not on disk yet — it is written the next time the project
+          saves, and from then on it is yours.
+        </div>
+      )}
+      {cls && properties.length === 0 && (
+        <div className="hint">
+          Mark a field <code>@property</code> in <code>{cls.src}</code> and it appears here, for
+          every {prefab.name} you place.
+        </div>
+      )}
+      {properties.map((property) => {
+        const has = Object.prototype.hasOwnProperty.call(own, property.name);
+        const value = has
+          ? own[property.name]
+          : property.name in defaults
+            ? defaults[property.name]
+            : property.default;
+        const label = property.label ?? property.name;
+        const set = (next: unknown) => store.setClassProp(obj.id, property.name, next);
+        const common = {
+          label,
+          marked: has,
+          onRevert: () => store.clearClassProp(obj.id, property.name),
+        };
+        if (property.codeOnly) {
+          return (
+            <div className="field readonly" key={property.name}>
+              <span className="field-label">{label}</span>
+              <code className="muted">
+                {property.type === "function" ? "callback" : "object"} · code only
+              </code>
+            </div>
+          );
+        }
+        switch (property.type) {
+          case "number":
+            return (
+              <NumberField
+                key={property.name}
+                {...common}
+                value={typeof value === "number" ? value : 0}
+                step={property.step ?? 1}
+                onCommit={(v) => set(clamp(v, property))}
+              />
+            );
+          case "boolean":
+            return <CheckField key={property.name} {...common} value={value === true} onCommit={set} />;
+          case "enum":
+            return (
+              <SelectField
+                key={property.name}
+                {...common}
+                value={typeof value === "string" ? value : ""}
+                options={(property.options ?? []).map((o) => ({ value: o, label: o }))}
+                onCommit={set}
+              />
+            );
+          default:
+            return (
+              <TextField
+                key={property.name}
+                label={label}
+                value={value === undefined || value === null ? "" : String(value)}
+                onCommit={set}
+              />
+            );
+        }
+      })}
+      {stale.map((key) => (
+        <div key={key} className="override-row stale">
+          <code>{key}</code>
+          <span>{JSON.stringify(own[key])}</span>
+          <button
+            className="mini"
+            title="The class no longer declares this field. Drop the value."
+            onClick={() => store.clearClassProp(obj.id, key)}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </>
   );
 }
 

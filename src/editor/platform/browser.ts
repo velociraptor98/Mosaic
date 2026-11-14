@@ -41,9 +41,14 @@ export const browserPlatform: Platform = {
   async recordScene() {
     return { ok: false, error: "Importing a Phaser project needs the desktop app." };
   },
-  async bundleEntry() {
-    return { code: null, error: "Running a project's own game needs the desktop app." };
+
+  // No folder means no dev server: the browser build previews a scene from
+  // its data instead, in the editor's own canvas.
+  canRunGame: false,
+  async startDevServer() {
+    return { ok: false, error: "Running the game needs the desktop app.", log: "" };
   },
+  async stopDevServer(): Promise<void> {},
 
   canPackage: false,
   async packageGame() {

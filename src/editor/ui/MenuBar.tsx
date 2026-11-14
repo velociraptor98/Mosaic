@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { startPlaytest, stopAndPrompt } from "../commands";
 import { MosaicLockup } from "./Logo";
 import { useEditor, useStoreVersion } from "./context";
 import { platform } from "../platform";
 
 /**
- * Menu bar + transport. RUN boots the scene into the canvas you were editing;
- * PAUSE freezes the loop and STEP advances exactly one update.
+ * Menu bar + transport. On a project folder RUN is the project's own game,
+ * served by its own dev server and shown beside the canvas. Without one it is
+ * the in-editor preview, where PAUSE freezes the loop and STEP advances
+ * exactly one update.
  */
 export function MenuBar() {
   const { store, bridge, playtest, workspace, openDialog } = useEditor();
@@ -22,6 +24,8 @@ export function MenuBar() {
     };
   }, [bridge]);
 
+  useSyncExternalStore(playtest.subscribeGame, playtest.getGameRevision);
+  const game = playtest.run;
   const scene = store.scene;
   const doc = store.prefabDoc;
   const stack = store.stack();
@@ -82,18 +86,42 @@ export function MenuBar() {
       </button>
 
       <div className="transport">
-        {!transport.playing ? (
+        {game ? (
+          // The project's own game: there is no frame to step, because the
+          // loop belongs to the game and not to the editor.
+          <>
+            <span className="running-badge">
+              {game.status === "starting" ? "STARTING" : game.status === "failed" ? "FAILED" : "RUNNING · GAME"}
+            </span>
+            {game.status === "running" && (
+              <button className="ghost" onClick={() => playtest.reloadGame()} title="Reload the game">
+                ↻
+              </button>
+            )}
+            <button
+              className="stop"
+              onClick={() => stopAndPrompt({ store, playtest, workspace, openDialog })}
+              title="Close the game (Ctrl/⌘↵)"
+            >
+              ■ STOP
+            </button>
+          </>
+        ) : !transport.playing ? (
           <button
             className="run"
             onClick={() => startPlaytest({ store, playtest, workspace, openDialog })}
-            title="Run (Ctrl/⌘↵)"
+            title={
+              playtest.runsGame
+                ? "Run the game from the project's dev server (Ctrl/⌘↵)"
+                : "Preview the scene (Ctrl/⌘↵)"
+            }
           >
             ▶ RUN
           </button>
         ) : (
           <>
             <span className="running-badge">
-              {transport.paused ? "PAUSED" : "RUNNING"} · f{transport.frame}
+              {transport.paused ? "PAUSED" : "PREVIEW"} · f{transport.frame}
             </span>
             <button
               className="ghost"
@@ -116,8 +144,8 @@ export function MenuBar() {
         )}
       </div>
 
-      <button className="ghost" onClick={() => openDialog("export")}>
-        Export scene…
+      <button className="ghost" onClick={() => openDialog("export")} title="What Mosaic writes for this scene (⌘E)">
+        Code…
       </button>
 
       {/* The source, then the thing you send someone. */}

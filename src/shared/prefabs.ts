@@ -251,6 +251,11 @@ export function resolveObject(project: ProjectData, obj: SceneObject): SceneObje
   for (const [path, value] of Object.entries(obj.overrides ?? {})) {
     setPath(resolved, path, structuredClone(value));
   }
+  // Class properties merge rather than replace: the definition supplies
+  // defaults, and an instance states only the fields it set for itself.
+  const merged = { ...(prefab.root.props ?? {}), ...(obj.props ?? {}) };
+  if (Object.keys(merged).length) resolved.props = merged;
+  else delete resolved.props;
   return resolved as unknown as SceneObject;
 }
 

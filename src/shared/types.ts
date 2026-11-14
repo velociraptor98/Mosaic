@@ -205,6 +205,15 @@ export interface SceneObject {
    * Attached behaviour, in execution order: update() is called in list order.
    */
   scripts?: ScriptRef[];
+  /**
+   * Values for the `@property` fields of the object's own class.
+   *
+   * A prefab is backed by a class the project owns — an ordinary Phaser sprite
+   * subclass — and a field that class marks `@property` is set from here. This
+   * is behaviour without a component: nothing is attached, the class simply has
+   * fields and the editor gives them values.
+   */
+  props?: Record<string, unknown>;
   /** Set when this object is a prefab instance. */
   prefab?: string;
   /** Property path -> value, for the fields this instance overrides. */
@@ -434,6 +443,12 @@ export interface ProjectConfig {
   physics: "arcade" | "matter" | "none";
   /** Forces nearest-neighbour filtering and integer camera positions. */
   pixelArt: boolean;
+  /**
+   * The language Mosaic writes layout files in. Absent means "work it out":
+   * TypeScript when the folder has a tsconfig, JavaScript when it has a
+   * package.json without one.
+   */
+  language?: "ts" | "js";
   /**
    * Where this project keeps things.
    *

@@ -1,28 +1,30 @@
 import { platform } from "../platform";
-import { hasUnmarkedEdits, mergeKeepRegions } from "./keep";
 import type { GeneratedFile } from "./generate";
 
 /**
- * Writing goes to a real directory when the browser can (File System Access
- * API), and falls back to downloads otherwise. Either way the user sees a diff
- * first, generated code is merged over its keep regions, and a file with
- * un-marked manual edits is refused rather than clobbered.
+ * Putting generated code somewhere.
+ *
+ * On desktop this is not a step: the project is a folder, and every save
+ * writes the layout files into it (see Workspace.saveNow). What is left here is
+ * the browser build, which has no folder — it writes through the File System
+ * Access API when the browser has one and downloads otherwise — and the diff
+ * the "Generated code" panel shows on either.
+ *
+ * The rule is the same everywhere: a `generated` file is overwritten, a
+ * `yours` file is written only when it does not exist.
  */
 
-const LAST_WRITE_KEY = "mosaic:last-write:v1";
-const LEGACY_WRITE_KEY = "phaser-scene-editor:last-write:v1";
-
-export type DiffStatus = "new" | "changed" | "unchanged" | "conflict";
+export type DiffStatus = "new" | "changed" | "unchanged" | "kept";
 
 export interface FileDiff {
   path: string;
   status: DiffStatus;
-  /** What will actually be written (generated, merged over keep regions). */
   contents: string;
   previous: string | null;
   addedLines: number;
   removedLines: number;
   language: GeneratedFile["language"];
+  owner: GeneratedFile["owner"];
 }
 
 type DirHandle = {
@@ -37,10 +39,7 @@ type FileHandle = {
 
 let rootHandle: DirHandle | null = null;
 
-/**
- * On desktop the project already has a real folder, so export writes straight
- * into it — no picker, no permission prompt. Set by the Workspace on open.
- */
+/** The open project's folder on desktop. Set by the Workspace on open. */
 let projectRoot: string | null = null;
 
 export function setProjectRoot(root: string | null): void {
@@ -52,7 +51,7 @@ export function canWriteToDisk(): boolean {
   return typeof (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker === "function";
 }
 
-/** True when writes need no further permission from the user. */
+/** True when saving already writes these files, so there is nothing to press. */
 export function writesGoToProject(): boolean {
   return projectRoot !== null;
 }
@@ -69,35 +68,9 @@ export async function chooseFolder(): Promise<string | null> {
   return rootHandle?.name ?? null;
 }
 
-function lastWrites(): Record<string, string> {
-  try {
-    const raw = window.localStorage.getItem(LAST_WRITE_KEY);
-    if (raw) return JSON.parse(raw);
-    // Carry the pre-rename log forward, so a first export after the rename
-    // still diffs against what was actually written last.
-    const legacy = window.localStorage.getItem(LEGACY_WRITE_KEY);
-    if (!legacy) return {};
-    window.localStorage.setItem(LAST_WRITE_KEY, legacy);
-    window.localStorage.removeItem(LEGACY_WRITE_KEY);
-    return JSON.parse(legacy);
-  } catch {
-    return {};
-  }
-}
-
-function rememberWrites(files: { path: string; contents: string }[]): void {
-  const log = lastWrites();
-  for (const f of files) log[f.path] = f.contents;
-  try {
-    window.localStorage.setItem(LAST_WRITE_KEY, JSON.stringify(log));
-  } catch {
-    /* the diff degrades to "new"; writing still works */
-  }
-}
-
 async function readExisting(path: string): Promise<string | null> {
   if (projectRoot) return platform.readText(projectRoot, path);
-  if (!rootHandle) return lastWrites()[path] ?? null;
+  if (!rootHandle) return null;
   const parts = path.split("/");
   const name = parts.pop()!;
   let dir = rootHandle;
@@ -111,28 +84,29 @@ async function readExisting(path: string): Promise<string | null> {
 }
 
 export async function diffFiles(generated: GeneratedFile[]): Promise<FileDiff[]> {
-  const log = lastWrites();
   const out: FileDiff[] = [];
   for (const file of generated) {
     const onDisk = await readExisting(file.path);
-    const merged =
-      file.language === "ts" ? mergeKeepRegions(file.contents, onDisk) : file.contents;
     let status: DiffStatus;
     if (onDisk === null) status = "new";
-    else if (onDisk === merged) status = "unchanged";
-    else if (file.language === "ts" && hasUnmarkedEdits(onDisk, log[file.path] ?? null))
-      status = "conflict";
+    else if (file.owner === "yours") status = "kept";
+    else if (onDisk === file.contents) status = "unchanged";
     else status = "changed";
 
-    const { added, removed } = lineDelta(onDisk ?? "", merged);
+    // A file that is yours is shown as it is on disk: that is what the game
+    // runs, and the starting point it was written from no longer matters.
+    const contents = status === "kept" ? onDisk! : file.contents;
+    const { added, removed } =
+      status === "kept" ? { added: 0, removed: 0 } : lineDelta(onDisk ?? "", contents);
     out.push({
       path: file.path,
       status,
-      contents: merged,
+      contents,
       previous: onDisk,
       addedLines: added,
       removedLines: removed,
       language: file.language,
+      owner: file.owner,
     });
   }
   return out;
@@ -141,32 +115,22 @@ export async function diffFiles(generated: GeneratedFile[]): Promise<FileDiff[]>
 export interface WriteResult {
   written: string[];
   skipped: string[];
-  refused: string[];
+  failed: string[];
   mode: "disk" | "download";
 }
 
-export async function writeFiles(
-  diffs: FileDiff[],
-  opts: { force?: boolean } = {},
-): Promise<WriteResult> {
+export async function writeFiles(diffs: FileDiff[]): Promise<WriteResult> {
   const result: WriteResult = {
     written: [],
     skipped: [],
-    refused: [],
+    failed: [],
     mode: projectRoot || rootHandle ? "disk" : "download",
   };
 
   const toWrite: FileDiff[] = [];
   for (const diff of diffs) {
-    if (diff.status === "unchanged") {
-      result.skipped.push(diff.path);
-      continue;
-    }
-    if (diff.status === "conflict" && !opts.force) {
-      result.refused.push(diff.path);
-      continue;
-    }
-    toWrite.push(diff);
+    if (diff.status === "unchanged" || diff.status === "kept") result.skipped.push(diff.path);
+    else toWrite.push(diff);
   }
 
   if (projectRoot) {
@@ -175,9 +139,7 @@ export async function writeFiles(
       toWrite.map((d) => ({ rel: d.path, contents: d.contents })),
     );
     result.written.push(...outcome.written);
-    for (const failure of outcome.failed) {
-      result.refused.push(`${failure.rel} (${failure.error})`);
-    }
+    for (const failure of outcome.failed) result.failed.push(`${failure.rel} (${failure.error})`);
   } else if (rootHandle) {
     for (const diff of toWrite) {
       const parts = diff.path.split("/");
@@ -197,7 +159,6 @@ export async function writeFiles(
     }
   }
 
-  rememberWrites(toWrite);
   return result;
 }
 

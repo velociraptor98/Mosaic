@@ -83,17 +83,6 @@ export async function findGameEntries(root: string): Promise<string[]> {
   );
 }
 
-/**
- * Compiles a project's entry point for evaluation in a renderer.
- *
- * Shared by the recorder and by RUN: both need the project's own game, one to
- * snapshot it once and one to keep it running, and compiling it twice two ways
- * would be two things to keep in step.
- */
-export async function bundleEntry(root: string, entry: string): Promise<string> {
-  return bundle(root, entry);
-}
-
 async function bundle(root: string, entry: string): Promise<string> {
   const build = await rolldown({
     input: { bundle: path.resolve(root, entry) },
