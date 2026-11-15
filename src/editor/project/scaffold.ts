@@ -1,11 +1,11 @@
-import { generateProjectFiles, prefabClassPath } from "../export/generate";
+import { generateProjectFiles, prefabClassPath, sceneClassPath } from "../export/generate";
+import { serializeTiledMap } from "../../shared/tiled";
 import { placeholderHeroSheetDataUrl } from "../../shared/tilesetImage";
 import { encodePngBase64 } from "../../shared/png";
 import { placeholderImages } from "../../shared/rasterise";
 import { DEFAULT_CONFIG, type ProjectConfig, type ProjectData } from "../../shared/types";
 import {
   createSceneFromTemplate,
-  defaultMatrix,
   placeholderObjectAssets,
   placeholderTilesetAsset,
   type TemplateId,
@@ -13,7 +13,14 @@ import {
 import { DEFAULT_GROUPS } from "../../shared/definitions";
 import { SCRIPT_BASE_FILE } from "../../shared/scripts";
 import { scriptBaseSource } from "../scripts/stub";
-import { CONFIG_PATH, MANIFEST_PATH, prefabPath, scenePath, toManifest } from "./serialize";
+import {
+  CONFIG_PATH,
+  MANIFEST_PATH,
+  pendingTilemaps,
+  prefabPath,
+  scenePath,
+  toManifest,
+} from "./serialize";
 
 /**
  * Plans a new project without touching the disk.
@@ -99,7 +106,7 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   // minus the decorated fields.
   const typed = opts.language === "ts";
   const e = typed ? "ts" : "js";
-  const { scene, prefabs } = createSceneFromTemplate(
+  const { scene, prefabs, assets: maps } = createSceneFromTemplate(
     "Level_01",
     "Level 01",
     opts.template,
@@ -112,10 +119,9 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     config,
     scenes: [scene],
     prefabs,
-    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],
+    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets(), ...maps],
     anims: [],
     groups: [...DEFAULT_GROUPS],
-    collision: defaultMatrix(),
   };
 
   // The same files a save writes, so a project is in step with the editor
@@ -159,12 +165,23 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
       "starter prefab — yours to rename or delete",
     );
   }
+  // The terrain, as the Tiled map it is. Mosaic writes it this once.
+  for (const { asset, map } of pendingTilemaps(project)) {
+    add(asset.path, serializeTiledMap(map), "terrain — open it in Tiled");
+  }
   const playerPath = prefabClassPath("Player", opts.language);
+  const levelPath = sceneClassPath(scene.key, opts.language);
   for (const file of code) {
     if (file.language === "json") continue;
-    // The one class with something in it: a new project should move when you
-    // press a key, and the place that lives is the player's own class.
-    const contents = file.path === playerPath && hasPlayer ? playerClass(e, opts) : file.contents;
+    // The two classes with something in them. A new project should move when
+    // you press a key and stop when it lands, and both of those are code: the
+    // first lives on the player, the second in the scene.
+    const contents =
+      file.path === playerPath && hasPlayer
+        ? playerClass(e, opts)
+        : file.path === levelPath && hasPlayer
+          ? levelClass(e, opts)
+          : file.contents;
     add(
       file.path,
       contents,
@@ -327,6 +344,58 @@ new Phaser.Game(config);
 }
 
 /**
+ * The scene's class for a template with terrain.
+ *
+ * The layout places things; this is where they are told about each other. A
+ * collider is one line of ordinary Phaser, written against objects the layout
+ * hands back by name.
+ */
+function levelClass(ext: string, opts: NewProjectOptions): string {
+  const typed = ext === "ts";
+  const t = (s: string) => (typed ? s : "");
+  const terrain = { platformer: "terrain", runner: "chunks", topdown: "walls", empty: "" }[opts.template];
+  const pickups = opts.template === "runner";
+  return `import Phaser from "phaser";
+import { createLevel_01, preloadLevel_01${t(", type Level_01Layout")} } from "./Level_01.layout${typed ? "" : ".js"}";
+
+/**
+ * Level 01 — this file is yours.
+ *
+ * Mosaic wrote it once, as a starting point, and will not touch it again. What
+ * you place in the editor arrives through ./Level_01.layout.${ext}, which is
+ * regenerated on every save. The terrain is assets/maps/Level_01.tmj — open it
+ * in Tiled; a tile with the "collides" property is solid.
+ */
+export class Level_01 extends Phaser.Scene {
+  ${t("layout!: Level_01Layout;\n\n  ")}constructor() {
+    super("Level_01");
+  }
+
+  preload()${t(": void")} {
+    preloadLevel_01(this);
+  }
+
+  create()${t(": void")} {
+    this.layout = createLevel_01(this);
+    const { player, ${terrain}${pickups ? ", groups" : ""} } = this.layout;
+
+    // What collides with what is yours to say.
+    this.physics.add.collider(player, ${terrain});
+${
+  pickups
+    ? `    this.physics.add.overlap(player, groups.pickup, (_player, pickup) => {
+      ${typed ? "(pickup as Phaser.GameObjects.GameObject)" : "pickup"}.destroy();
+    });
+`
+    : ""
+}  }
+
+  update(_time${t(": number")}, _delta${t(": number")})${t(": void")} {}
+}
+`;
+}
+
+/**
  * The player's class, as a Phaser developer would write it: a sprite subclass
  * that reads the keyboard in preUpdate. The numbers are @property fields, so
  * they can be tuned from the editor without the behaviour leaving the code.
@@ -438,6 +507,7 @@ src/scenes/Level_01.layout.${ext}    what the editor placed — generated
 src/scenes/Level_01.scene.json   the data the editor edits
 src/prefabs/Player.${ext}            a prefab's class — yours
 src/prefabs/Player.layout.${ext}     its art and body — generated
+assets/maps/Level_01.tmj         the terrain — a Tiled map, edited in Tiled
 assets/                          art and audio, copied in by the editor
 mosaic.config.json               canvas, tile size, scale mode, physics
 \`\`\`
@@ -447,12 +517,17 @@ yours.** Open this folder in Mosaic to lay scenes out. Every save rewrites the
 layout files and nothing else, so \`npm run dev\` reloads with what you just
 placed, and Mosaic never opens a file you wrote.
 
-A scene's \`create()\` gets its objects from the layout, by name:
+A scene's \`create()\` gets its objects from the layout, by name, and says
+how they meet:
 
 \`\`\`${ext}
 create() {
-  const { player, terrain } = createLevel_01(this);
+  const { player, terrain, groups } = createLevel_01(this);
+  this.physics.add.collider(player, terrain);
 }
 \`\`\`
+
+Terrain is a [Tiled](https://www.mapeditor.org) map. Give a tile the custom
+property \`collides\` (bool) and the layout marks it solid.
 `;
 }

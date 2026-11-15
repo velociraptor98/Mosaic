@@ -146,7 +146,7 @@ function AssetBrowser() {
 
 /**
  * Re-importing art under the same key swaps the texture in place — the editor
- * canvas and any running play-test pick it up without a restart.
+ * canvas picks it up without a restart.
  */
 function ReplaceArtButton({ assetId }: { assetId: string }) {
   const { store } = useEditor();

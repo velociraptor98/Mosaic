@@ -1,4 +1,4 @@
-import { trustRoot } from "../../scripts/runtime";
+import { trustRoot } from "../../scripts/trust";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ProjectConfig } from "../../../shared/types";
 import { platform } from "../../platform";

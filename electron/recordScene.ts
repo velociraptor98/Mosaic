@@ -24,7 +24,7 @@ import type { SceneRecording } from "./contract";
  * - **A deadline.** `create()` is not required to terminate, so the window is
  *   killed on a timer regardless of what the page is doing.
  * - **Consent upstream.** The renderer will not call this without the same
- *   per-folder trust the play-test already asks for. Running somebody's game is
+ *   per-folder trust RUN already asks for. Running somebody's game is
  *   not something to do because they opened a folder.
  *
  * Nothing is written to the project. The bundle and the harness page live in a

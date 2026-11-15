@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 
-/** Bundles the sample-game generator for node, the way the smoke suite is. */
+/** Bundles the sample-game generator for node. */
 export default defineConfig({
   build: {
     ssr: "scripts/sample-game/build.ts",

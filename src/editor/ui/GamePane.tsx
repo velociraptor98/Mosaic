@@ -12,14 +12,14 @@ import { useEditor, useStoreVersion } from "./context";
  */
 export function GamePane() {
   const { playtest, store, workspace } = useEditor();
-  useSyncExternalStore(playtest.subscribeGame, playtest.getGameRevision);
+  useSyncExternalStore(playtest.subscribe, playtest.getRevision);
   useStoreVersion(store);
   const [wide, setWide] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
 
   const game = playtest.run;
-  const url = playtest.gameUrl();
+  const url = playtest.url();
 
   // Keys belong to the game the moment it appears: nobody should have to
   // click a canvas before the arrow keys do anything.
@@ -32,7 +32,7 @@ export function GamePane() {
   const install = () => {
     workspace.markInstalling();
     void platform.install(game.root);
-    playtest.stopGame();
+    playtest.stop();
     store.setStatus("Running npm install — press RUN again when it finishes");
   };
 
@@ -48,7 +48,7 @@ export function GamePane() {
         <div className="toolbar-spacer" />
         {game.status === "running" && (
           <>
-            <button className="mini" onClick={() => playtest.reloadGame()} title="Reload the page">
+            <button className="mini" onClick={() => playtest.reload()} title="Reload the page">
               ↻
             </button>
             <button
@@ -70,7 +70,7 @@ export function GamePane() {
         >
           {wide ? "◧" : "▣"}
         </button>
-        <button className="mini" onClick={() => playtest.stopGame()} title="Close the game">
+        <button className="mini" onClick={() => playtest.stop()} title="Close the game">
           ✕
         </button>
       </header>
@@ -103,13 +103,10 @@ export function GamePane() {
             </button>
           )}
           {game.code !== "not-installed" && (
-            <button className="primary" onClick={() => void playtest.startGame()}>
+            <button className="primary" onClick={() => void playtest.start()}>
               Try again
             </button>
           )}
-          <button className="ghost" onClick={() => playtest.start()}>
-            Preview the layout in the editor instead
-          </button>
         </div>
       )}
 

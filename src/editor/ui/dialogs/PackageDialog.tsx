@@ -22,7 +22,7 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
 
   const root = workspace.location?.root ?? "";
   const entries = workspace.gameEntries;
-  const [entry, setEntry] = useState(workspace.gameEntry ?? "src/main.ts");
+  const [entry, setEntry] = useState(entries[0] ?? "src/main.ts");
   const [outDir, setOutDir] = useState("build/web");
   const [minify, setMinify] = useState(true);
   const [copyAssets, setCopyAssets] = useState(true);

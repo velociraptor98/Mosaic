@@ -4,13 +4,13 @@ import {
   DEFAULT_PATHS,
   type AnimDef,
   type AssetDef,
-  type CollisionRule,
   type PrefabDef,
   type ProjectConfig,
   type ProjectData,
   type SceneData,
 } from "../../shared/types";
 import { ensureLids, walkNodes } from "../../shared/prefabs";
+import { MAP_EXT, serializeTiledMap, tiledFromDataUrl, type TiledMap } from "../../shared/tiled";
 import type { DiskFile, ProjectSource } from "../platform/types";
 import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset } from "../store/templates";
 
@@ -50,7 +50,6 @@ export interface ProjectManifest {
   prefabs: (PrefabDef & { file?: string })[];
   anims: AnimDef[];
   groups: string[];
-  collision: Record<string, Record<string, CollisionRule>>;
 }
 
 /** The manifest as it ships: asset metadata and paths, never asset bytes. */
@@ -62,7 +61,6 @@ export function toManifest(project: ProjectData): ProjectManifest {
     prefabs: project.prefabs.map((p) => ({ ...p, file: prefabPath(p.name) })),
     anims: project.anims,
     groups: project.groups,
-    collision: project.collision,
   };
 }
 
@@ -80,7 +78,26 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
       rel: prefabPath(prefab.name),
       contents: JSON.stringify(prefab, null, 2) + "\n",
     })),
+    ...pendingTilemaps(project).map(({ asset, map }) => ({
+      rel: asset.path,
+      contents: serializeTiledMap(map),
+    })),
   ];
+}
+
+/**
+ * Maps Mosaic made and has not yet put on disk: a template's terrain, or a
+ * converted tile layer. Each is written once, by the first save, and is a
+ * file edited in Tiled from then on — Mosaic never writes it a second time.
+ */
+export function pendingTilemaps(project: ProjectData): { asset: AssetDef; map: TiledMap }[] {
+  const out: { asset: AssetDef; map: TiledMap }[] = [];
+  for (const asset of project.assets) {
+    if (asset.kind !== "tilemap" || !asset.url.startsWith("data:")) continue;
+    const map = tiledFromDataUrl(asset.url);
+    if (map) out.push({ asset, map });
+  }
+  return out;
 }
 
 export interface LoadResult {
@@ -201,7 +218,6 @@ export function projectFromSource(
     prefabs: readPrefabs(source.prefabs, manifest, issues),
     anims: manifest?.anims ?? [],
     groups: manifest?.groups?.length ? manifest.groups : [...DEFAULT_GROUPS],
-    collision: manifest?.collision ?? {},
     assets,
   };
 
@@ -357,6 +373,9 @@ function reconcileAssets(
   const keys = new Set(out.map((a) => a.key));
   for (const file of onDisk) {
     if (claimed.has(file.rel)) continue;
+    // Tiled maps and atlas documents are read by content, not guessed at by
+    // name — the workspace does that once it can open the files.
+    if (MAP_EXT.test(file.rel)) continue;
     const base = file.rel.replace(/^assets\//, "").replace(/\.\w+$/, "").replace(/[^\w]+/g, "_");
     let key = base || "asset";
     let n = 2;

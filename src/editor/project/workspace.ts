@@ -1,17 +1,27 @@
 import type { ProjectData } from "../../shared/types";
-import { generateProjectFiles, type GeneratedFile, type Language } from "../export/generate";
+import {
+  generateProjectFiles,
+  prefabLayoutPath,
+  sceneLayoutPath,
+  type GeneratedFile,
+  type Language,
+} from "../export/generate";
 import { setProjectRoot } from "../export/write";
 import { propertiesOf } from "../scripts/parse";
 import { platform } from "../platform";
 import type { DiskFile, ProjectChange, ProjectLocation, RecentEntry } from "../platform/types";
 import { ScriptRegistry } from "../scripts/registry";
-import { ScriptRuntime } from "../scripts/runtime";
 import { SCRIPT_EXT } from "../../shared/scripts";
 import type { ProjectStore } from "../store/project";
+import { MAP_EXT, describeTiledMap, parseTiledMap, type TiledMap } from "../../shared/tiled";
+import { uid, uniqueKey } from "../store/ids";
+import { migratePaintedTileLayers } from "./tiledMigration";
 import {
   CONFIG_PATH,
   MANIFEST_PATH,
+  pendingTilemaps,
   projectFromSource,
+  prefabPath,
   projectToFiles,
   scenePath,
 } from "./serialize";
@@ -27,15 +37,13 @@ async function measureAssets(project: ProjectData): Promise<void> {
     project.assets.map(
       (asset) =>
         new Promise<void>((resolve) => {
-          if (asset.kind === "audio" || !asset.url || asset.width > 0) return resolve();
+          if (asset.kind === "audio" || asset.kind === "tilemap" || !asset.url || asset.width > 0) {
+            return resolve();
+          }
           const img = new Image();
           img.onload = () => {
             asset.width = img.naturalWidth;
             asset.height = img.naturalHeight;
-            if (asset.kind === "tileset" && !asset.frameWidth) {
-              asset.frameWidth = 32;
-              asset.frameHeight = 32;
-            }
             resolve();
           };
           img.onerror = () => resolve();
@@ -64,14 +72,10 @@ export class Workspace {
   /**
    * Files in this folder that construct a `Phaser.Game`.
    *
-   * Detected on open so the UI can offer to run the project's own game without
-   * a scan at click time. Empty for a project Mosaic scaffolded, which has no
-   * entry point of its own.
+   * Detected on open so Export game… can offer them without a scan at click
+   * time. The first is the best-ranked.
    */
   gameEntries: string[] = [];
-  /** The entry the user picked, when the folder offers more than one. */
-  selectedGameEntry: string | null = null;
-
   /**
    * The language layout files are written in: the project's own setting, or
    * what the folder implies when it has not said.
@@ -84,6 +88,12 @@ export class Workspace {
    * inspecting.
    */
   private settled = new Set<string>();
+  /**
+   * The files Mosaic owns for the project as it last stood: scene and prefab
+   * data, and the layouts generated from them. A path that was here and is not
+   * in the next save belongs to something that was deleted, and goes with it.
+   */
+  private owned = new Set<string>();
 
   /** Bumped on every change, so React can subscribe with useSyncExternalStore. */
   revision = 0;
@@ -93,14 +103,7 @@ export class Workspace {
    * that reloads a scene keeps it warm.
    */
   scripts = new ScriptRegistry();
-  /**
-   * The compiled half of the same thing: the classes the play-test constructs.
-   * Built on RUN, rebuilt when the source behind it changes.
-   */
-  scriptRuntime = new ScriptRuntime();
-  /** Set by the play-test, so a source edit can reach a running scene. */
-  onScriptsChanged: ((rels: string[]) => void) | null = null;
-  /** Set by the play-test, so a closing project takes its dev server with it. */
+  /** Set by the game runner, so a closing project takes its dev server with it. */
   onClosing: ((root: string) => void) | null = null;
   /**
    * Scene files that changed on disk under unsaved edits of ours. Writing one
@@ -196,13 +199,17 @@ export class Workspace {
       platform.assetUrl(location.root, rel),
     );
     await measureAssets(project);
+    const maps = await this.readTilemaps(location.root, project, source.assets);
+    const converted = migratePaintedTileLayers(project);
 
     this.close({ keepStore: true });
     this.location = location;
     setProjectRoot(location.root);
-    this.issues = issues;
+    this.issues = [...issues, ...converted];
     this.language = project.config.language ?? (await inferLanguage(location.root));
     this.store.loadProject(project);
+    this.applyTilemaps(maps);
+    this.owned = this.ownedPaths(project);
 
     // Autosave is what makes the editor feel like it edits a folder rather
     // than a document — but it is also a write, and a starter shown over
@@ -213,8 +220,10 @@ export class Workspace {
     if (!deferWrite) {
       this.store.setPersister((next) => this.scheduleSave(next));
       // A folder with nothing in it gets its scaffold written immediately, so
-      // what is on disk always matches what the editor is showing.
-      if (scaffolded) await this.saveNow(project);
+      // what is on disk always matches what the editor is showing. The same
+      // goes for a conversion: the scene now points at maps, so the maps have
+      // to exist.
+      if (scaffolded || converted.length) await this.saveNow(project);
     }
 
     // The index is built in the background: the scene is on screen either
@@ -244,25 +253,14 @@ export class Workspace {
     this.issues = [];
     this.scripts.clear();
     this.gameEntries = [];
-    this.selectedGameEntry = null;
-    this.scriptRuntime.reset();
     this.settled.clear();
     this.selfWrites.clear();
+    this.owned.clear();
     setProjectRoot(null);
     if (!opts.keepStore) {
       this.store.setPersister(null);
       platform.setWindowTitle("Mosaic");
     }
-    this.emit();
-  }
-
-  /** The entry RUN would use: the user's choice, else the best-ranked one. */
-  get gameEntry(): string | null {
-    return this.selectedGameEntry ?? this.gameEntries[0] ?? null;
-  }
-
-  setGameEntry(rel: string): void {
-    this.selectedGameEntry = rel;
     this.emit();
   }
 
@@ -323,6 +321,15 @@ export class Workspace {
     }
 
     const result = await platform.writeFiles(this.location.root, files);
+    // A map Mosaic made is a file from here on. Pointing the asset at it is
+    // what stops the next save writing it again — over whatever Tiled has
+    // done to it in the meantime.
+    for (const { asset } of pendingTilemaps(project)) {
+      if (result.written.includes(asset.path)) {
+        asset.url = platform.assetUrl(this.location.root, asset.path);
+      }
+    }
+    await this.removeOrphans(project);
     this.saving = false;
     this.lastSavedAt = Date.now();
     if (result.failed.length) {
@@ -395,6 +402,119 @@ export class Workspace {
     return out;
   }
 
+  // ------------------------------------------------------------ tilemaps
+
+  /**
+   * Finds the Tiled maps in the folder and describes each one.
+   *
+   * A map is recognised by what is in it, not by its name: `.tmj` is what
+   * Tiled writes now, `.json` is what it wrote for years and what most Phaser
+   * projects have, and a `.json` in an art folder is as likely to be an atlas.
+   * So every candidate is opened, and the ones that are maps become assets.
+   */
+  private async readTilemaps(
+    root: string,
+    project: ProjectData,
+    onDisk: { rel: string }[],
+  ): Promise<Map<string, TiledMap>> {
+    const out = new Map<string, TiledMap>();
+    const candidates = new Set<string>();
+    for (const asset of project.assets) {
+      if (asset.kind === "tilemap" && !asset.url.startsWith("data:")) candidates.add(asset.path);
+    }
+    for (const file of onDisk) {
+      if (MAP_EXT.test(file.rel) && !/\.atlas\.json$/i.test(file.rel)) candidates.add(file.rel);
+    }
+
+    const keys = project.assets.map((a) => a.key);
+    for (const rel of [...candidates].sort()) {
+      const text = await platform.readText(root, rel);
+      const map = text ? parseTiledMap(text) : null;
+      let asset = project.assets.find((a) => a.path === rel);
+      if (!map) {
+        // Declared, and now unreadable or gone: keep the asset so the scene's
+        // layers still say what they wanted, and let validation report it.
+        if (asset?.kind === "tilemap") delete asset.tilemap;
+        continue;
+      }
+      if (!asset) {
+        const stem = rel.split("/").pop()!.replace(/\.\w+$/, "");
+        const key = uniqueKey(stem, keys);
+        keys.push(key);
+        asset = { id: uid("asset"), key, kind: "tilemap", path: rel, url: "", width: 0, height: 0 };
+        project.assets.push(asset);
+      }
+      asset.kind = "tilemap";
+      asset.url = platform.assetUrl(root, rel);
+      asset.width = map.width * map.tilewidth;
+      asset.height = map.height * map.tileheight;
+      out.set(asset.key, map);
+    }
+    // Described last, once every image the project has is known — a tileset
+    // names its image, and the image may be an asset discovered in this pass.
+    for (const asset of project.assets) {
+      const map = out.get(asset.key);
+      if (map) asset.tilemap = describeTiledMap(map, asset.path, project.assets);
+    }
+    return out;
+  }
+
+  /** Hands the parsed maps to the store and lets every scene catch up with them. */
+  private applyTilemaps(maps: Map<string, TiledMap>): void {
+    for (const [key, map] of maps) this.store.setTilemap(key, map);
+    const notes = this.store.reconcileTilemaps();
+    if (notes.length) this.store.setStatus(notes[0]);
+  }
+
+  /**
+   * Re-reads the folder's maps without reloading the project — after a save
+   * in Tiled, or after art was imported that a map may have been waiting for.
+   */
+  async rescanTilemaps(): Promise<void> {
+    if (!this.location) return;
+    const root = this.location.root;
+    const source = await platform.readProject(root);
+    if (!source || this.location?.root !== root) return;
+    const maps = await this.readTilemaps(root, this.store.project, source.assets);
+    this.applyTilemaps(maps);
+    this.emit();
+  }
+
+  /** Scene and prefab data, plus the layout generated from each. */
+  private ownedPaths(project: ProjectData): Set<string> {
+    const out = new Set<string>();
+    for (const scene of project.scenes) {
+      out.add(scenePath(scene.key));
+      out.add(sceneLayoutPath(scene.key, this.language));
+    }
+    for (const prefab of project.prefabs) {
+      out.add(prefabPath(prefab.name));
+      out.add(prefabLayoutPath(prefab.name, this.language));
+    }
+    return out;
+  }
+
+  /**
+   * Deleting a scene or a prefab deletes its files.
+   *
+   * Without this the data file stayed behind and the thing came back the next
+   * time the folder was opened. Only what Mosaic owns goes: the class beside
+   * it is the developer's, and is left exactly where it is.
+   */
+  private async removeOrphans(project: ProjectData): Promise<void> {
+    if (!this.location) return;
+    const now = this.ownedPaths(project);
+    const gone = [...this.owned].filter((rel) => !now.has(rel));
+    this.owned = now;
+    if (!gone.length) return;
+    for (const rel of gone) this.selfWrites.delete(rel);
+    this.expectedRemovals = new Set(gone);
+    await platform.removeFiles(this.location.root, gone);
+  }
+
+  /** Removals we asked for, so the watcher does not read them as someone else's. */
+  private expectedRemovals = new Set<string>();
+
   /**
    * True when the project already has its own class for this file's job.
    *
@@ -410,8 +530,16 @@ export class Workspace {
       if (src === file.path) continue;
       if (contents.includes(`${stem}.layout`)) return true;
     }
+    // Only scenes, and only a class that IS a scene: a prefab called Brick
+    // and a script component called Brick are two different things that
+    // happen to share the obvious name.
+    if (!file.path.startsWith("src/scenes/")) return false;
     return this.scripts.index.classes.some(
-      (c) => c.name === stem && c.src !== file.path && !/\.layout\.(ts|js)$/.test(c.src),
+      (c) =>
+        c.name === stem &&
+        c.src !== file.path &&
+        !/\.layout\.(ts|js)$/.test(c.src) &&
+        /Scene$/.test(c.base ?? ""),
     );
   }
 
@@ -442,6 +570,7 @@ export class Workspace {
 
     const external: ProjectChange[] = [];
     for (const change of changes) {
+      if (change.kind === "unlink" && this.expectedRemovals.delete(change.rel)) continue;
       const written = this.selfWrites.get(change.rel);
       if (written === undefined) {
         external.push(change);
@@ -473,7 +602,6 @@ export class Workspace {
       .map((c) => c.rel);
     if (touchedScripts.length) {
       await this.scripts.refresh(touchedScripts);
-      this.onScriptsChanged?.(touchedScripts);
     }
 
     if (this.store.stack().canUndo && touchedProject && this.store.isDirty(this.store.docKey)) {
@@ -490,9 +618,18 @@ export class Workspace {
       return;
     }
 
+    const assetChanges = external.filter((c) => c.rel.startsWith("assets/"));
+    const onlyMaps = assetChanges.length > 0 && assetChanges.every((c) => MAP_EXT.test(c.rel));
+
     if (touchedProject) {
       await this.reload();
       this.store.setStatus(`Reloaded — ${external[0].rel} changed on disk`);
+    } else if (onlyMaps) {
+      // A save in Tiled. Re-read the maps where they stand: a full reload
+      // would throw away the undo history and the selection every time, and
+      // saving in Tiled is something that happens every few seconds.
+      await this.rescanTilemaps();
+      this.store.setStatus(`${assetChanges[0].rel} changed in Tiled — map updated`);
     } else if (touchedAssets) {
       await this.reload();
       this.store.setStatus("Assets changed on disk — textures reloaded");
@@ -519,13 +656,17 @@ export class Workspace {
       platform.assetUrl(this.location!.root, rel),
     );
     await measureAssets(project);
-    this.issues = issues;
+    const maps = await this.readTilemaps(this.location.root, project, source.assets);
+    const converted = migratePaintedTileLayers(project);
+    this.issues = [...issues, ...converted];
     const activeKey = this.store.activeSceneKey;
     // An open prefab is a document like a scene is, and reopening the folder
     // must put you back in the one you were in. Unsaved definition work never
     // reaches here — the guard above refuses to reload over it.
     const openPrefab = this.store.prefabDoc?.name;
     this.store.loadProject(project);
+    this.applyTilemaps(maps);
+    this.owned = this.ownedPaths(project);
     if (project.scenes.some((s) => s.key === activeKey)) this.store.activateScene(activeKey);
     if (openPrefab && project.prefabs.some((p) => p.name === openPrefab)) {
       this.store.openPrefab(openPrefab);
@@ -546,14 +687,6 @@ export class Workspace {
     this.emit();
   }
 
-  /** Git status for a scene, for the badge in the Project panel. */
-  statusForScene(key: string): string | undefined {
-    return this.git[scenePath(key)];
-  }
-
-  statusForPath(rel: string): string | undefined {
-    return this.git[rel];
-  }
 }
 
 

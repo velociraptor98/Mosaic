@@ -2,7 +2,6 @@ import type { AssetDef } from "../../shared/types";
 import type {
   CreateResult,
   EditorOpen,
-  ScriptBundle,
   ScriptFile,
   Platform,
   ProjectLocation,
@@ -64,6 +63,9 @@ export const browserPlatform: Platform = {
   async writeFiles(): Promise<WriteOutcome> {
     return { written: [], failed: [] };
   },
+  async removeFiles(): Promise<string[]> {
+    return [];
+  },
   async readText(): Promise<string | null> {
     return null;
   },
@@ -75,14 +77,6 @@ export const browserPlatform: Platform = {
   },
   async openInEditor(): Promise<EditorOpen> {
     return { ok: false, via: "none", error: "The browser build has no local files to open" };
-  },
-  async bundleScripts(): Promise<ScriptBundle> {
-    return {
-      code: null,
-      error: "The browser build has no source tree to compile",
-      warnings: [],
-      modules: [],
-    };
   },
   async importAssets(): Promise<AssetDef[]> {
     return [];

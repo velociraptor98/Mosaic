@@ -14,21 +14,20 @@ variants, and every behaviour is a script component whose tunable fields are
 `@property` declarations the editor fills in.
 
 It exists to answer a question rather than to be a game — can a whole, real,
-already-written Phaser game be expressed in this editor's model, and does what
-comes out the far end actually run? Both are checked in CI:
-
-| command | what it proves |
-|---|---|
-| `npm run breakout` (repo root) | the project can be authored through the editor's own API |
-| `node scripts/verify-export.mjs breakout` | the generated code typechecks and bundles |
-| `node scripts/parity/run.mjs breakout` | the editor's play-test and the shipped build agree |
-| `node scripts/breakout/playtest.mjs` | the game is playable: bricks break, lives are lost, the round ends |
+already-written Phaser game be laid out in this editor and still run as an
+ordinary Phaser project? `npm run breakout` at the repo root rebuilds it by
+driving the editor's own API.
 
 ## Layout
 
-    src/scenes/Level_01.scene.json   the editor's source of truth
-    src/scenes/Level_01.ts           generated from it — edit inside // <keep> markers
-    src/prefabs/Brick*.ts            one class per prefab; the five variants are diffs
+One rule: **`*.layout.ts` is generated, everything else is yours.**
+
+    src/main.ts                      the game config and scene list — yours
+    src/scenes/Level_01.ts           the scene class — yours
+    src/scenes/Level_01.layout.ts    what the editor placed — generated on save
+    src/scenes/Level_01.scene.json   the data the editor edits
+    src/prefabs/Brick*.ts            a class per prefab — yours; variants extend Brick
+    src/prefabs/Brick*.layout.ts     each prefab's art and body — generated
     src/scripts/                     ScriptComponent + the four behaviours
     assets/                          art, copied in by the editor
     mosaic.config.json               canvas, tile size, scale mode, physics

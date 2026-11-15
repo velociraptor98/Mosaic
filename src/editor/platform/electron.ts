@@ -39,7 +39,6 @@ function assetKeyFor(rel: string): string {
 
 function kindFor(rel: string): AssetDef["kind"] {
   if (/\.(mp3|ogg|wav|m4a)$/i.test(rel)) return "audio";
-  if (/tile(set|s)?[-_.]|[-_.]tiles?\./i.test(rel)) return "tileset";
   if (/(sheet|sprites?|atlas|anim)/i.test(rel)) return "spritesheet";
   return "image";
 }
@@ -84,10 +83,10 @@ export function createElectronPlatform(api: MosaicApi): Platform {
       return api.writeFiles(root, files);
     },
 
+    removeFiles: (root, rels) => api.removeFiles(root, rels),
     readText: (root, rel) => api.readText(root, rel),
     readScripts: (root) => api.readScripts(root),
     openInEditor: (root, rel, line) => api.openInEditor(root, rel, line),
-    bundleScripts: (root, entries) => api.bundleScripts(root, entries),
 
     async importAssets(root: string): Promise<AssetDef[]> {
       return withAtlases(root, await api.importAssets(root));
@@ -147,7 +146,7 @@ export function createElectronPlatform(api: MosaicApi): Platform {
   async function withAtlases(root: string, files: { rel: string }[]): Promise<AssetDef[]> {
     const defs = toAssetDefs(
       root,
-      files.filter((f) => !/\.json$/i.test(f.rel)),
+      files.filter((f) => !/\.(json|tmj)$/i.test(f.rel)),
     );
     for (const def of defs) {
       if (def.kind === "audio") continue;

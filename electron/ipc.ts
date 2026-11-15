@@ -4,7 +4,6 @@ import fs, { constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
-import { bundleScripts } from "./bundleScripts";
 import { packageGame } from "./packageGame";
 import { findGameEntries, recordScene } from "./recordScene";
 import { startDevServer, stopAllDevServers, stopDevServer } from "./devServer";
@@ -22,8 +21,6 @@ import {
   type RecentProject,
   type CreateResult,
   type EditorOpen,
-  type ScriptBundle,
-  type ScriptEntry,
   type ScriptFileIpc,
   type InstallProgress,
   type TargetCheck,
@@ -81,10 +78,15 @@ async function projectPaths(root: string): Promise<Paths> {
 }
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const AUDIO_EXT = /\.(mp3|ogg|wav|m4a)$/i;
+/** Tiled maps, and documents that might be one. The renderer opens them to find out. */
+const MAP_EXT = /\.(tmj|json)$/i;
 const SCRIPT_EXT = /\.(ts|tsx|js|jsx|mts|mjs)$/i;
 /** Source files are read whole for the index; anything huge is not source. */
 const MAX_SCRIPT_BYTES = 512 * 1024;
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", "coverage", ".next"]);
+
+/** Files Mosaic writes and may therefore delete: scene data and generated layouts. */
+const REMOVABLE = /\.(scene|prefab)\.json$|\.layout\.(ts|js)$/;
 
 const watchers = new Map<string, FSWatcher>();
 
@@ -201,7 +203,9 @@ async function listAssets(root: string, assetDir: string): Promise<AssetFileInfo
         await walk(rel);
         continue;
       }
-      if (!IMAGE_EXT.test(entry.name) && !AUDIO_EXT.test(entry.name)) continue;
+      if (!IMAGE_EXT.test(entry.name) && !AUDIO_EXT.test(entry.name) && !MAP_EXT.test(entry.name)) {
+        continue;
+      }
       const stat = await fs.stat(path.join(root, rel));
       out.push({ rel: toPosix(rel), bytes: stat.size, modified: stat.mtimeMs });
     }
@@ -393,6 +397,23 @@ export function registerIpc(): void {
     },
   );
 
+  ipcMain.handle(IPC.removeFiles, async (_e, root: string, rels: string[]): Promise<string[]> => {
+    const removed: string[] = [];
+    for (const rel of rels) {
+      // The renderer names the files, so the rule about WHICH files is
+      // enforced here: only what Mosaic generates or owns as data. A class the
+      // user wrote can never be deleted through this, whatever is asked for.
+      if (!REMOVABLE.test(rel)) continue;
+      try {
+        await fs.rm(resolveInside(root, rel), { force: true });
+        removed.push(rel);
+      } catch {
+        /* a file that will not go is left; the next save tries again */
+      }
+    }
+    return removed;
+  });
+
   ipcMain.handle(IPC.readText, async (_e, root: string, rel: string) =>
     readIfExists(resolveInside(root, rel)),
   );
@@ -403,16 +424,6 @@ export function registerIpc(): void {
 
   ipcMain.handle(IPC.openInEditor, async (_e, root: string, rel: string, line?: number) =>
     openInEditor(root, rel, line),
-  );
-
-  ipcMain.handle(
-    IPC.bundleScripts,
-    async (_e, root: string, entries: ScriptEntry[]): Promise<ScriptBundle> => {
-      // Every entry is resolved against the root before it reaches the
-      // bundler, so a renderer cannot ask for a file outside the project.
-      for (const entry of entries) resolveInside(root, entry.src);
-      return bundleScripts(root, entries);
-    },
   );
 
   ipcMain.handle(
@@ -468,6 +479,7 @@ export function registerIpc(): void {
         // The atlas document goes in the Art filter beside the sheet it
         // describes: they are picked together or the frames are lost.
         { name: "Art", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "json"] },
+        { name: "Tiled maps", extensions: ["tmj", "json"] },
         { name: "Audio", extensions: ["mp3", "ogg", "wav", "m4a"] },
       ],
     });

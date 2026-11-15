@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EditorBridge } from "./editor/bridge";
-import { buildCommands, isRunning, startPlaytest, stopAndPrompt, type DialogName } from "./editor/commands";
+import { buildCommands, startPlaytest, type DialogName } from "./editor/commands";
 import { PhaserHost } from "./editor/phaser/PhaserHost";
 import { Playtest } from "./editor/phaser/playtest";
 import { platform } from "./editor/platform";
-import { DEFAULT_OPTIONS, planScaffold } from "./editor/project/scaffold";
 import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
-import { isTrusted, revokeRoot, trustRoot } from "./editor/scripts/runtime";
+import { isTrusted, revokeRoot, trustRoot } from "./editor/scripts/trust";
 import { BottomDock } from "./editor/ui/BottomDock";
 import { EditorContext, useStoreVersion, useWorkspace } from "./editor/ui/context";
 import { FirstRunChecklist } from "./editor/ui/FirstRunChecklist";
@@ -31,21 +30,17 @@ import { PackageDialog } from "./editor/ui/dialogs/PackageDialog";
 import { GridDialog } from "./editor/ui/dialogs/GridDialog";
 import { ImportDialog } from "./editor/ui/dialogs/ImportDialog";
 import { ImportPhaserDialog } from "./editor/ui/dialogs/ImportPhaserDialog";
-import { applyImport, findEntries, previewScene, surveyProject } from "./editor/import/importPhaser";
 import { NewSceneDialog } from "./editor/ui/dialogs/NewSceneDialog";
 import { PrefabDialog } from "./editor/ui/dialogs/PrefabDialog";
-import { PromoteDialog } from "./editor/ui/dialogs/PromoteDialog";
 import { PropagateDialog } from "./editor/ui/dialogs/PropagateDialog";
 
 const store = new ProjectStore();
 const bridge = new EditorBridge();
-// The workspace comes first: the play-test compiles the project's scripts
-// through it before it boots a scene.
 const workspace = new Workspace(store);
-const playtest = new Playtest(store, bridge, workspace);
+const playtest = new Playtest(store, workspace);
 
-// A debug handle for the desktop end-to-end test and for poking at state in
-// devtools. Intentionally read-write: this is an editor, not a sandbox.
+// A debug handle for poking at state in devtools. Intentionally read-write:
+// this is an editor, not a sandbox.
 if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).mosaicDebug = {
     store,
@@ -54,9 +49,6 @@ if (typeof window !== "undefined") {
     bridge,
     platform,
     scriptTrust: { isTrusted, trustRoot, revokeRoot },
-    importPhaser: { findEntries, surveyProject, previewScene, applyImport },
-    planScaffold,
-    DEFAULT_OPTIONS,
   };
 }
 
@@ -67,8 +59,7 @@ export default function App() {
   const openDialog = useCallback((name: DialogName) => setDialog(name), []);
 
   // The dialogs are React state, so the debug handle cannot reach them from
-  // module scope the way it reaches the store. Published here instead, for the
-  // desktop end-to-end test and for devtools.
+  // module scope the way it reaches the store. Published here instead.
   useEffect(() => {
     (window as unknown as Record<string, unknown>).mosaicDebug = {
       ...((window as unknown as Record<string, Record<string, unknown>>).mosaicDebug ?? {}),
@@ -86,15 +77,6 @@ export default function App() {
     () => ({ store, bridge, playtest, workspace, dialog, openDialog }),
     [dialog, openDialog],
   );
-
-  // Clicking a running game object binds the inspector to it.
-  useEffect(() => {
-    const onRuntimeSelect = (id: string | null) => id && store.setSelection([id]);
-    bridge.on("runtimeSelection", onRuntimeSelect);
-    return () => {
-      bridge.off("runtimeSelection", onRuntimeSelect);
-    };
-  }, []);
 
   useKeyboardShortcuts(ctx);
 
@@ -152,7 +134,7 @@ export default function App() {
               <i className="corner tr" />
               <i className="corner bl" />
               <i className="corner br" />
-              <PhaserHost store={store} bridge={bridge} playtest={playtest} />
+              <PhaserHost store={store} bridge={bridge} />
               {/* The project's real game, beside the canvas it was laid out on. */}
               <GamePane />
               {/* Reading a class happens over the scene, not instead of it. */}
@@ -179,7 +161,6 @@ export default function App() {
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
         {dialog === "package" && <PackageDialog onClose={() => setDialog(null)} />}
         {dialog === "grid" && <GridDialog onClose={() => setDialog(null)} />}
-        {dialog === "promote" && <PromoteDialog onClose={() => setDialog(null)} />}
         {store.ui.prefabPlan && <PropagateDialog onClose={() => setDialog(null)} />}
       </div>
     </EditorContext.Provider>
@@ -257,7 +238,7 @@ function useKeyboardShortcuts(ctx: {
             return run("asset.import");
           case "enter":
             e.preventDefault();
-            return isRunning(ctx.playtest) ? stopAndPrompt(ctx) : startPlaytest(ctx);
+            return ctx.playtest.run ? ctx.playtest.stop() : startPlaytest(ctx);
           default:
             return;
         }
@@ -282,10 +263,6 @@ function useKeyboardShortcuts(ctx: {
           return run("object.text");
         case "F2":
           return run("view.bodies");
-        case "F5":
-          return run("play.pause");
-        case "F6":
-          return run("play.step");
         case "Delete":
         case "Backspace":
           return run("edit.delete");

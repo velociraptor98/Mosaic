@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { generateFiles } from "../../src/editor/export/generate";
+import { generateProjectFiles } from "../../src/editor/export/generate";
 import { DEFAULT_OPTIONS, planScaffold } from "../../src/editor/project/scaffold";
 import { projectToFiles } from "../../src/editor/project/serialize";
 import { ProjectStore } from "../../src/editor/store/project";
@@ -18,7 +18,7 @@ import { GAME_SCRIPTS } from "./scripts";
  *
  * Every byte this writes comes out of the editor's own code: `planScaffold`
  * plans the folder, `ProjectStore` performs each edit as a real undoable
- * transaction, and `projectToFiles` / `generateFiles` write the result. There
+ * transaction, and `projectToFiles` / `generateProjectFiles` write the result. There
  * is no second, script-only path into the project format — if the editor
  * cannot express something, neither can this.
  *
@@ -515,30 +515,24 @@ export function buildSampleGame(location: string, name = "Coin Rush"): BuildResu
 
   // ------------------------------------------------------------- 12. write it
   for (const file of projectToFiles(store.project)) write(file.rel, file.contents);
-  for (const file of generateFiles(store.project, store.scene!, "tsSceneClass")) {
-    // The scaffold named the scene class Level_01 and main.ts imports it by
-    // that name. Writing Level_01Scene.ts beside it would leave a second,
-    // stale copy that nothing loads.
-    const isScene = file.path.startsWith("src/scenes/");
-    write(
-      isScene ? "src/scenes/Level_01.ts" : file.path,
-      isScene
-        ? file.contents.replace("export class Level_01Scene", "export class Level_01")
-        : file.contents,
-    );
+  // The same files a save writes: the layout is rewritten, and a class that is
+  // "yours" is written only if the scaffold has not already put one there.
+  for (const file of generateProjectFiles(store.project)) {
+    if (file.owner === "yours" && files.some((f) => f.rel === file.path)) continue;
+    write(file.path, file.contents);
   }
 
   step({
     n: "14",
-    title: "Save, and export the scene class",
+    title: "Save — the layout is written with it",
     body:
       `Saving writes plain JSON: the manifest, the scene, and one file per prefab under ` +
       `src/prefabs/. There is no proprietary project file — the repo can read all of it.\n\n` +
-      `Export then emits the Phaser scene class beside it, plus a class per prefab. The scene ` +
-      `CONSTRUCTS those classes, so behaviour authored on a prefab actually runs. Hand-written ` +
-      `code inside a // <keep> region survives every later re-export.`,
-    editor: "Export scene… → both · or ⌘S to save the folder",
-    api: `projectToFiles(store.project)\ngenerateFiles(store.project, scene, "tsSceneClass")`,
+      `The same save writes a *.layout.ts beside each: generated, rewritten every time, never ` +
+      `edited. The scene class and the prefab classes are written once and are yours from then ` +
+      `on. The layout CONSTRUCTS the prefab classes, so behaviour written on one actually runs.`,
+    editor: "⌘S — or nothing at all: the folder autosaves",
+    api: `projectToFiles(store.project)\ngenerateProjectFiles(store.project)`,
   });
 
   return {

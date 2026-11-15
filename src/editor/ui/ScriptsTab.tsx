@@ -19,8 +19,7 @@ import { platform } from "../platform";
 import type { ScriptProperty } from "../scripts/parse";
 import type { ScriptResolution } from "../scripts/registry";
 import { CheckField, NumberField, SelectField, TextField } from "./fields";
-import { isTrusted, trustRoot } from "../scripts/runtime";
-import { useEditor, useScriptRuntime, useScripts, useStoreVersion } from "./context";
+import { useEditor, useScripts, useStoreVersion } from "./context";
 
 /**
  * Workflow — reading the code behind an object.
@@ -112,8 +111,6 @@ export function ScriptsTab() {
           prefab={prefab}
         />
       ))}
-
-      <RuntimeBanner />
 
       {scripts.length > 0 && (
         <div className="hint">
@@ -256,60 +253,6 @@ function ClassProps({ obj }: { obj: SceneObject }) {
       ))}
     </>
   );
-}
-
-/**
- * What the compiled half is doing right now: whether this project is trusted to
- * run its own code, whether it compiled, and what is running.
- */
-function RuntimeBanner() {
-  const { store, workspace, playtest } = useEditor();
-  const runtime = workspace.scriptRuntime;
-  useScriptRuntime(runtime);
-  const root = workspace.location?.root;
-  const trusted = isTrusted(root);
-
-  if (!root) return null;
-
-  if (!trusted) {
-    return (
-      <div className="banner warn">
-        Play-test will run the scene without behaviour: this project has not been trusted to
-        compile and run its own code.
-        <button
-          className="mini"
-          onClick={() => {
-            trustRoot(root);
-            store.setStatus(`Scripts enabled for ${workspace.location?.name ?? root}`);
-            runtime.reset();
-          }}
-        >
-          Enable for this project
-        </button>
-      </div>
-    );
-  }
-
-  if (runtime.status === "error") {
-    return (
-      <div className="banner error">
-        <strong>Scripts did not compile.</strong>
-        <pre className="compile-error">{runtime.error}</pre>
-      </div>
-    );
-  }
-
-  if (playtest.playing && runtime.status === "ready") {
-    return (
-      <div className="banner volatile">
-        Running {Object.keys(runtime.classes).length} class(es) from your source. Editing a script
-        recompiles it and restarts the scene on the new code.
-      </div>
-    );
-  }
-
-  if (runtime.status === "building") return <div className="hint">Compiling scripts…</div>;
-  return null;
 }
 
 interface Row {

@@ -3,8 +3,6 @@ import type {
   CreateResult,
   EditorOpen,
   InstallProgress,
-  ScriptBundle,
-  ScriptEntry,
   ScriptFileIpc,
   TargetCheck,
   Toolchain,
@@ -15,8 +13,6 @@ export type {
   CreateResult,
   EditorOpen,
   InstallProgress,
-  ScriptBundle,
-  ScriptEntry,
   TargetCheck,
   Toolchain,
 };
@@ -118,13 +114,13 @@ export interface Platform {
   createProject(): Promise<ProjectLocation | null>;
   readProject(root: string): Promise<ProjectSource | null>;
   writeFiles(root: string, files: DiskFile[]): Promise<WriteOutcome>;
+  /** Removes scene data and generated layouts left behind by a deletion. */
+  removeFiles(root: string, rels: string[]): Promise<string[]>;
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFile[]>;
   /** Opens a file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
-  /** Compiles the project's script classes so the play-test can run them. */
-  bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
 
   // --- Importing a hand-written Phaser project ---------------------------
   /** True when this platform can run a project's own code to record a scene. */

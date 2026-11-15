@@ -222,8 +222,7 @@
      The reference is a specification document: it never had to warn anyone
      or mark a field invalid. These two hues are mixed to the same OKLCH
      lightness as --color-accent so they read as siblings of it, not as
-     imports from another palette. Used sparingly: validation, conflicts,
-     and the volatile-edit banner during play-test. */
+     imports from another palette. Used sparingly: validation and conflicts. */
   --color-danger: #a6595e;
   --color-danger-100: #ffeef0;
   --color-danger-800: #5d2c30;

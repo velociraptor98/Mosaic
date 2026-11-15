@@ -2,7 +2,7 @@ import { platform } from "./platform";
 import type { Workspace } from "./project/workspace";
 import type { ProjectStore } from "./store/project";
 import type { Playtest } from "./phaser/playtest";
-import { isTrusted } from "./scripts/runtime";
+import { isTrusted } from "./scripts/trust";
 
 export type DialogName =
   | "palette"
@@ -17,7 +17,6 @@ export type DialogName =
   | "export"
   | "package"
   | "grid"
-  | "promote"
   | null;
 
 export interface CommandContext {
@@ -109,52 +108,33 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
     { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
 
-    { id: "play.run", title: isRunning(playtest) ? "Stop" : playtest.runsGame ? "Run the game" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (isRunning(playtest) ? stopAndPrompt(ctx) : startPlaytest(ctx)) },
-    { id: "play.reload", title: "Reload the running game", category: "Play", run: () => playtest.reloadGame() },
-    { id: "play.preview", title: "Preview the layout in the editor (no game code)", category: "Play", run: () => { if (!playtest.playing) startPreview(ctx); } },
-    { id: "play.pause", title: "Pause / resume", category: "Play", binding: "F5", run: () => (playtest.paused ? playtest.resume() : playtest.pause()) },
-    { id: "play.step", title: "Step one frame", category: "Play", binding: "F6", run: () => playtest.step() },
+    { id: "play.run", title: playtest.run ? "Stop the game" : "Run the game", category: "Play", binding: `${mod}⏎`, run: () => (playtest.run ? playtest.stop() : startPlaytest(ctx)) },
+    { id: "play.reload", title: "Reload the running game", category: "Play", run: () => playtest.reload() },
   ];
-}
-
-/** True while either kind of run is going. */
-export function isRunning(playtest: Playtest): boolean {
-  return playtest.playing || playtest.run !== null;
 }
 
 /**
  * RUN, through the one door every entry point uses.
  *
- * On a project folder it is the project's own game, from its own dev server.
- * That executes the project's code, so a folder that has not been trusted asks
- * first — pressing play should never be the moment someone else's code starts
- * running.
+ * It starts the project's own dev server, which executes the project's code —
+ * so a folder that has not been trusted asks first. Pressing play should never
+ * be the moment someone else's code starts running.
  */
 export function startPlaytest(ctx: CommandContext): void {
-  if (ctx.playtest.runsGame) {
-    const root = ctx.workspace.location?.root;
-    if (root && !isTrusted(root)) {
-      ctx.openDialog("scripttrust");
-      return;
-    }
-    void ctx.playtest.startGame();
+  const root = ctx.workspace.location?.root;
+  if (!ctx.playtest.canRun || !root) {
+    ctx.store.setStatus(
+      platform.canRunGame
+        ? "Save the project into this folder first — RUN runs the game from disk"
+        : "RUN needs the desktop app: it runs your project's own dev server",
+    );
     return;
   }
-  startPreview(ctx);
-}
-
-/** The in-editor preview: the scene built from its data, with no game code needed. */
-export function startPreview(ctx: CommandContext): void {
-  if (ctx.playtest.needsTrust()) {
+  if (!isTrusted(root)) {
     ctx.openDialog("scripttrust");
     return;
   }
-  ctx.playtest.start();
-}
-
-export function stopAndPrompt(ctx: CommandContext): void {
-  const pending = ctx.playtest.stop();
-  if (pending.length) ctx.openDialog("promote");
+  void ctx.playtest.start();
 }
 
 /**

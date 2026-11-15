@@ -1,30 +1,17 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { startPlaytest, stopAndPrompt } from "../commands";
+import { useSyncExternalStore } from "react";
+import { startPlaytest } from "../commands";
 import { MosaicLockup } from "./Logo";
 import { useEditor, useStoreVersion } from "./context";
 import { platform } from "../platform";
 
 /**
- * Menu bar + transport. On a project folder RUN is the project's own game,
- * served by its own dev server and shown beside the canvas. Without one it is
- * the in-editor preview, where PAUSE freezes the loop and STEP advances
- * exactly one update.
+ * Menu bar + transport. RUN is the project's own game, served by its own dev
+ * server and shown beside the canvas.
  */
 export function MenuBar() {
-  const { store, bridge, playtest, workspace, openDialog } = useEditor();
+  const { store, playtest, workspace, openDialog } = useEditor();
   useStoreVersion(store);
-  const [transport, setTransport] = useState({ playing: false, paused: false, frame: 0 });
-
-  useEffect(() => {
-    const onPlay = (state: { playing: boolean; paused: boolean; frame: number }) =>
-      setTransport(state);
-    bridge.on("playtest", onPlay);
-    return () => {
-      bridge.off("playtest", onPlay);
-    };
-  }, [bridge]);
-
-  useSyncExternalStore(playtest.subscribeGame, playtest.getGameRevision);
+  useSyncExternalStore(playtest.subscribe, playtest.getRevision);
   const game = playtest.run;
   const scene = store.scene;
   const doc = store.prefabDoc;
@@ -87,60 +74,32 @@ export function MenuBar() {
 
       <div className="transport">
         {game ? (
-          // The project's own game: there is no frame to step, because the
-          // loop belongs to the game and not to the editor.
           <>
             <span className="running-badge">
-              {game.status === "starting" ? "STARTING" : game.status === "failed" ? "FAILED" : "RUNNING · GAME"}
+              {game.status === "starting" ? "STARTING" : game.status === "failed" ? "FAILED" : "RUNNING"}
             </span>
             {game.status === "running" && (
-              <button className="ghost" onClick={() => playtest.reloadGame()} title="Reload the game">
+              <button className="ghost" onClick={() => playtest.reload()} title="Reload the game">
                 ↻
               </button>
             )}
-            <button
-              className="stop"
-              onClick={() => stopAndPrompt({ store, playtest, workspace, openDialog })}
-              title="Close the game (Ctrl/⌘↵)"
-            >
+            <button className="stop" onClick={() => playtest.stop()} title="Close the game (Ctrl/⌘↵)">
               ■ STOP
             </button>
           </>
-        ) : !transport.playing ? (
+        ) : (
           <button
             className="run"
+            disabled={!playtest.canRun}
             onClick={() => startPlaytest({ store, playtest, workspace, openDialog })}
             title={
-              playtest.runsGame
+              playtest.canRun
                 ? "Run the game from the project's dev server (Ctrl/⌘↵)"
-                : "Preview the scene (Ctrl/⌘↵)"
+                : "RUN runs your project's own dev server, so it needs a project folder in the desktop app"
             }
           >
             ▶ RUN
           </button>
-        ) : (
-          <>
-            <span className="running-badge">
-              {transport.paused ? "PAUSED" : "PREVIEW"} · f{transport.frame}
-            </span>
-            <button
-              className="ghost"
-              onClick={() => (transport.paused ? playtest.resume() : playtest.pause())}
-              title="Pause / resume (F5)"
-            >
-              {transport.paused ? "▶" : "⏸"}
-            </button>
-            <button className="ghost" onClick={() => playtest.step()} title="Step one frame (F6)">
-              ⏭
-            </button>
-            <button
-              className="stop"
-              onClick={() => stopAndPrompt({ store, playtest, workspace, openDialog })}
-              title="Stop and restore the snapshot"
-            >
-              ■ STOP
-            </button>
-          </>
         )}
       </div>
 

@@ -45,21 +45,8 @@ export function scriptEnabledPath(index: number): string {
 /** The path an instance uses when it changes the LIST itself, not a value. */
 export const SCRIPT_LIST_PATH = "scripts";
 
-export function isScriptOverridePath(path: string): boolean {
-  return path === SCRIPT_LIST_PATH || path.startsWith("scripts.");
-}
-
 export function newScriptRef(className: string, src: string): ScriptRef {
   return { class: className, src, enabled: true, props: {} };
-}
-
-/** The type a stored JSON value reads as, for comparison against the class. */
-export function valueType(value: unknown): PropertyType {
-  if (typeof value === "number") return "number";
-  if (typeof value === "boolean") return "boolean";
-  if (typeof value === "string") return "string";
-  if (typeof value === "function") return "function";
-  return "object";
 }
 
 /**

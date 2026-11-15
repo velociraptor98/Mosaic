@@ -8,11 +8,14 @@ import { resolvePrefab, resolveObject, walkNodes } from "./prefabs";
 export function collectLoaderManifest(project: ProjectData, scene: SceneData): LoaderEntry[] {
   const needed = new Set<string>();
 
+  // A tile layer needs its map, and the map needs the image behind each of
+  // its tilesets.
   for (const layer of scene.layers) {
-    if (layer.kind === "tile") {
-      const tileset = project.assets.find((a) => a.id === (layer as TileLayer).tilesetId);
-      if (tileset) needed.add(tileset.key);
-    }
+    if (layer.kind !== "tile") continue;
+    const map = project.assets.find((a) => a.kind === "tilemap" && a.key === (layer as TileLayer).map);
+    if (!map) continue;
+    needed.add(map.key);
+    for (const set of map.tilemap?.tilesets ?? []) if (set.image) needed.add(set.image);
   }
 
   for (const obj of scene.objects) {
@@ -41,7 +44,6 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
   for (const obj of scene.objects) {
     const resolved = resolveObject(project, obj);
     if (resolved.sounds?.spawn) needed.add(resolved.sounds.spawn);
-    if (resolved.sounds?.overlap) needed.add(resolved.sounds.overlap);
   }
   if (scene.settings.music?.key) needed.add(scene.settings.music.key);
 
@@ -67,17 +69,9 @@ export function loaderEntry(asset: AssetDef): LoaderEntry {
       return { key: asset.key, type: "atlas", url: asset.url, frames: asset.frames ?? [] };
     case "audio":
       return { key: asset.key, type: "audio", url: asset.url };
+    case "tilemap":
+      return { key: asset.key, type: "tilemap", url: asset.url };
     default:
       return { key: asset.key, type: "image", url: asset.url };
   }
-}
-
-/** Every texture key the project knows about, for Inspector pickers. */
-export function textureChoices(project: ProjectData): { key: string; frames: string[] }[] {
-  return project.assets
-    .filter((a) => a.kind !== "audio")
-    .map((a) => ({
-      key: a.key,
-      frames: a.kind === "atlas" ? (a.frames ?? []).map((f) => f.name) : [],
-    }));
 }

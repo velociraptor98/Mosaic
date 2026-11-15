@@ -48,24 +48,6 @@ export function worldTransform(
   return { x, y, rotation, scaleX, scaleY };
 }
 
-/** Convert a desired world position into a local one under `parentId`. */
-export function worldToLocal(
-  world: { x: number; y: number },
-  parentId: string | null,
-  index: Map<string, SceneObject>,
-): { x: number; y: number } {
-  if (!parentId) return { x: world.x, y: world.y };
-  const parent = index.get(parentId);
-  if (!parent) return { x: world.x, y: world.y };
-  const pw = worldTransform(parent, index);
-  const dx = world.x - pw.x;
-  const dy = world.y - pw.y;
-  const rad = (-pw.rotation * Math.PI) / 180;
-  const rx = dx * Math.cos(rad) - dy * Math.sin(rad);
-  const ry = dx * Math.sin(rad) + dy * Math.cos(rad);
-  return { x: rx / (pw.scaleX || 1), y: ry / (pw.scaleY || 1) };
-}
-
 /** True when making `parentId` the parent of `id` would create a cycle. */
 export function wouldCycle(
   id: string,
@@ -95,11 +77,6 @@ export function descendantIds(id: string, scene: SceneData): string[] {
   };
   walk(id);
   return out;
-}
-
-/** Root-first ordering, so parents always exist before their children. */
-export function topLevel(scene: SceneData): SceneObject[] {
-  return scene.objects.filter((o) => !o.parentId);
 }
 
 export function childrenOf(scene: SceneData, id: string | null): SceneObject[] {

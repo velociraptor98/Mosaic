@@ -10,18 +10,16 @@ import type { PackageRequest, PackageResult, PackagedFile, PhaserChoice } from "
 /**
  * Packages a project into a folder you can ship.
  *
- * Export writes SOURCE — a scene class, prefab classes, JSON. Turning that into
- * something playable meant leaving the editor for a terminal, running an
- * install, and running a bundler, which is a cliff at exactly the moment the
- * game is finished. This is the other half: one folder, index.html first, that
- * runs with nothing installed.
+ * Saving writes SOURCE — layouts, classes, JSON. Turning that into something
+ * you can send somebody meant leaving the editor for a terminal and running a
+ * bundler, which is a cliff at exactly the moment the game is finished. This is
+ * the other half: one folder, index.html first, that runs with nothing
+ * installed.
  *
- * It reuses the bundler Mosaic already carries. `bundleScripts` compiles script
- * classes for the play-test and `bundleEntry` compiles a project's own entry to
- * run it; this compiles the whole game for keeps. The difference that matters is
- * Phaser: those two deliberately leave it EXTERNAL, because the editor already
- * has an instance and a second copy would break every `instanceof`. A shipped
- * build has no editor to borrow from, so here Phaser is linked in.
+ * It uses the bundler Mosaic already carries for importing a hand-written
+ * project. The difference is Phaser: the importer leaves it EXTERNAL and hands
+ * the project's code a copy to be inspected through, while a shipped build has
+ * nothing to borrow from, so here Phaser is linked in.
  */
 
 /** Written into every build folder, and the only thing that licenses a wipe. */

@@ -93,7 +93,3 @@ export const LEGACY_OBJECT_TEXTURES: Record<string, string> = {
   "obj-spawn": shapeTextureKey("diamond"),
   "obj-exit": shapeTextureKey("diamond"),
 };
-
-export function tileDef(index: number): TileDef | undefined {
-  return TILE_DEFS.find((t) => t.index === index);
-}

@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 
-/** Bundles the Anim Lab generator for node, the way the smoke suite is. */
+/** Bundles the Anim Lab generator for node. */
 export default defineConfig({
   build: {
     ssr: "scripts/sample-game/anim-lab.ts",

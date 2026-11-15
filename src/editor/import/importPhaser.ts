@@ -1,5 +1,5 @@
 import { platform } from "../platform";
-import { isTrusted } from "../scripts/runtime";
+import { isTrusted } from "../scripts/trust";
 import {
   sceneFromRecording,
   type ImportResult,
@@ -83,7 +83,7 @@ export function findEntries(root: string): Promise<string[]> {
  *
  * Refuses without trust. Recording means executing the project's own code, and
  * "the user opened this folder" is not consent for that — it is the same bar
- * the play-test holds, asked in the same place.
+ * RUN holds.
  */
 export async function surveyProject(
   root: string,

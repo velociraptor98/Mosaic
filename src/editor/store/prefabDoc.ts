@@ -3,7 +3,6 @@ import {
   ensureLids,
   newLid,
   prefabBounds,
-  walkNodes,
 } from "../../shared/prefabs";
 import type {
   ObjectLayer,
@@ -33,10 +32,6 @@ export const PREFAB_LAYER_ID = "prefab-stage";
 
 export function prefabDocKey(name: string): string {
   return `prefab:${name}`;
-}
-
-export function isPrefabDocKey(key: string): boolean {
-  return key.startsWith("prefab:");
 }
 
 /** The drawn size of a part, for the bounds outline the stage shows. */
@@ -179,9 +174,4 @@ export function sceneToPrefabNode(scene: SceneData, rootId: string): PrefabNode 
   delete root.prefab;
   delete root.overrides;
   return root;
-}
-
-/** Local ids present in a tree — what an exposure path may still address. */
-export function lidsOf(root: PrefabNode): Set<string> {
-  return new Set(walkNodes(root).map((n) => n.lid));
 }

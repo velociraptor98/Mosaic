@@ -1,5 +1,6 @@
 import { collectLoaderManifest } from "../../shared/manifest";
 import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
+import { COLLIDES_PROPERTY } from "../../shared/tiled";
 import { findPrefab, resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../../shared/size";
 import { worldTransform } from "../../shared/transform";
@@ -14,7 +15,7 @@ import {
   type TileLayer,
 } from "../../shared/types";
 import { bindArgs } from "../../shared/prefabBinding";
-import type { CollisionRule, PrefabSource } from "../../shared/types";
+import type { PrefabSource } from "../../shared/types";
 
 /**
  * Layout beside code.
@@ -31,6 +32,10 @@ import type { CollisionRule, PrefabSource } from "../../shared/types";
  *
  * The two meet through an import: your `create()` calls `createLevel_01(this)`
  * and gets back the objects, typed, by name.
+ *
+ * What the layout does NOT do is decide how the game behaves. It places
+ * things, sizes their bodies and sorts them into groups; what collides with
+ * what is a line of your own code, written against what it hands back.
  */
 
 export type Language = "ts" | "js";
@@ -221,7 +226,7 @@ function q(value: string): string {
 /** Names a generated function body may not take for one of its own locals. */
 const RESERVED = new Set([
   // the function's own vocabulary
-  "scene", "contacts", "scripts", "groups", "sceneData", "Phaser", "ScriptHost", "playContactCues",
+  "scene", "scripts", "groups", "maps", "Phaser", "ScriptHost",
   // the language's
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
   "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
@@ -262,9 +267,9 @@ interface Field {
 
 /**
  * Emit order: loads -> world -> layers bottom-up -> groups -> bodies ->
- * colliders -> animations -> camera -> music. Bodies come after groups because
- * an arcade group applies its own defaults to every child it takes; animations
- * are started after they are registered; the camera follows last because its
+ * animations -> camera -> music. Bodies come after groups because an arcade
+ * group applies its own defaults to every child it takes; animations are
+ * started after they are registered; the camera follows last because its
  * target has to exist.
  */
 export function generateSceneLayout(
@@ -283,7 +288,8 @@ export function generateSceneLayout(
   const used = new Set<string>();
   const varsById = new Map<string, string>();
   const groupVars = new Map<string, string>();
-  const tileVars: { name: string; v: string }[] = [];
+  /** One Phaser tilemap per Tiled map the scene uses, however many layers it places. */
+  const mapVars = new Map<string, string>();
   const fields: Field[] = [];
   /** Body configuration, held back until every group exists. */
   const bodyLines: string[] = [];
@@ -299,21 +305,13 @@ export function generateSceneLayout(
   const moduleNames = new Set<string>([
     "Phaser",
     "ScriptHost",
-    "sceneData",
     `${cls}Layout`,
-    `${cls}Contacts`,
     `preload${cls}`,
     `create${cls}`,
-    "playContactCues",
     ...usedPrefabs(project, scene).map(className),
   ]);
 
   const hasScripts = scene.objects.some((o) => scriptsOf(resolveObject(project, o)).length > 0);
-  const hasCues = scene.objects.some((o) => !!resolveObject(project, o).sounds?.overlap);
-  const hasTiles = scene.layers.some(
-    (l) => l.kind === "tile" && project.assets.some((a) => a.id === (l as TileLayer).tilesetId),
-  );
-
   // ---- preload ----
   const P: string[] = [];
   if (!manifest.length) P.push(`  // No assets referenced by this scene.`);
@@ -329,6 +327,8 @@ export function generateSceneLayout(
       P.push(`  scene.load.atlas(${q(entry.key)}, ${q(path)}, ${q(path.replace(/\.\w+$/, ".atlas.json"))});`);
     } else if (entry.type === "audio") {
       P.push(`  scene.load.audio(${q(entry.key)}, ${q(path)});`);
+    } else if (entry.type === "tilemap") {
+      P.push(`  scene.load.tilemapTiledJSON(${q(entry.key)}, ${q(path)});`);
     } else {
       const note = asset?.generated ? "  // editor placeholder — replace with real art" : "";
       P.push(`  scene.load.image(${q(entry.key)}, ${q(path)});${note}`);
@@ -360,33 +360,43 @@ export function generateSceneLayout(
   scene.layers.forEach((layer, depth) => {
     if (layer.kind === "tile") {
       const tile = layer as TileLayer;
-      const tileset = project.assets.find((a) => a.id === tile.tilesetId);
-      if (!tileset) return;
+      const asset = project.assets.find((a) => a.kind === "tilemap" && a.key === tile.map);
+      const info = asset?.tilemap;
+      // A layer whose map has gone, or was renamed out from under it in Tiled,
+      // is skipped rather than emitted as a call that throws at run time. The
+      // editor says so where the layer is listed.
+      if (!info || !info.layers.includes(tile.layer)) return;
+
+      let mv = mapVars.get(tile.map);
+      if (!mv) {
+        mv = identifier(`${tile.map}Map`, used);
+        used.add(`${mv}Tiles`);
+        mapVars.set(tile.map, mv);
+        L.push(`  // ${asset.path} — authored in Tiled`);
+        L.push(`  const ${mv} = scene.make.tilemap({ key: ${q(tile.map)} });`);
+        const sets = info.tilesets.filter((t) => t.image);
+        L.push(`  const ${mv}Tiles = [`);
+        for (const set of sets) {
+          L.push(`    ${mv}.addTilesetImage(${q(set.name)}, ${q(set.image!)})${ts ? "!" : ""},`);
+        }
+        L.push(`  ];`);
+      }
+
       const v = identifier(tile.name, used);
-      for (const suffix of ["Data", "Map", "Tiles"]) used.add(`${v}${suffix}`);
-      tileVars.push({ name: tile.name, v });
-      fields.push({ name: v, type: "Phaser.Tilemaps.TilemapLayer", doc: `Tile layer "${tile.name}".` });
+      fields.push({
+        name: v,
+        type: "Phaser.Tilemaps.TilemapLayer",
+        doc: `Tile layer "${tile.layer}" of ${asset.path}.`,
+      });
       L.push(`  // layer ${depth}: ${tile.name} (tiles)`);
-      // Tile data stays in the .scene.json; this reads it back so the source
-      // does not carry thousands of literal numbers.
-      L.push(
-        `  const ${v}Data = ${ts ? `(sceneData.layers[${depth}] as { data: number[][] })` : `sceneData.layers[${depth}]`}.data;`,
-      );
-      L.push(
-        `  const ${v}Map = scene.make.tilemap({ data: ${v}Data, tileWidth: ${tile.tileWidth}, tileHeight: ${tile.tileHeight} });`,
-      );
-      L.push(
-        `  const ${v}Tiles = ${v}Map.addTilesetImage(${q(tileset.key)}, ${q(tileset.key)}, ${tileset.frameWidth ?? tile.tileWidth}, ${tileset.frameHeight ?? tile.tileHeight}, ${tileset.margin ?? 0}, ${tileset.spacing ?? 0})${ts ? "!" : ""};`,
-      );
-      L.push(
-        `  const ${v} = ${v}Map.createLayer(0, ${v}Tiles, 0, 0)${ts ? " as Phaser.Tilemaps.TilemapLayer" : ""};`,
-      );
+      L.push(`  const ${v} = ${mv}.createLayer(${q(tile.layer)}, ${mv}Tiles, 0, 0)${ts ? "!" : ""};`);
       L.push(`  ${v}.setDepth(${depth});`);
       // Named, so a lookup by name finds it in the running game too.
       L.push(`  ${v}.setName(${q(tile.name)});`);
       if (!layer.visible) L.push(`  ${v}.setVisible(false);`);
-      const collides = tileset.tileCollides ?? [];
-      if (collides.length) L.push(`  ${v}.setCollision([${collides.join(", ")}]);`);
+      // Which tiles are solid is said in Tiled, on the tile. Nothing collides
+      // with the layer until your code adds a collider for it.
+      if (info.collides) L.push(`  ${v}.setCollisionByProperty({ ${COLLIDES_PROPERTY}: true });`);
       L.push(``);
       return;
     }
@@ -446,7 +456,6 @@ export function generateSceneLayout(
         });
       }
 
-      if (obj.sounds?.overlap) L.push(`  ${v}.setData("__sfxOverlap", ${q(obj.sounds.overlap)});`);
       if (obj.sounds?.spawn) L.push(`  scene.sound.play(${q(obj.sounds.spawn)});`);
 
       emitScripts(L, v, obj, scriptImports, moduleNames, opts);
@@ -463,10 +472,11 @@ export function generateSceneLayout(
   // can never push an object off the identifier the author gave it.
   for (const [group, wanted] of groupVars) groupVars.set(group, identifier(wanted, used));
 
-  // ---- groups + colliders ----
-  const pairs: { key: string; a: string; b: string; rule: CollisionRule }[] = [];
+  // ---- groups ----
+  // Membership only. A group is how the scene's code names "every brick"; what
+  // happens when the ball meets one is that code's to say.
   if (groupVars.size) {
-    L.push(`  // collision groups`);
+    L.push(`  // groups`);
     for (const [group, gv] of groupVars) {
       const members = scene.objects
         .map((o) => resolveObject(project, o))
@@ -479,44 +489,6 @@ export function generateSceneLayout(
       L.push(`  // bodies, after their groups: a group applies its own defaults`);
       L.push(`  // to every child it takes, and would overwrite these.`);
       L.push(...bodyLines);
-      L.push(``);
-    }
-
-    const emitted = new Set<string>();
-    const pairKeys = new Set<string>();
-    const pairLines: string[] = [];
-    for (const [a, row] of Object.entries(project.collision ?? {})) {
-      for (const [b, rule] of Object.entries(row ?? {})) {
-        if (rule === "ignore") continue;
-        if (!groupVars.has(a) || !groupVars.has(b)) continue;
-        const id = [a, b].sort().join("|");
-        if (emitted.has(id)) continue;
-        emitted.add(id);
-        const key = identifier(`${lowerFirst(className(a))}${className(b)}`, pairKeys);
-        pairs.push({ key, a, b, rule });
-        const fn = rule === "overlap" ? "overlap" : "collider";
-        pairLines.push(`  scene.physics.add.${fn}(${groupVars.get(a)}, ${groupVars.get(b)}, (a, b) => {`);
-        // Cues authored on either object. Anything conditional is behaviour,
-        // and belongs in the hook or in a script.
-        if (hasCues) pairLines.push(`    playContactCues(scene, a, b);`);
-        // The scripts on either object hear about it, so behaviour attached to
-        // a PREFAB reaches every instance without the scene naming any of them.
-        if (hasScripts) pairLines.push(`    scripts.contact(a, b, ${q(rule)});`);
-        pairLines.push(`    contacts.${key}?.call(scene, a, b);`);
-        pairLines.push(`  });`);
-      }
-    }
-    if (pairLines.length) {
-      L.push(`  // collision matrix (authored once, in the project)`);
-      L.push(...pairLines);
-      L.push(``);
-    }
-    if (tileVars.length) {
-      for (const layer of tileVars) {
-        for (const gv of groupVars.values()) {
-          L.push(`  scene.physics.add.collider(${gv}, ${layer.v});`);
-        }
-      }
       L.push(``);
     }
   } else if (bodyLines.length) {
@@ -567,6 +539,9 @@ export function generateSceneLayout(
     groupEntries.length
       ? `groups: { ${groupEntries.map((g) => (g.key === g.gv ? g.gv : `${g.key}: ${g.gv}`)).join(", ")} }`
       : `groups: {}`,
+    ...(mapVars.size
+      ? [`maps: { ${[...mapVars].map(([key, mv]) => `${propertyKey(key)}: ${mv}`).join(", ")} }`]
+      : []),
     ...(hasScripts ? ["scripts"] : []),
   ];
   L.push(`  return {`);
@@ -580,11 +555,6 @@ export function generateSceneLayout(
   out.push(`// Every save in the editor rewrites this file. Your code lives in`);
   out.push(`// ./${cls}.${lang}, which Mosaic wrote once and will not touch again.`);
   out.push(`import Phaser from "phaser";`);
-  if (hasTiles) {
-    out.push(
-      `import sceneData from "./${scene.key}.scene.json"${ts ? "" : ` with { type: "json" }`};`,
-    );
-  }
   const layoutFile = sceneLayoutPath(scene.key, lang);
   for (const name of [...usedPrefabClasses].sort()) {
     const source = resolvePrefab(project, name)?.source;
@@ -618,33 +588,23 @@ export function generateSceneLayout(
       out.push(`  /** ${field.doc.replace(/\*\//g, "*\\/")} */`);
       out.push(`  ${field.name}: ${field.type};`);
     }
-    out.push(`  /** The project's collision groups that have members in this scene. */`);
+    out.push(`  /** The project's groups that have members in this scene. */`);
     out.push(
       groupEntries.length
         ? `  groups: { ${groupEntries.map((g) => `${g.key}: Phaser.Physics.Arcade.Group`).join("; ")} };`
         : `  groups: {};`,
     );
+    if (mapVars.size) {
+      out.push(`  /** The Tiled maps themselves — for object layers, tile lookups and the rest. */`);
+      out.push(
+        `  maps: { ${[...mapVars.keys()].map((key) => `${propertyKey(key)}: Phaser.Tilemaps.Tilemap`).join("; ")} };`,
+      );
+    }
     if (hasScripts) {
       out.push(`  /** Runs the script components attached in the editor. */`);
       out.push(`  scripts: ScriptHost;`);
     }
     out.push(`}`);
-    out.push(``);
-    out.push(`/**`);
-    out.push(` * Called when two groups the collision matrix pairs touch. Physics has`);
-    out.push(` * already responded; this is where you find out. \`this\` is the scene.`);
-    out.push(` */`);
-    if (pairs.length) {
-      out.push(`export interface ${cls}Contacts {`);
-      for (const pair of pairs) {
-        out.push(`  /** ${pair.a} × ${pair.b} — "${pair.rule}" in the collision matrix. */`);
-        out.push(`  ${pair.key}?: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback;`);
-      }
-      out.push(`}`);
-    } else {
-      out.push(`// No pair in the matrix has members in this scene yet, so there is nothing to hook.`);
-      out.push(`export type ${cls}Contacts = Record<string, never>;`);
-    }
     out.push(``);
   }
 
@@ -656,31 +616,12 @@ export function generateSceneLayout(
   out.push(`/** Builds the scene as authored and hands the objects back. Call from create(). */`);
   out.push(
     ts
-      ? `export function create${cls}(scene: Phaser.Scene, contacts: ${cls}Contacts = {}): ${cls}Layout {`
-      : `export function create${cls}(scene, contacts = {}) {`,
+      ? `export function create${cls}(scene: Phaser.Scene): ${cls}Layout {`
+      : `export function create${cls}(scene) {`,
   );
-  // The parameter stays when nothing uses it, so a scene that passes hooks
-  // keeps compiling while the matrix is being filled in.
-  if (!pairs.length) out.push(`  void contacts;`);
   out.push(...L);
   out.push(`}`);
 
-  if (hasCues && pairs.length) {
-    out.push(``);
-    out.push(`/** Plays the contact cue either object declared, if it has one. */`);
-    out.push(
-      ts
-        ? `function playContactCues(scene: Phaser.Scene, ...parts: unknown[]): void {`
-        : `function playContactCues(scene, ...parts) {`,
-    );
-    out.push(`  for (const part of parts) {`);
-    out.push(
-      `    const key = ${ts ? "(part as Phaser.GameObjects.GameObject)" : "part"}?.getData?.("__sfxOverlap");`,
-    );
-    out.push(`    if (typeof key === "string" && scene.cache.audio.exists(key)) scene.sound.play(key);`);
-    out.push(`  }`);
-    out.push(`}`);
-  }
   out.push(``);
   return out.join("\n");
 }

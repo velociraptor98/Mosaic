@@ -3,7 +3,6 @@ import {
   diffNodes,
   isOverridden,
   resolvePrefab,
-  same,
   variantsOf,
 } from "./prefabs";
 import type { PrefabDef, ProjectData, SceneObject } from "./types";
@@ -297,9 +296,4 @@ export function prefabUsage(
     counts.set(entry.scene, row);
   }
   return [...counts.values()];
-}
-
-/** True when two definitions would resolve to the same thing. */
-export function definitionsMatch(a: PrefabDef, b: PrefabDef): boolean {
-  return same(a, b);
 }

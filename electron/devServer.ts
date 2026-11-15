@@ -95,7 +95,13 @@ export async function startDevServer(root: string): Promise<DevServerResult> {
         : // A login shell, so the PATH is the one the user's terminal has. An
           // app launched from the dock inherits almost none of it, and `npm`
           // installed through a version manager is simply not found.
-          spawn(process.env.SHELL || "/bin/sh", ["-lc", command], {
+          //
+          // The `cat` is a dead-man's switch. It reads the stdin pipe this
+          // process holds open, so it returns the moment Mosaic is gone — quit,
+          // crashed or killed outright, none of which a signal handler can be
+          // relied on to see — and `kill 0` then ends the whole group. Without
+          // it the server outlives the editor and keeps its port.
+          spawn(process.env.SHELL || "/bin/sh", ["-lc", `(${command}) & cat >/dev/null; kill 0`], {
             cwd: root,
             env,
             // Its own process group, so stopping takes the bundler with it and

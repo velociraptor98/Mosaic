@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
-import { generateFiles } from "../../src/editor/export/generate";
+import { generateProjectFiles } from "../../src/editor/export/generate";
 import { DEFAULT_OPTIONS, planScaffold } from "../../src/editor/project/scaffold";
 import { projectToFiles } from "../../src/editor/project/serialize";
 import { ProjectStore } from "../../src/editor/store/project";
@@ -237,12 +237,11 @@ export function buildAnimLab(location: string, name = "Anim Lab"): { root: strin
 
   write(scriptFilePath("Walker"), WALKER_SCRIPT);
   for (const file of projectToFiles(store.project)) write(file.rel, file.contents);
-  for (const file of generateFiles(store.project, store.scene!, "tsSceneClass")) {
-    const isScene = file.path.startsWith("src/scenes/");
-    write(
-      isScene ? "src/scenes/Level_01.ts" : file.path,
-      isScene ? file.contents.replace("export class Level_01Scene", "export class Level_01") : file.contents,
-    );
+  // The same files a save writes: the layout is rewritten, and a class that is
+  // "yours" is written only if the scaffold has not already put one there.
+  for (const file of generateProjectFiles(store.project)) {
+    if (file.owner === "yours" && files.includes(file.path)) continue;
+    write(file.path, file.contents);
   }
 
   return { root: plan.root, files: files.length };

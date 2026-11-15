@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { TILE_DEFS } from "../../shared/definitions";
 import {
   getPath,
@@ -77,17 +76,8 @@ function sharedValue<T>(objects: SceneObject[], path: string): T | undefined {
 }
 
 function ObjectTab() {
-  const { store, playtest } = useEditor();
+  const { store } = useEditor();
   const selection = store.selection;
-  const [, forceTick] = useState(0);
-
-  // While the game runs the inspector binds to the LIVE instance, so tuning
-  // happens against the running game rather than the saved scene.
-  useEffect(() => {
-    if (!playtest.playing) return;
-    const t = window.setInterval(() => forceTick((n) => n + 1), 120);
-    return () => window.clearInterval(t);
-  }, [playtest.playing]);
 
   if (!selection.length) {
     return (
@@ -101,7 +91,6 @@ function ObjectTab() {
   const obj = selection[0];
   const prefab = resolvePrefab(store.project, obj.prefab);
   const resolved = resolveObject(store.project, obj);
-  const runtime = playtest.playing ? playtest.readRuntime(obj.id) : null;
   const owners = selection
     .map((o) => resolvePrefab(store.project, o.prefab))
     .filter((p): p is NonNullable<typeof p> => !!p);
@@ -114,7 +103,7 @@ function ObjectTab() {
    * them expose, because a field one of them owns is not editable for the set.
    */
   const lockedBy = (path: string): string | undefined => {
-    if (playtest.playing || !owners.length) return undefined;
+    if (!owners.length) return undefined;
     const blocking = owners.filter((p) => !isExposed(p, path));
     if (!blocking.length) return undefined;
     const names = [...new Set(blocking.map((p) => p.name))].join(", ");
@@ -122,11 +111,6 @@ function ObjectTab() {
   };
 
   const commit = (path: string, value: unknown, label?: string) => {
-    if (playtest.playing) {
-      playtest.setRuntimeProp(obj.id, path, value);
-      store.setStatus(`Runtime edit (volatile): ${obj.name}.${path}`);
-      return;
-    }
     if (multi) store.setObjectsProp(selection.map((o) => o.id), path, value, label);
     else store.setObjectProp(obj.id, path, value, label);
   };
@@ -135,9 +119,7 @@ function ObjectTab() {
   const revert = (path: string) => store.revertOverride(obj.id, path);
 
   const num = (path: string, label: string, step = 1) => {
-    const value = playtest.playing && runtime && path in runtime
-      ? Number(runtime[path])
-      : (sharedValue<number>(selection, path) ?? 0);
+    const value = sharedValue<number>(selection, path) ?? 0;
     return (
       <NumberField
         key={path}
@@ -175,13 +157,6 @@ function ObjectTab() {
         </>
       )}
 
-      {playtest.playing && (
-        <div className="banner volatile">
-          Bound to the running instance. Edits apply immediately and are marked
-          <strong> volatile</strong> — stopping offers to promote them.
-        </div>
-      )}
-
       <div className="section-title">Transform</div>
       <div className="grid2">
         {num("x", "X")}
@@ -200,17 +175,6 @@ function ObjectTab() {
         onRevert={() => revert("visible")}
         onCommit={(v) => commit("visible", v, "Toggle visibility")}
       />
-
-      {runtime && (
-        <>
-          <div className="section-title">Runtime</div>
-          <div className="readout">
-            <span>vx {String(runtime.velocityX)}</span>
-            <span>vy {String(runtime.velocityY)}</span>
-            <span>onFloor {String(runtime.onFloor)}</span>
-          </div>
-        </>
-      )}
 
       {!multi && resolved.text && (
         <>

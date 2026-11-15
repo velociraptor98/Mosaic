@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { generateFiles } from "../../src/editor/export/generate";
+import { generateProjectFiles } from "../../src/editor/export/generate";
 import { DEFAULT_OPTIONS, planScaffold } from "../../src/editor/project/scaffold";
 import { projectToFiles } from "../../src/editor/project/serialize";
 import { ProjectStore } from "../../src/editor/store/project";
@@ -26,7 +26,7 @@ import { GAME_SCRIPTS } from "./scripts";
  *
  * So every byte here comes out of the editor's own code — `planScaffold` plans
  * the folder, `ProjectStore` performs each edit as a real undoable transaction,
- * `projectToFiles` and `generateFiles` write the result. There is no
+ * `projectToFiles` and `generateProjectFiles` write the result. There is no
  * script-only path into the project format: if the editor cannot express
  * something, neither can this, and the places where that bit are recorded in
  * the step log rather than worked around.
@@ -532,30 +532,26 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
   // -------------------------------------------------------------- 13. write
   write("README.md", readme(steps, bricks));
   for (const file of projectToFiles(store.project)) write(file.rel, file.contents);
-  for (const file of generateFiles(store.project, store.scene!, "tsSceneClass")) {
-    // The scaffold named the scene class Level_01 and main.ts imports it by
-    // that name. Writing Level_01Scene.ts beside it would leave a second,
-    // stale copy that nothing loads.
-    const isScene = file.path.startsWith("src/scenes/");
-    write(
-      isScene ? "src/scenes/Level_01.ts" : file.path,
-      isScene
-        ? file.contents.replace("export class Level_01Scene", "export class Level_01")
-        : file.contents,
-    );
+  // The same files a save writes: the layout is rewritten, and a class that is
+  // "yours" is written only if the scaffold has not already put one there.
+  for (const file of generateProjectFiles(store.project)) {
+    if (file.owner === "yours" && files.some((f) => f.rel === file.path)) continue;
+    write(file.path, file.contents);
   }
 
   step({
     n: "13",
-    title: "Save, and export the scene class",
+    title: "Save — the layout is written with it",
     body:
       `Saving writes plain JSON: the manifest, the scene, and one file per prefab under ` +
-      `src/prefabs/. Export then emits the Phaser scene class beside it, plus a class per prefab — ` +
-      `six brick classes, one per variant, each constructing its own texture and body.\n\n` +
-      `The scene CONSTRUCTS those classes, so behaviour authored on a prefab actually runs. ` +
-      `Hand-written code inside a // <keep> region survives every later re-export.`,
-    editor: "Export scene… → both · or ⌘S to save the folder",
-    api: `projectToFiles(store.project)\ngenerateFiles(store.project, scene, "tsSceneClass")`,
+      `src/prefabs/. The same save writes a *.layout.ts beside each — generated, rewritten every ` +
+      `time, never edited — and a class per scene and per prefab that is written once and is ` +
+      `yours from then on.\n\n` +
+      `The scene layout CONSTRUCTS the prefab classes, so behaviour written on one actually runs, ` +
+      `and the five variants extend Brick rather than restating it. Nothing is merged, so there ` +
+      `is nothing to protect with markers.`,
+    editor: "⌘S — or nothing at all: the folder autosaves",
+    api: `projectToFiles(store.project)\ngenerateProjectFiles(store.project)`,
   });
 
   return {
@@ -596,21 +592,20 @@ variants, and every behaviour is a script component whose tunable fields are
 \`@property\` declarations the editor fills in.
 
 It exists to answer a question rather than to be a game — can a whole, real,
-already-written Phaser game be expressed in this editor's model, and does what
-comes out the far end actually run? Both are checked in CI:
-
-| command | what it proves |
-|---|---|
-| \`npm run breakout\` (repo root) | the project can be authored through the editor's own API |
-| \`node scripts/verify-export.mjs breakout\` | the generated code typechecks and bundles |
-| \`node scripts/parity/run.mjs breakout\` | the editor's play-test and the shipped build agree |
-| \`node scripts/breakout/playtest.mjs\` | the game is playable: bricks break, lives are lost, the round ends |
+already-written Phaser game be laid out in this editor and still run as an
+ordinary Phaser project? \`npm run breakout\` at the repo root rebuilds it by
+driving the editor's own API.
 
 ## Layout
 
-    src/scenes/Level_01.scene.json   the editor's source of truth
-    src/scenes/Level_01.ts           generated from it — edit inside // <keep> markers
-    src/prefabs/Brick*.ts            one class per prefab; the five variants are diffs
+One rule: **\`*.layout.ts\` is generated, everything else is yours.**
+
+    src/main.ts                      the game config and scene list — yours
+    src/scenes/Level_01.ts           the scene class — yours
+    src/scenes/Level_01.layout.ts    what the editor placed — generated on save
+    src/scenes/Level_01.scene.json   the data the editor edits
+    src/prefabs/Brick*.ts            a class per prefab — yours; variants extend Brick
+    src/prefabs/Brick*.layout.ts     each prefab's art and body — generated
     src/scripts/                     ScriptComponent + the four behaviours
     assets/                          art, copied in by the editor
     mosaic.config.json               canvas, tile size, scale mode, physics

@@ -12,10 +12,10 @@ export const IPC = {
   createFolder: "mosaic:createFolder",
   readProjectFiles: "mosaic:readProjectFiles",
   writeFiles: "mosaic:writeFiles",
+  removeFiles: "mosaic:removeFiles",
   readText: "mosaic:readText",
   readScripts: "mosaic:readScripts",
   openInEditor: "mosaic:openInEditor",
-  bundleScripts: "mosaic:bundleScripts",
   importAssets: "mosaic:importAssets",
   copyAssets: "mosaic:copyAssets",
   watch: "mosaic:watch",
@@ -91,32 +91,6 @@ export interface ScriptFileIpc {
   rel: string;
   contents: string;
   modified: number;
-}
-
-/** One class the renderer wants compiled into the play-test bundle. */
-export interface ScriptEntry {
-  /** Project-relative POSIX path. */
-  src: string;
-  className: string;
-  /**
-   * The name the module exports it under, when that differs from the class
-   * name. `"default"` for `export default class` — the form the Phaser
-   * examples use throughout, and one a named import cannot reach.
-   */
-  exportName?: string;
-}
-
-/**
- * A compiled bundle of the project's script classes, as an IIFE that assigns
- * `MosaicScripts` and takes the editor's Phaser instance as `__mosaicPhaser`.
- */
-export interface ScriptBundle {
-  code: string | null;
-  /** Set when the project's code did not compile. */
-  error?: string;
-  warnings: string[];
-  /** Project-relative paths that went into the bundle. */
-  modules: string[];
 }
 
 /** What happened when the renderer asked to open a file outside Mosaic. */
@@ -248,13 +222,16 @@ export interface MosaicApi {
   createFolder(): Promise<ProjectFolder | null>;
   readProjectFiles(root: string): Promise<ProjectFiles | null>;
   writeFiles(root: string, files: WriteRequest[]): Promise<WriteResultIpc>;
+  /**
+   * Deletes files Mosaic itself wrote for a scene or prefab that no longer
+   * exists. Anything that is not scene data or a generated layout is refused.
+   */
+  removeFiles(root: string, rels: string[]): Promise<string[]>;
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFileIpc[]>;
   /** Opens a project file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
-  /** Compiles the project's script classes for the play-test. */
-  bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
   /** Files that construct a `Phaser.Game` — the candidate import entries. */
   findGameEntries(root: string): Promise<string[]>;
   /** Runs one of them and reports what its scenes built. */
@@ -296,8 +273,7 @@ export interface MosaicApi {
  * One scene, as it existed the moment its `create()` returned.
  *
  * Deliberately untyped beyond this: the renderer owns the mapping into Mosaic's
- * model, and the main process stays dumb about what a scene means — the same
- * split `bundleScripts` already keeps.
+ * model, and the main process stays dumb about what a scene means.
  */
 export interface SceneRecording {
   ok: boolean;

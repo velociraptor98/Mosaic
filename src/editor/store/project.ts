@@ -33,7 +33,6 @@ import type { ScriptRegistry } from "../scripts/registry";
 import type {
   AnimDef,
   AssetDef,
-  CollisionRule,
   Layer,
   ObjectLayer,
   PrefabDef,
@@ -58,9 +57,10 @@ import {
   makeTileLayer,
   type TemplateId,
 } from "./templates";
+import { tiledFromDataUrl, type TiledMap } from "../../shared/tiled";
 import { UndoStack, type SliceChange } from "./undo";
 
-export type Tool = "select" | "place" | "brush" | "rect" | "erase";
+export type Tool = "select" | "place";
 export type LeftTab = "project" | "outliner" | "layers";
 export type DockTab = "assets" | "anim" | "scripts";
 export type InspectorTab =
@@ -120,7 +120,6 @@ export interface ReviewQueue {
 export interface UiState {
   tool: Tool;
   placement: Placement | null;
-  brush: { tilesetId: string; tileId: number } | null;
   snap: boolean;
   showGrid: boolean;
   showBodies: boolean;
@@ -149,9 +148,11 @@ export interface UiState {
   review: ReviewQueue | null;
 }
 
-const STORAGE_KEY = "mosaic:project:v1";
+// v2: tile layers reference Tiled maps. A browser project saved before that
+// holds painted tile data nothing reads any more, so it is not carried over.
+const STORAGE_KEY = "mosaic:project:v2";
 /** Pre-rename key, read once so an existing project survives the rename. */
-const LEGACY_STORAGE_KEYS = ["phaser-scene-editor:project:v2"];
+const LEGACY_STORAGE_KEYS: string[] = [];
 
 /**
  * The editor's single source of truth outside the Phaser canvas.
@@ -175,7 +176,6 @@ export class ProjectStore {
   ui: UiState = {
     tool: "select",
     placement: null,
-    brush: null,
     snap: true,
     showGrid: true,
     showBodies: false,
@@ -419,7 +419,6 @@ export class ProjectStore {
       "assets",
       "anims",
       "groups",
-      "collision",
       ...this.project.scenes.map((s) => `scene:${s.key}`),
     ];
   }
@@ -446,8 +445,6 @@ export class ProjectStore {
         return this.project.anims;
       case "groups":
         return this.project.groups;
-      case "collision":
-        return this.project.collision;
       default:
         return null;
     }
@@ -500,9 +497,6 @@ export class ProjectStore {
       case "groups":
         this.project.groups = value as string[];
         break;
-      case "collision":
-        this.project.collision = value as ProjectData["collision"];
-        break;
     }
   }
 
@@ -541,6 +535,11 @@ export class ProjectStore {
     this.transact(`Create scene ${key}`, () => {
       const made = createSceneFromTemplate(key, name || key, template, this.project.config);
       this.project.scenes.push(made.scene);
+      // The terrain a template stands on is a Tiled map of its own.
+      for (const asset of made.assets) {
+        if (this.project.assets.some((a) => a.key === asset.key)) continue;
+        this.project.assets.push(asset);
+      }
       // A template's starter prefabs are content, so a second scene made from
       // the same template reuses the ones the project already has.
       for (const prefab of made.prefabs) {
@@ -549,6 +548,7 @@ export class ProjectStore {
         }
       }
     });
+    this.hydrateTilemaps();
     this.activateScene(key);
     this.setStatus(`Created src/scenes/${key}.scene.json`);
     return key;
@@ -620,10 +620,7 @@ export class ProjectStore {
   setActiveLayer(id: string): void {
     this.view.activeLayerId = id;
     const layer = this.scene?.layers.find((l) => l.id === id);
-    if (layer?.kind === "tile") {
-      this.ui.inspectorTab = "tile";
-      if (!this.ui.brush) this.ui.brush = { tilesetId: layer.tilesetId, tileId: 0 };
-    }
+    if (layer?.kind === "tile") this.ui.inspectorTab = "tile";
     this.emit();
   }
 
@@ -631,32 +628,20 @@ export class ProjectStore {
   // Workflow 3 — layers
   // -------------------------------------------------------------------
 
-  addLayer(kind: "tile" | "object", opts?: { name?: string; tilesetId?: string }): void {
+  addLayer(name = "Objects"): void {
     const scene = this.scene;
     if (!scene) return;
     const names = scene.layers.map((l) => l.name);
-    this.transact(`Add ${kind} layer`, () => {
-      if (kind === "tile") {
-        const layer = makeTileLayer(uniqueName(opts?.name ?? "Tiles", names));
-        layer.cols = Math.ceil(scene.settings.width / layer.tileWidth);
-        layer.rows = Math.ceil(scene.settings.height / layer.tileHeight);
-        layer.data = Array.from({ length: layer.rows }, () =>
-          Array<number>(layer.cols).fill(-1),
-        );
-        if (opts?.tilesetId) layer.tilesetId = opts.tilesetId;
-        scene.layers.push(layer);
-        this.view.activeLayerId = layer.id;
-      } else {
-        const layer: ObjectLayer = {
-          id: uid("layer"),
-          name: uniqueName(opts?.name ?? "Objects", names),
-          kind: "object",
-          visible: true,
-          locked: false,
-        };
-        scene.layers.push(layer);
-        this.view.activeLayerId = layer.id;
-      }
+    this.transact("Add object layer", () => {
+      const layer: ObjectLayer = {
+        id: uid("layer"),
+        name: uniqueName(name, names),
+        kind: "object",
+        visible: true,
+        locked: false,
+      };
+      scene.layers.push(layer);
+      this.view.activeLayerId = layer.id;
     });
   }
 
@@ -692,57 +677,129 @@ export class ProjectStore {
   }
 
   // -------------------------------------------------------------------
-  // Workflow 3 — tiles
+  // Workflow 3 — tilemaps
+  //
+  // Tiles are authored in Tiled. What lives here is the map's place in a
+  // scene: which map, and where each of its layers sits in the draw order.
   // -------------------------------------------------------------------
 
-  putTile(layerId: string, col: number, row: number, index: number): boolean {
-    const scene = this.scene;
-    const layer = scene?.layers.find((l) => l.id === layerId);
-    if (!scene || !layer || layer.kind !== "tile") return false;
-    if (layer.locked || !layer.visible) return false;
-    if (col < 0 || row < 0 || col >= layer.cols || row >= layer.rows) return false;
-    if (layer.data[row][col] === index) return false;
-    this.transact("Paint tiles", () => {
-      layer.data[row][col] = index;
-    });
-    return true;
+  /** Parsed maps by asset key. Derived from the files; never saved. */
+  private tilemaps = new Map<string, TiledMap>();
+  private tilemapRevisions = new Map<string, number>();
+
+  tilemapData(key: string): TiledMap | undefined {
+    return this.tilemaps.get(key);
   }
 
-  rectFill(
-    layerId: string,
-    a: { col: number; row: number },
-    b: { col: number; row: number },
-    index: number,
-  ): void {
-    const scene = this.scene;
-    const layer = scene?.layers.find((l) => l.id === layerId);
-    if (!scene || !layer || layer.kind !== "tile" || layer.locked) return;
-    const c0 = Math.max(0, Math.min(a.col, b.col));
-    const c1 = Math.min(layer.cols - 1, Math.max(a.col, b.col));
-    const r0 = Math.max(0, Math.min(a.row, b.row));
-    const r1 = Math.min(layer.rows - 1, Math.max(a.row, b.row));
-    this.transact(index < 0 ? "Erase tiles" : "Fill tiles", () => {
-      for (let r = r0; r <= r1; r++) {
-        for (let c = c0; c <= c1; c++) layer.data[r][c] = index;
-      }
-    });
+  /** Bumped whenever a map's contents change, so the canvas knows to rebuild. */
+  tilemapRevision(key: string): number {
+    return this.tilemapRevisions.get(key) ?? 0;
   }
 
-  setBrush(tilesetId: string, tileId: number): void {
-    this.ui.brush = { tilesetId, tileId };
-    if (this.ui.tool !== "rect" && this.ui.tool !== "erase") this.ui.tool = "brush";
+  /** Hands the store a map's contents, as read from disk or from an import. */
+  setTilemap(key: string, map: TiledMap | null): void {
+    if (map) this.tilemaps.set(key, map);
+    else this.tilemaps.delete(key);
+    this.tilemapRevisions.set(key, this.tilemapRevision(key) + 1);
     this.emit();
   }
 
-  toggleTileCollision(assetId: string, tileId: number): void {
-    this.transact("Tile collision flag", () => {
-      const asset = this.project.assets.find((a) => a.id === assetId);
-      if (!asset) return;
-      const list = new Set(asset.tileCollides ?? []);
-      if (list.has(tileId)) list.delete(tileId);
-      else list.add(tileId);
-      asset.tileCollides = [...list].sort((x, y) => x - y);
+  /**
+   * Maps carried inside the project itself — a template's terrain before the
+   * first save, or any map in the browser build, which has no folder to read
+   * one from.
+   */
+  hydrateTilemaps(): void {
+    for (const asset of this.project.assets) {
+      if (asset.kind !== "tilemap" || this.tilemaps.has(asset.key)) continue;
+      const map = tiledFromDataUrl(asset.url);
+      if (map) {
+        this.tilemaps.set(asset.key, map);
+        this.tilemapRevisions.set(asset.key, this.tilemapRevision(asset.key) + 1);
+      }
+    }
+  }
+
+  /**
+   * Puts a Tiled map into the scene: one row in the layer list per tile layer
+   * of the map, at the bottom, in the map's own order. From there they are
+   * reordered like any other layer, which is how an object layer comes to sit
+   * between the ground and the treetops.
+   */
+  addTilemap(key: string): void {
+    const scene = this.scene;
+    const asset = this.project.assets.find((a) => a.kind === "tilemap" && a.key === key);
+    if (!scene || !asset?.tilemap) return;
+    const present = new Set(
+      scene.layers.filter((l) => l.kind === "tile" && l.map === key).map((l) => (l as TileLayer).layer),
+    );
+    const missing = asset.tilemap.layers.filter((name) => !present.has(name));
+    if (!missing.length) {
+      this.setStatus(`Every layer of ${asset.path} is already in this scene`);
+      return;
+    }
+    this.transact(`Add tilemap ${key}`, () => {
+      const names = scene.layers.map((l) => l.name);
+      const added = missing.map((name) => {
+        const layer = makeTileLayer(uniqueName(name, names), key, name);
+        names.push(layer.name);
+        return layer;
+      });
+      scene.layers.unshift(...added);
     });
+    this.setStatus(`Added ${missing.length} layer(s) from ${asset.path}`);
+  }
+
+  /**
+   * Brings every scene's tile layers back in step with the maps as they now
+   * are. A layer added in Tiled appears above its map's others; one deleted or
+   * renamed there is dropped, because there is nothing left for it to draw.
+   *
+   * Runs when the project is read, so it is not an undoable edit — it is the
+   * scene catching up with a file that changed.
+   */
+  reconcileTilemaps(): string[] {
+    const notes: string[] = [];
+    for (const scene of this.project.scenes) {
+      const maps = new Set(
+        scene.layers.filter((l) => l.kind === "tile").map((l) => (l as TileLayer).map),
+      );
+      for (const key of maps) {
+        const info = this.project.assets.find((a) => a.kind === "tilemap" && a.key === key)?.tilemap;
+        // A map that is missing altogether keeps its rows: the file may be
+        // back in a moment, and validation says so in the meantime.
+        if (!info) continue;
+        const before = scene.layers.length;
+        scene.layers = scene.layers.filter(
+          (l) => l.kind !== "tile" || l.map !== key || info.layers.includes(l.layer),
+        );
+        if (scene.layers.length !== before) {
+          notes.push(`${scene.key}: dropped ${before - scene.layers.length} layer(s) no longer in ${key}`);
+        }
+        const present = new Set(
+          scene.layers.filter((l) => l.kind === "tile" && l.map === key).map((l) => (l as TileLayer).layer),
+        );
+        const fresh = info.layers.filter((name) => !present.has(name));
+        if (!fresh.length) continue;
+        const names = scene.layers.map((l) => l.name);
+        let at = -1;
+        scene.layers.forEach((l, i) => {
+          if (l.kind === "tile" && l.map === key) at = i;
+        });
+        for (const name of fresh) {
+          const layer = makeTileLayer(uniqueName(name, names), key, name);
+          names.push(layer.name);
+          scene.layers.splice(++at, 0, layer);
+        }
+        notes.push(`${scene.key}: added ${fresh.length} new layer(s) from ${key}`);
+      }
+      if (!scene.layers.length) {
+        scene.layers.push({ id: uid("layer"), name: "Objects", kind: "object", visible: true, locked: false });
+      }
+      this.ensureView(scene);
+    }
+    if (notes.length) this.emit();
+    return notes;
   }
 
   // -------------------------------------------------------------------
@@ -1981,12 +2038,23 @@ export class ProjectStore {
       }
       for (const layer of scene.layers) {
         if (layer.kind !== "tile") continue;
-        if (!this.project.assets.some((a) => a.id === layer.tilesetId)) {
+        const map = this.project.assets.find((a) => a.kind === "tilemap" && a.key === layer.map);
+        if (!map?.tilemap) {
           issues.push({
             level: "error",
-            message: `${scene.key}/${layer.name}: tileset is missing`,
+            message: `${scene.key}/${layer.name}: tilemap "${layer.map}" is missing`,
+          });
+        } else if (!map.tilemap.layers.includes(layer.layer)) {
+          issues.push({
+            level: "error",
+            message: `${scene.key}/${layer.name}: ${map.path} has no tile layer called "${layer.layer}"`,
           });
         }
+      }
+    }
+    for (const asset of this.project.assets) {
+      for (const issue of asset.tilemap?.issues ?? []) {
+        issues.push({ level: "error", message: `${asset.path}: ${issue}` });
       }
     }
     for (const anim of this.project.anims) {
@@ -1998,17 +2066,8 @@ export class ProjectStore {
   }
 
   // -------------------------------------------------------------------
-  // Workflow 7 — physics
+  // Workflow 7 — groups
   // -------------------------------------------------------------------
-
-  setCollisionRule(a: string, b: string, rule: CollisionRule): void {
-    this.transact("Collision matrix", () => {
-      this.project.collision[a] = this.project.collision[a] ?? {};
-      this.project.collision[b] = this.project.collision[b] ?? {};
-      this.project.collision[a][b] = rule;
-      this.project.collision[b][a] = rule;
-    });
-  }
 
   /**
    * Groups are a taxonomy the project owns, not one the editor supplies. The
@@ -2025,15 +2084,6 @@ export class ProjectStore {
     }
     this.transact(`Rename group ${from}`, () => {
       this.project.groups = this.project.groups.map((g) => (g === from ? clean : g));
-      const matrix = this.project.collision;
-      matrix[clean] = matrix[from] ?? {};
-      delete matrix[from];
-      for (const row of Object.values(matrix)) {
-        if (from in row) {
-          row[clean] = row[from];
-          delete row[from];
-        }
-      }
       // Every object naming the old group follows it, in the same transaction.
       for (const scene of this.project.scenes) {
         for (const obj of scene.objects) if (obj.group === from) obj.group = clean;
@@ -2054,8 +2104,6 @@ export class ProjectStore {
     );
     this.transact(`Remove group ${name}`, () => {
       this.project.groups = this.project.groups.filter((g) => g !== name);
-      delete this.project.collision[name];
-      for (const row of Object.values(this.project.collision)) delete row[name];
       for (const scene of this.project.scenes) {
         for (const obj of scene.objects) if (obj.group === name) delete obj.group;
       }
@@ -2077,12 +2125,6 @@ export class ProjectStore {
     if (!clean || this.project.groups.includes(clean)) return;
     this.transact(`Add group ${clean}`, () => {
       this.project.groups.push(clean);
-      this.project.collision[clean] = {};
-      for (const g of this.project.groups) {
-        this.project.collision[clean][g] = "ignore";
-        this.project.collision[g] = this.project.collision[g] ?? {};
-        this.project.collision[g][clean] = "ignore";
-      }
     });
   }
 
@@ -2095,6 +2137,8 @@ export class ProjectStore {
     this.ui.prefabPlan = null;
     this.ui.review = null;
     this.project = project;
+    this.tilemaps.clear();
+    this.hydrateTilemaps();
     // Folders written before local ids existed have none; give them theirs
     // once, on the way in, so overrides can address parts from here on.
     for (const prefab of project.prefabs) if (prefab.root) ensureLids(prefab.root);

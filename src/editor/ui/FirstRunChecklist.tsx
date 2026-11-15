@@ -44,7 +44,7 @@ function tileCount(scene: { layers: { kind: string }[] } | null): number {
  * reading it. Dismissal is stored per project and never returns.
  */
 export function FirstRunChecklist({ root, installing }: { root: string; installing: boolean }) {
-  const { store, bridge } = useEditor();
+  const { store, playtest } = useEditor();
   useStoreVersion(store);
   const [hidden, setHidden] = useState(() => dismissedFor(root));
   const [ran, setRan] = useState(false);
@@ -59,15 +59,13 @@ export function FirstRunChecklist({ root, installing }: { root: string; installi
     };
   }, [root, store]);
 
-  useEffect(() => {
-    const onPlay = (s: { playing: boolean }) => {
-      if (s.playing) setRan(true);
-    };
-    bridge.on("playtest", onPlay);
-    return () => {
-      bridge.off("playtest", onPlay);
-    };
-  }, [bridge]);
+  useEffect(
+    () =>
+      playtest.subscribe(() => {
+        if (playtest.run) setRan(true);
+      }),
+    [playtest],
+  );
 
   const items = useMemo(() => {
     const scene = store.scene;

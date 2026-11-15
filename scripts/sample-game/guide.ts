@@ -289,16 +289,17 @@ export function renderGuide(result: BuildResult, shots: GuideAssets = {}): strin
     tweak made while it ran — so tuning against a moving game does not mean losing the tuning.
   </p>
   <p>
-    <b>Export scene…</b> emits the Phaser scene class beside the JSON, plus a class per prefab.
-    The scene <em>constructs</em> those prefab classes, so behaviour written on a prefab actually
-    runs in the shipped game:
+    Saving also writes a <code>*.layout.ts</code> beside the JSON — generated, rewritten on
+    every save, never edited — plus a class per scene and per prefab that is written once and is
+    yours from then on. The layout <em>constructs</em> those prefab classes, so behaviour written
+    on a prefab actually runs:
   </p>
-  <pre class="code">const coin_Gold = new Coin_Gold(this, 272, 172);
+  <pre class="code">const coin_Gold = new Coin_Gold(scene, 272, 172);
 coin_Gold.setName("Coin_Gold").setDepth(1);
-this.scripts.add(coin_Gold, new Collectible(), { "points": 50 });</pre>
+scripts.add(coin_Gold, new Collectible(), { points: 50 });</pre>
   <p>
-    Anything written between <code>// &lt;keep&gt;</code> markers survives every later
-    re-export, so the generated file is a place to work rather than a file to fight.
+    Your scene's <code>create()</code> calls <code>createLevel_01(this)</code> and gets every
+    object back by name. Nothing is merged with anything, so there are no markers to work inside.
   </p>
   <h3>From a clean checkout</h3>
   <pre class="code">npm install
@@ -310,9 +311,11 @@ npm run build    # a production bundle in dist/</pre>
     <tr><td class="mono">phaser.editor.json</td><td>The manifest: assets, animations, groups, the collision matrix</td></tr>
     <tr><td class="mono">mosaic.config.json</td><td>Canvas size, tile size, physics — project defaults every scene inherits</td></tr>
     <tr><td class="mono">src/scenes/Level_01.scene.json</td><td>The level. The editor's source of truth</td></tr>
-    <tr><td class="mono">src/scenes/Level_01.ts</td><td>Generated from it; hand-written keep regions survive</td></tr>
+    <tr><td class="mono">src/scenes/Level_01.layout.ts</td><td>Generated from it on every save. Never edited</td></tr>
+    <tr><td class="mono">src/scenes/Level_01.ts</td><td>The scene class. Written once; yours</td></tr>
     <tr><td class="mono">src/prefabs/*.prefab.json</td><td>One file per definition, with its own history in the repo</td></tr>
-    <tr><td class="mono">src/prefabs/*.ts</td><td>The class each definition becomes</td></tr>
+    <tr><td class="mono">src/prefabs/*.layout.ts</td><td>Each definition's art and body, as a base class. Generated</td></tr>
+    <tr><td class="mono">src/prefabs/*.ts</td><td>The class that extends it. Written once; yours</td></tr>
     <tr><td class="mono">src/scripts/*.ts</td><td>Yours. Mosaic reads them and never writes them</td></tr>
   </table>
   <div class="note">
