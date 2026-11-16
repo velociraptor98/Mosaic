@@ -23,11 +23,8 @@ npm install
 
 npm run dev:app     # the desktop app (Electron + Vite dev server)
 npm run dev         # the browser demo at the printed URL
-
-npm run sample      # build the Coin Rush sample by driving the editor
-npm run anim-lab    # build the Anim Lab sample
-npm run breakout    # rebuild Phaser's breakout example as a Mosaic project
-npm run twin-stick  # build the Twin Stick sample, a top-down arena shooter
+npm run sample      # build the test samples into samples/: Coin Run and Holdout
+npm run check       # rebuild them, then open each as the app does: fails if opening would change a byte
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
@@ -36,9 +33,13 @@ npm run pack        # an unsigned .app in release/ (electron-builder --dir)
 npm run dist        # installers: dmg / nsis / AppImage for the host platform
 ```
 
-There is no automated suite at the moment: the previous ones asserted on a
+There is no unit suite at the moment: the previous ones asserted on a
 generator and an in-editor runtime that no longer exist, and were removed with
-them.
+them. `npm run check` is the one automated gate. It opens each sample through
+the real Workspace — with a Node stand-in for the desktop bridge that reads the
+way the main process reads (`electron/projectFiles.ts`) and only records
+writes — and fails on any file that opening and saving would create, change or
+delete.
 
 ## Layout beside code
 
@@ -89,7 +90,7 @@ convention already does:
 ### 1. Project & scenes — `project/workspace.ts`, `project/serialize.ts`, `store/project.ts`
 The editor opens a *folder*, not a file — `readProject(dir)` parses
 `phaser.editor.json`, and chokidar watches the tree and re-reads on change. The
-Project tab lists every scene, prefab, script, asset and animation, with an
+Project tab lists every scene, prefab, source file, asset and animation, with an
 unsaved marker and **the git status of each**. New scenes come from templates (Empty /
 Platformer / Top-down) that write a runnable scene — camera, a Tiled map, a
 player with a body. Keys are derived and collision-free before write.
@@ -112,6 +113,11 @@ The Inspector writes the same values and commits on blur or ⏎.
 Snap targets are the tile grid ∪ the edges of on-screen objects, with a 6px
 *screen-space* threshold divided by zoom so it holds at any magnification.
 Holding **Alt** suspends snapping for a single drag instead of toggling it.
+
+**F** frames the selection, and with nothing selected the whole scene;
+double-clicking a row in the Outliner selects and frames it. It zooms out as far
+as it must to fit and never zooms in past 100% on its own, so finding one crate
+in a big level still shows the level around it.
 
 **Fill grid** (`⌘⇧G`) stamps the selection across a grid in one undoable step,
 defaulting the step to the selection's own footprint. It deliberately adds no
@@ -141,7 +147,9 @@ Each tile layer of a map is **one row in the scene's layer list**, alongside
 the object layers, because draw order must be one ordering and not two. That
 is how an object layer comes to sit between the ground and the treetops. A
 layer added in Tiled appears above its map's others the next time the file is
-read; one renamed or deleted there is dropped.
+read; one renamed or deleted there is dropped. A scene may place only some of a
+map's layers — a title screen drawing just the ground — and a layer it leaves
+out stays out: only a layer new to the map is added.
 
 A tile with the custom property `collides` (bool) is solid: the layout calls
 `setCollisionByProperty({ collides: true })` on the layer. Nothing collides
@@ -167,9 +175,12 @@ place tool and the body editor read them.
 
 Art that arrives **already packed** is read rather than re-cut. Pick a sheet
 and its `.json` together and the image comes in as an atlas carrying the
-packer's own frame names — all three shapes Phaser accepts (JSON hash, JSON
-array, and `textures[0]` multi-atlas), because which one you get is decided by
-the packer and not by the person importing. The document itself never becomes
+packer's own frame names — every shape Phaser loads (JSON hash, JSON array,
+`textures[0]` multi-atlas, and the Starling `.xml` that `load.atlasXML` takes
+and Kenney's packs ship), because which one you get is decided by the packer
+and not by the person importing. The layout loads the JSON Mosaic writes beside
+the sheet; it carries a pivot only for a frame whose pivot was set, because
+Phaser resets the origin to a frame's pivot on every frame change. The document itself never becomes
 an asset of its own: it is metadata about one. Invented names were the whole
 problem — a scene says `frame: "blue1"`, and `frame_7` is not that.
 
@@ -178,7 +189,7 @@ Making one object into many, in seven steps: **promote, isolate, compose,
 expose, vary, place, propagate.**
 
 **There are no engine object types.** An object is art plus the components put
-on it: a texture, maybe a body, maybe scripts. `type` is a rendering hint
+on it: a texture, maybe a body, maybe a class. `type` is a rendering hint
 (`sprite` or `container`) and nothing downstream branches on it. The editor
 ships six *placeholder shapes* — capsule, box, circle, triangle, star, diamond
 — so a new project has something to place before you import art, and a new
@@ -193,6 +204,11 @@ replaced by a copy. The scene node is rewritten in place, **keeping its id**, so
 anything referencing it still resolves. A selection spanning two parents has no
 single root and is refused with the reason; siblings of one parent are relinked
 as instances together.
+
+What the game's code makes and nobody places — a bullet, an explosion, an enemy
+a spawner lets out — starts from art instead: **◆+** on an asset card names the
+prefab, picks the frame and optionally gives it a body, and opens the
+definition on its stage. Nothing lands in a scene.
 
 **Isolate.** `src/prefabs/<Name>.prefab.json` opens as its **own document** on
 an empty stage, with its own undo stack, so nothing you drag can land in a
@@ -244,12 +260,14 @@ meant hand-written code in every scene. The follow call is emitted *after* the
 objects, because a target has to exist before it can be followed, and a camera
 pointed at a name the scene does not contain is a validation error.
 
-**Sound** has one cue — `on spawn` — plus looping scene music. A clip a scene
-names is pulled into its loader manifest. A sound on contact is behaviour, and
-is played from code.
+**Sound** has one cue — `on spawn` — plus looping scene music. A prefab plays
+its cue from its own constructor, so an explosion made with `new` sounds like a
+placed one. Every clip the project has is loaded, as every animation is
+registered: nearly all sound is played by code, and a scene file cannot say
+which. A sound on contact is behaviour, and is played from code.
 
 The line stays where it was: these are the values, not the logic. Anything
-conditional — a sound only when the player is falling — is still a script.
+conditional — a sound only when the player is falling — is still code.
 
 ### 6. Animation timeline — `ui/BottomDock.tsx`, `ui/AnimPreview.tsx`
 The timeline takes over the asset dock so the canvas stays full size. Frames
@@ -264,15 +282,15 @@ because building a sixty-frame clip one click at a time is not a workflow.
 
 The preview runs the **real Phaser animation manager** on the real texture
 bytes, so approved timing is shipped timing. An object names the animation it
-plays on spawn; a missing key is a validation error, not a silent no-op.
+plays on spawn; a missing key is a validation error, not a silent no-op. A
+prefab plays it from its constructor, so `new Explosion(scene, x, y)` from code
+plays it too — which is why the layout registers animations before it builds
+anything.
 
 Every animation the project defines is registered in the exported scene, not
 only the ones an object names in `playOnSpawn`. Nothing in a scene file can say
-what a script plays, and an animation that is merely absent fails at the moment
-it is asked for — so `npm run anim-lab` builds a sample whose whole job is to
-exercise this: a looping walk, a two-frame idle at 2fps, a one-shot with
-per-frame durations, an animation on a prefab that instances inherit and one
-overrides, and an animation played only from a script.
+what your code plays, and an animation that is merely absent fails at the moment
+it is asked for.
 
 ### 7. Physics bodies & groups — `Inspector.tsx` (Physics)
 Bodies are a *section of the object*, not a separate editor: box or circle,
@@ -287,31 +305,38 @@ brick" without naming sixty of them. Every group the project defines is handed
 back, including one this scene places nothing in, because the bullets may all
 be made by code.
 
-Adding to one of those groups at run time works without extra steps:
+An arcade group resets the body settings of anything it takes (gravity,
+immovable, bounce, world-bounds collision) to the group's config. The body's
+shape survives. So the layout creates each group the way you would by hand,
+with the settings its bodies share as config:
 
 ```ts
-groups.enemy.add(Enemy.spawn(this, x, y));
+const enemyGroup = scene.physics.add.group({ allowGravity: false });
+enemyGroup.addMultiple([enemy, enemy_2]);
 ```
 
-An arcade group resets the body settings of anything it takes to the group's
-own defaults: gravity on, immovable off, bounce 0, world-bounds collision off.
-The body's shape survives, but its settings don't. The layout's groups put the
-authored body back with `applyBody()`. An object
-whose depth is still 0 also gets the depth of the layer the group's objects
-were placed on, or the scene's first object layer when none are placed, so it
-doesn't draw under the terrain. A depth your code has already set is kept.
+The bodies counted are the ones placed in the scene plus every prefab tagged
+with the group, since code may make more of those. Adding one at run time is
+then plain Phaser:
+
+```ts
+const enemy = new Enemy(this, x, y);
+groups.enemy.add(enemy);
+enemy.setDepth(player.depth);
+```
+
+A setting the group's bodies disagree on is left out of the config, and the
+layout says so in a comment. Depth is yours to set, as in any Phaser game.
 
 There is no collision matrix. Colliders are written in the scene class:
 
 ```ts
-this.physics.add.collider(groups.ball, groups.brick, (a, b) => scripts.contact(a, b, "collide"));
+this.physics.add.collider(groups.ball, groups.brick, (_ball, brick) => (brick as Brick).hit());
 ```
 
-The callback is optional and is where a script component finds out: passing
-the pair to `scripts.contact` calls `onContact(other, rule)` on the scripts of
-both objects, each handed the other one. So a brick's behaviour lives on the
-Brick prefab and reaches all sixty instances, and there is one collider per
-pair — the one doing the physics is the one that reports it.
+The callback is where an object finds out it was hit: it calls a method on the
+prefab's class. So a brick's behaviour lives on the Brick class and reaches all
+sixty instances, the way it would in any Phaser game.
 
 **World edges** are scene data too. Arcade's bounds are one rectangle with a
 flag per side, and Mosaic used to author only the rectangle — so a game that
@@ -345,14 +370,16 @@ There is no export step. Saving a scene writes its layout, and only the files
 whose bytes changed are written, so moving one sprite reloads one module.
 
 The generator is **pure** — same project in, same bytes out. A scene layout
-emits loads → world → layers bottom-up → groups → bodies → colliders →
-animations → camera → music, and returns the objects. Prefabs become classes
+emits loads → world → animations → layers bottom-up → groups → bodies →
+camera → music, and returns the objects. Prefabs become classes
 **and the layout constructs them** — `new Coin(scene, x, y)` — so behaviour
 written on a prefab's class actually runs. A prefab's layout is a base class
-(`CoinBase`) holding its texture, body and defaults; your `Coin` extends it. A
-variant extends its parent's class — yours, not the generated one — so
-behaviour reaches variants by ordinary inheritance, and the variant restates
-only what it changed.
+(`CoinBase`) holding its texture and body; your `Coin` extends it. A variant
+extends its parent's class — yours, not the generated one — so behaviour
+reaches variants by ordinary inheritance, and the variant restates only what it
+changed. Values set on a variant become field initialisers on its base class
+(`override speed: Enemy["speed"] = 170`), which run after the parent's, so
+`new Enemy_Fast(scene, x, y)` gets them with no Mosaic helper involved.
 
 A scene made in the editor gets its class written once; adding it to the game's
 scene list is yours to do, because `main.ts` is yours. Deleting a scene or a
@@ -373,93 +400,66 @@ and picks the layout up by importing it.
 
 ### 10. Behaviour — `scripts/parse.ts`, `scripts/registry.ts`, `ui/ScriptsTab.tsx`
 **Behaviour lives in your classes.** A prefab's class is an ordinary Phaser
-sprite subclass, and a field it marks `@property` is listed in the Scripts tab
-for every instance:
+sprite subclass, and a field whose doc comment says `@editable` is listed in
+the inspector's Code tab for every instance:
 
 ```ts
 export class Player extends PlayerBase {
-  @property({ min: 0, max: 600 })
+  /** Pixels per second. @editable { min: 0, max: 600 } */
   speed = 220;
 
   override preUpdate(time: number, delta: number) { /* reads this.speed */ }
 }
 ```
 
-A value set there is stored on the object (`props`) and assigned in the layout
-after the constructor runs — `player.speed = 400`. Set on the prefab's
-definition it is the default for every instance; set on an instance it wins. A
+It is a comment, so the class compiles and runs exactly as it would without
+Mosaic: no import, no decorator, no compiler setting, and it works in
+JavaScript. The description becomes the inspector's hint, and the braces take
+`label`, `min`, `max`, `step`, `options` and `hint`. The older `@property(...)`
+decorator is still read, so existing projects keep working.
+
+**Where a value lives decides who sees it**, and `new` always agrees with the
+editor:
+
+| Set where | Stored as | `new Player(scene, x, y)` gets it? |
+|---|---|---|
+| In the class (`speed = 220`) | your code | yes. For a root prefab this *is* the default, so the inspector shows it read-only on the definition, marked "from code" |
+| On a variant's definition | a field initialiser in the variant's generated base class | yes |
+| On a placed instance | `props` in the scene file, assigned after `new` in the layout (`player.speed = 400`) | no, it belongs to that one object |
+
+A value set on a root definition before this rule existed still reaches placed
+instances. The inspector flags it, because `new` doesn't see it, and asks for it
+to be moved into code. A
 value whose field has been removed from the class is kept in the scene file,
 flagged, and left out of the layout rather than assigned to a property that no
 longer exists.
 
-**Script components are the optional second way**, for behaviour that attaches
-to several kinds of object. The rest of this section is about them.
+Mosaic never executes your game code to find out what a class exposes. The
+editor indexes every source file under `src/` when the project opens and keeps
+the index warm with the same watcher that reloads scenes, and `parse.ts` reads
+the declarations **statically**. That is also why the index survives a file
+that does not compile: the fields grey out and the last good metadata stays.
 
-The scene shows what a script does; **the file stays the source of truth**. A
-class in your own `src/` marks fields with `@property`, and Mosaic renders
-those fields in the Scripts tab. The class says what exists; the scene says
-what it is set to. Editing a value writes into `scene.json`, never into
-your `.ts`.
-
-Scene data is `scripts: [{ class, src, enabled, props }]` per object. The
-editor resolves class → file through an index built on project open and kept
-warm by the same watcher that reloads scenes: `readScripts` hands the renderer
-every source file under `src/`, and `parse.ts` reads the declarations out of
-them **statically** — Mosaic never executes your game code to find out what it
-exposes, which is also why the index survives a file that does not compile
-(the fields grey out and the last good metadata stays).
-
-- **Contacts arrive when your collider says so.** A script implements
-  `onContact(other, rule)`; the scene's collider passes the pair to
-  `scripts.contact(a, b, rule)` and both objects' scripts hear about it. A
-  contact that lands before `create()` has run is dropped rather than
-  delivered to a script that has not initialised.
-- **Order is execution order.** Rows run top to bottom, drag or ↑↓ to reorder,
-  and the order is written back to the file. The checkbox is *enabled* state,
-  not deletion: a disabled script keeps its values and is still constructed at
-  runtime, so re-enabling it mid-game just works.
-- **Only declared fields are editable.** `@property` carries type, label,
+- **Only declared fields are editable.** `@editable` carries type, label,
   min/max and enum options; objects and callbacks render read-only with a *code
   only* tag. A field removed from the class keeps its value in the scene file,
-  flagged rather than deleted; a field whose type changed offers a conversion
-  instead of coercing silently.
-- **Attach from what the project has.** The picker lists real exported classes
-  extending `ScriptComponent` — no free-text class names, because an attach
-  that cannot resolve is not worth offering. Abstract and non-exported classes
-  are indexed (a subclass needs them) but not offered. Nothing matches?
-  *Create script…* writes `src/scripts/<Name>.ts` from the stub, indexes it and
-  attaches it in one action. A class already attached asks before duplicating,
-  and duplicates are numbered `#2`.
-- **The Project tab lists them.** Every file under `src/` that declares a
-  component shows in the folder view beside the scenes, prefabs and assets,
-  with its classes, its git status, how many objects across the project run it,
-  and ↗ to open it in your editor. Clicking one opens it read-only.
-- **View source** opens the file in a read-only drawer with the declarations
-  the inspector is rendering highlighted, so the mapping from field to code is
+  flagged rather than deleted.
+- **The Project tab lists the code.** Every file under `src/` shows in the
+  folder view beside the scenes, prefabs and assets, with its classes, its git
+  status and ↗ to open it in your editor. Clicking one opens it read-only.
+- **View source** opens the file in a read-only drawer with the fields the
+  inspector is rendering highlighted, so the mapping from field to code is
   obvious. External saves re-index and refresh the field list in place; the
   text you are reading gets a *reload* banner rather than moving underneath
   you. *Open in editor* hands the file to `$MOSAIC_EDITOR`, then `code`,
-  `cursor`, `subl`, then the OS handler — at the property's line where it can.
-- **Prefab vs instance.** Scripts live on the prefab; an instance stores only
-  the diff. A value edit records `scripts.<i>.props.<field>`; a structural edit
-  (attach, detach, reorder) makes the instance own the whole list and folds the
-  per-value overrides in, so nothing is applied twice. *Apply to prefab* pushes
-  the diff up, *Revert* drops it.
-- **Your game runs them.** The layout constructs one `ScriptHost` per scene,
-  and the host owns their update loop. A script that throws is switched off
-  rather than allowed to take the frame loop with it.
-- **The layout wires it up.** It constructs the `ScriptHost`, then
-  `scripts.add(player, new PlayerController(), { moveSpeed: 220 })` in list
-  order, with `, false` for a disabled script. Two classes of one name in
-  different folders are imported under distinct aliases — and so is a script
-  that shares its name with a **prefab**, which is the case that actually bit:
-  `Brick` the prefab and `Brick` the behaviour is the obvious way to name that
-  object, and it emitted two imports of one name and a file that would not
-  compile, whose first error named neither of them. `runtime/scripts.ts`
-  is the base class, the `@property` decorator and the host — one file, type
-  checked here, copied verbatim into your project as
-  `src/scripts/ScriptComponent.ts`, so what the editor parses and what your
-  game runs cannot drift apart.
+  `cursor`, `subl`, then the OS handler — at the field's line where it can.
+- **There are no script components.** An earlier version let you attach
+  component classes to objects and ran them from a host the layout built.
+  That was a Unity-style system laid over Phaser, so it was removed: behaviour
+  that belongs to a kind of object goes in its prefab class, and behaviour that
+  belongs to the level (rules, score, a one-off paddle) goes in the scene
+  class, which is where Phaser puts it. A project written while components
+  existed opens with a note, its references dropped and its classes untouched.
 
 ### 11. Ship the game — `electron/packageGame.ts`, `dialogs/PackageDialog`
 Saving writes source. **Export game…** (`⌘⇧E`) writes the thing you send
@@ -539,7 +539,7 @@ One renderer, two targets, with a single seam between them: `src/editor/platform
 | Assets | files, served over `mosaic://` | inlined data: URLs |
 | Saving | debounced write into the folder | debounced write to localStorage |
 | External edits | watched (chokidar), reloaded | n/a |
-| Scripts | indexed from `src/**`, attachable | unavailable — no source tree |
+| Code | indexed from `src/**`, editable fields shown | unavailable — no source tree |
 | Git status | per file in the Project panel | n/a |
 | Generated code | written on every save | File System Access API, else download |
 | RUN | the project's own dev server | unavailable — no project to run |
@@ -691,7 +691,7 @@ from the mark.
 
 ```
 src/
-  shared/          imported by BOTH the editor and your game — no React, no UI
+  shared/          editor data and logic with no React and no UI
     types.ts        Project / Scene / Layer / Object / Prefab / Anim schema
     definitions.ts  Placeholder tileset + placeholder SHAPES (not game roles)
     size.ts         How big a thing is drawn — read from its art, not its type
@@ -710,9 +710,10 @@ src/
     tiled.ts        Reads a Tiled map well enough to describe it, and writes a
                     small one (template terrain, converted painted layers)
 
-  runtime/         ships inside your game — zero editor deps
-    scripts.ts      ScriptComponent, the @property decorator and the host that
-                    runs them; copied into your project by the scaffold
+    scripts.ts      Editable-field types, and checking a stored value against one
+
+  Nothing Mosaic ships runs inside your game: what it writes is generated
+  layout files, and those import only Phaser and your own classes.
 
   tokens.css       the reference document's design tokens
   styles.css       editor chrome built from them
@@ -731,54 +732,16 @@ src/
     assets/         slice.ts (grid + auto-detect slicing, frame naming),
                     atlasJson.ts (reading an atlas document that already
                     exists, in any of the three shapes Phaser accepts)
-    scripts/        parse.ts (@property declarations, statically), registry.ts
+    scripts/        parse.ts (@editable fields, statically), registry.ts
                     (the index, kept warm by the watcher), trust.ts
-                    (per-folder consent to run code), stub.ts (templates)
+                    (per-folder consent to run code)
     export/         generate.ts (layouts and starting-point classes), write.ts
     commands.ts     command registry, bindings, palette search
     ui/             MenuBar, Toolbar, LeftDock, Inspector, ScriptsTab,
                     SourceDrawer, BottomDock, StatusBar, Logo, fields, dialogs/
     bridge.ts       60fps canvas chatter (cursor, drag previews)
 
-scripts/sample-game/
-                   builds the samples by driving the editor: Coin Rush (a
-                   playable game, and the build guide) and Anim Lab (built to
-                   exercise the animation feature rather than to be a game)
-scripts/twin-stick/
-                   builds samples/twin-stick, a top-down twin-stick shooter:
-                   build.ts lays the level out through the editor's API,
-                   code.ts is the game's own hand-written classes
-scripts/breakout/  rebuilds Phaser's own breakout example as a Mosaic project,
-                   to answer whether a whole game somebody else already wrote
-                   fits the model. build.ts authors it through the editor's
-                   API and logs every step
 ```
-
-### Rebuilding somebody else's game
-
-Every workflow above is checked against a game Mosaic did not design.
-`npm run breakout` rebuilds Phaser's own `breakout.js` example — the wall, the
-ball, the paddle, the rules — as a Mosaic project, authored entirely through
-the editor's own API: `planScaffold` plans the folder, `ProjectStore` performs
-each edit as a real undoable transaction, `projectToFiles` and
-`generateProjectFiles` write the result. There is no script-only path into the project format, so
-anything the editor cannot express does not get quietly written anyway — the
-builder records those as **friction** in its step log and prints them when it
-finishes.
-
-The first run printed four. Closing them is most of what the physics, atlas and
-grid notes above describe:
-
-| Friction | Now |
-|---|---|
-| a collision could not also tell the objects involved | the scene's collider calls `scripts.contact`; scripts get `onContact` |
-| world bounds were one rectangle, not four sides | `Scene → World edges` |
-| an existing Phaser atlas could not be imported | picked with its `.json`, frame names kept |
-| sixty placements were sixty clicks | `Fill grid` — the same scene in 50 edits instead of 98 |
-
-The same exercise is what turned up the duplicate-identifier bug in the
-generator: naming a prefab and its behaviour the same thing — the obvious
-choice — emitted a file that would not compile.
 
 ### Why undo is slice-based
 
@@ -833,17 +796,18 @@ compared by length + prefix, so a transaction never walks megabytes of base64.
   bricks has sixty typed fields. Collections are reached through `groups`.
 - Prefab layouts cover a prefab's root: a child node inside a prefab is drawn by
   the editor, and is not yet emitted into the class.
-- The sample builders (`sample`, `anim-lab`, `breakout`) write the new file
-  shape, but `breakout` needs a checkout of the Phaser examples for its art.
-- An arcade group applies its OWN defaults to every child it takes —
-  `collideWorldBounds` off, `allowGravity` on, drag, acceleration — so a body
-  has to be configured *after* it joins its group. That is why the layout
-  emits bodies after groups, and why each layout group calls `applyBody()` on
-  anything added to it later. A group your own code creates with
-  `this.physics.add.group()` does none of this.
-- The depth a layout group gives an object it takes is a heuristic: the layer
-  most of its placed members sit on. Depth 0 reads as "not set yet", so an
-  object meant to stay at 0 gets moved too. Set its depth after adding it.
+- There are two samples (`npm run sample`), built through the editor's own API:
+  Coin Run, a platformer on placeholder shapes (`scripts/sample/build.ts`), and
+  Holdout, a top-down shooter on real CC0 art and sound
+  (`scripts/sample/holdout/`). Each README lists what its parts exercise.
+- An arcade group resets the body settings of every child it takes to its
+  config. The layout's groups carry the settings their bodies share. Where the
+  bodies disagree, the setting is left out of the config, and an object added
+  at run time keeps Phaser's default for it until your code sets it (or calls
+  the prefab's `applyBody()`) after adding.
+- A root prefab's editable defaults live in its class, so tuning one for every
+  instance means editing code (or making a variant). Values can still be set
+  per placed instance in the editor.
 - Groups and the starter prefabs are project data with genre-ish
   names (`player`, `pickup`, `Player`, `Pickup`). They are a starting point,
   not a fixed set — rename or delete them and nothing in the editor cares.
@@ -852,7 +816,3 @@ compared by length + prefix, so a transaction never walks megabytes of base64.
   base do not flow into it. Property changes on the base still do.
 - **rolldown** is a runtime dependency of the desktop build: it bundles a
   hand-written project for importing, and the whole game for `Export game…`.
-- Script components are a TypeScript story: `@property` needs a compiler
-  configured for decorators, which the scaffold's `tsconfig.json` provides. A
-  JavaScript project lists the script files as skipped rather than writing code
-  that will not build.

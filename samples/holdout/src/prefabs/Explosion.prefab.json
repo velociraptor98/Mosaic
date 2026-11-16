@@ -1,0 +1,25 @@
+{
+  "name": "Explosion",
+  "exposed": [],
+  "root": {
+    "name": "Explosion",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 1.6,
+    "scaleY": 1.6,
+    "originX": 0.5,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "tanks",
+    "frame": "smokeYellow0.png",
+    "playOnSpawn": "explode",
+    "sounds": {
+      "spawn": "audio_explosion"
+    },
+    "data": {},
+    "lid": "nmwjcrwouc",
+    "children": []
+  }
+}

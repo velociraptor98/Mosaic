@@ -21,7 +21,6 @@ import { SourceDrawer } from "./editor/ui/SourceDrawer";
 import { StatusBar } from "./editor/ui/StatusBar";
 import { Toolbar } from "./editor/ui/Toolbar";
 import { AtlasDialog } from "./editor/ui/dialogs/AtlasDialog";
-import { AttachScriptDialog } from "./editor/ui/dialogs/AttachScriptDialog";
 import { ScriptTrustDialog } from "./editor/ui/dialogs/ScriptTrustDialog";
 import { CommandPalette } from "./editor/ui/dialogs/CommandPalette";
 import { ExportDialog } from "./editor/ui/dialogs/ExportDialog";
@@ -154,7 +153,6 @@ export default function App() {
         {dialog === "importphaser" && <ImportPhaserDialog onClose={() => setDialog(null)} />}
         {dialog === "atlas" && <AtlasDialog onClose={() => setDialog(null)} />}
         {dialog === "prefab" && <PrefabDialog onClose={() => setDialog(null)} />}
-        {dialog === "attachscript" && <AttachScriptDialog onClose={() => setDialog(null)} />}
         {dialog === "scripttrust" && <ScriptTrustDialog onClose={() => setDialog(null)} />}
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
         {dialog === "package" && <PackageDialog onClose={() => setDialog(null)} />}
@@ -255,6 +253,8 @@ function useKeyboardShortcuts(ctx: {
           return run("object.text");
         case "F2":
           return run("view.bodies");
+        case "f":
+          return run("view.frame");
         case "Delete":
         case "Backspace":
           return run("edit.delete");

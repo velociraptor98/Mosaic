@@ -10,9 +10,11 @@ import type { AssetFrame } from "../../shared/types";
  * names are the part that matters: a scene says `texture: "assets", frame:
  * "blue1"`, and `frame_7` is not that.
  *
- * So the JSON that shipped with the art is read instead. All three shapes
- * Phaser itself accepts are handled, because which one you get is decided by
- * whichever packer produced the file and not by the person importing it.
+ * So the document that shipped with the art is read instead. Every shape
+ * Phaser itself loads is handled — the three JSON ones `load.atlas` takes and
+ * the Starling XML `load.atlasXML` takes — because which one you get is decided
+ * by whichever packer produced the file and not by the person importing it.
+ * Kenney's packs, for one, ship XML.
  */
 
 interface RawFrame {
@@ -29,6 +31,7 @@ interface RawFrame {
  * nothing in it" are different answers, and only the second is worth an error.
  */
 export function parsePhaserAtlas(text: string): AssetFrame[] | null {
+  if (text.trimStart().startsWith("<")) return parseStarlingXml(text);
   let doc: unknown;
   try {
     doc = JSON.parse(text);
@@ -88,7 +91,43 @@ function fromArray(list: RawFrame[]): [string, RawFrame][] {
   return list.map((entry, i) => [entry.filename ?? entry.name ?? `frame_${i}`, entry]);
 }
 
-/** The atlas document that would sit beside an image, e.g. "assets/kit.png". */
-export function atlasSidecarPath(imagePath: string): string {
-  return imagePath.replace(/\.\w+$/, ".json");
+/**
+ * Starling / Sparrow XML, which Phaser loads with `load.atlasXML`:
+ *
+ *   <TextureAtlas imagePath="sheet.png">
+ *     <SubTexture name="blue1" x="0" y="0" width="32" height="32"/>
+ *   </TextureAtlas>
+ *
+ * Read with a pattern rather than a DOM parser so the same function runs in the
+ * renderer and in node. The format is one flat list of self-describing tags,
+ * which is what makes that safe.
+ */
+function parseStarlingXml(text: string): AssetFrame[] | null {
+  if (!/<TextureAtlas[\s>]/.test(text)) return null;
+  const frames: AssetFrame[] = [];
+  for (const tag of text.match(/<SubTexture\b[^>]*>/g) ?? []) {
+    const attrs: Record<string, string> = {};
+    for (const [, key, value] of tag.matchAll(/([\w:-]+)\s*=\s*"([^"]*)"/g)) attrs[key] = value;
+    const num = (key: string) => Number(attrs[key]);
+    if (!attrs.name || ![num("x"), num("y"), num("width"), num("height")].every(Number.isFinite)) continue;
+    frames.push({
+      name: attrs.name,
+      x: num("x"),
+      y: num("y"),
+      w: num("width"),
+      h: num("height"),
+      // Starling writes the pivot in pixels, when it writes one at all.
+      pivotX: Number.isFinite(num("pivotX")) && num("width") ? num("pivotX") / num("width") : 0.5,
+      pivotY: Number.isFinite(num("pivotY")) && num("height") ? num("pivotY") / num("height") : 0.5,
+    });
+  }
+  return frames;
+}
+
+/** Documents that may describe the atlas an image is, e.g. beside "assets/kit.png". */
+export const ATLAS_DOC_EXT = /\.(json|xml)$/i;
+
+/** The atlas documents that would sit beside an image, in the order they are tried. */
+export function atlasSidecarPaths(imagePath: string): string[] {
+  return [".json", ".xml"].map((ext) => imagePath.replace(/\.\w+$/, ext));
 }

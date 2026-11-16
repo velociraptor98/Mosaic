@@ -20,16 +20,7 @@ import {
   type PropagationPlan,
 } from "../../shared/propagate";
 import { flattenNode, same } from "../../shared/prefabs";
-import {
-  SCRIPT_LIST_PATH,
-  fitsType,
-  newScriptRef,
-  scriptEnabledPath,
-  scriptPropPath,
-  scriptsOf,
-} from "../../shared/scripts";
 import { objectsById, wouldCycle, descendantIds } from "../../shared/transform";
-import type { ScriptRegistry } from "../scripts/registry";
 import type {
   AnimDef,
   AssetDef,
@@ -41,7 +32,6 @@ import type {
   ResolvedPrefab,
   SceneData,
   SceneObject,
-  ScriptRef,
   TileLayer,
 } from "../../shared/types";
 import {
@@ -51,6 +41,7 @@ import {
   type StageGeometry,
 } from "./prefabDoc";
 import { uid, uniqueKey, uniqueName } from "./ids";
+import { bodyForSize, objectSize } from "../../shared/size";
 import {
   createSceneFromTemplate,
   createStarterProject,
@@ -138,7 +129,6 @@ export interface UiState {
    * Set when the attach picker is being used to re-point an existing row at a
    * class rather than to add a new one.
    */
-  scriptRelink: { objectId: string; index: number } | null;
   /**
    * The plan a prefab save is waiting on. Saving computes what the change
    * costs and stops here; nothing is written until it is pushed.
@@ -146,6 +136,11 @@ export interface UiState {
   prefabPlan: PropagationPlan | null;
   /** Set while walking the scenes a push touched, one at a time. */
   review: ReviewQueue | null;
+  /**
+   * Bumped to ask the canvas to bring the selection into view. The canvas
+   * answers it, because only the canvas knows how big things are on screen.
+   */
+  frameRequest: number;
 }
 
 // v2: tile layers reference Tiled maps. A browser project saved before that
@@ -185,9 +180,9 @@ export class ProjectStore {
     animKey: null,
     status: "Ready",
     sourceView: null,
-    scriptRelink: null,
     prefabPlan: null,
     review: null,
+    frameRequest: 0,
   };
 
   private stacks = new Map<string, UndoStack>();
@@ -617,6 +612,12 @@ export class ProjectStore {
     this.emit();
   }
 
+  /** Brings the selection into view, or the whole scene when nothing is selected. */
+  frameSelection(): void {
+    this.ui.frameRequest += 1;
+    this.emit();
+  }
+
   setActiveLayer(id: string): void {
     this.view.activeLayerId = id;
     const layer = this.scene?.layers.find((l) => l.id === id);
@@ -755,10 +756,16 @@ export class ProjectStore {
    * are. A layer added in Tiled appears above its map's others; one deleted or
    * renamed there is dropped, because there is nothing left for it to draw.
    *
+   * `known` is each map's layer names as they were before this read. Only a
+   * layer that is new to the MAP is added: one the map already had and a scene
+   * does not place was left out of that scene on purpose, and putting it back
+   * on every open undid that. Without a previous read there is nothing to say
+   * what is new, so nothing is added — Add to scene on the Map tab still is.
+   *
    * Runs when the project is read, so it is not an undoable edit — it is the
    * scene catching up with a file that changed.
    */
-  reconcileTilemaps(): string[] {
+  reconcileTilemaps(known: Map<string, string[] | undefined> = new Map()): string[] {
     const notes: string[] = [];
     for (const scene of this.project.scenes) {
       const maps = new Set(
@@ -779,7 +786,8 @@ export class ProjectStore {
         const present = new Set(
           scene.layers.filter((l) => l.kind === "tile" && l.map === key).map((l) => (l as TileLayer).layer),
         );
-        const fresh = info.layers.filter((name) => !present.has(name));
+        const previous = known.get(key);
+        const fresh = info.layers.filter((name) => !present.has(name) && !!previous && !previous.includes(name));
         if (!fresh.length) continue;
         const names = scene.layers.map((l) => l.name);
         let at = -1;
@@ -1139,11 +1147,9 @@ export class ProjectStore {
     children: SceneObject[];
     /** Other selected siblings, which are relinked as instances of the new prefab. */
     siblings: SceneObject[];
-    /** Script refs pointing at objects the prefab would not contain. */
-    unresolved: { object: string; property: string; target: string }[];
   } {
     const scene = this.scene;
-    const empty = { ok: false, children: [], siblings: [], unresolved: [] };
+    const empty = { ok: false, children: [], siblings: [] };
     if (!scene || !ids.length) return { ...empty, reason: "Select an object first" };
 
     const selected = scene.objects.filter((o) => ids.includes(o.id));
@@ -1167,23 +1173,8 @@ export class ProjectStore {
     const siblings = tops.slice(1);
     const kids = new Set(descendantIds(root.id, scene));
     const children = scene.objects.filter((o) => kids.has(o.id));
-    const inside = new Set([root.name, ...children.map((c) => c.name)]);
 
-    const unresolved: { object: string; property: string; target: string }[] = [];
-    for (const obj of [root, ...children]) {
-      for (const script of this.scriptsFor(obj)) {
-        const cls = this.scriptIndex?.resolve(script);
-        const properties = cls && cls.status !== "missing" ? this.scriptIndex!.properties(cls.cls) : [];
-        for (const property of properties) {
-          if (property.type !== "ref") continue;
-          const target = script.props[property.name];
-          if (typeof target !== "string" || !target || inside.has(target)) continue;
-          unresolved.push({ object: obj.name, property: `${script.class}.${property.name}`, target });
-        }
-      }
-    }
-
-    return { ok: true, root, children, siblings, unresolved };
+    return { ok: true, root, children, siblings };
   }
 
   /**
@@ -1295,6 +1286,62 @@ export class ProjectStore {
     this.setStatus(
       `Wrote ${prefabFilePath(name)} — ${relinked} instance(s) now resolve from it`,
     );
+    return this.project.prefabs.find((p) => p.name === name) ?? null;
+  }
+
+  /**
+   * A prefab straight from art, with nothing placed.
+   *
+   * Promoting needs something on the canvas, which suits what a level is built
+   * from and not what the game's code makes — a bullet, an explosion — where
+   * the only way in was to place one, promote it, and delete it again. The
+   * definition opens on its isolated stage, where its body, animation and sound
+   * are set like any other prefab's.
+   */
+  createPrefabFromAsset(options: {
+    name: string;
+    assetId: string;
+    frame?: string;
+    /** A box body the size of the art; adjust it on the stage. */
+    body?: boolean;
+  }): PrefabDef | null {
+    const name = options.name.trim();
+    const asset = this.project.assets.find((a) => a.id === options.assetId);
+    if (!name || !asset) {
+      this.setStatus(!name ? "A prefab needs a name" : "That asset is gone");
+      return null;
+    }
+    if (this.project.prefabs.some((p) => p.name === name)) {
+      this.setStatus(`Prefab "${name}" already exists — pick another name`);
+      return null;
+    }
+    const art: SceneObject = {
+      id: "",
+      name,
+      type: "sprite",
+      layerId: "",
+      parentId: null,
+      x: 0,
+      y: 0,
+      rotation: 0,
+      scaleX: 1,
+      scaleY: 1,
+      originX: 0.5,
+      originY: 0.5,
+      visible: true,
+      texture: asset.key,
+      frame: options.frame || undefined,
+      data: {},
+    };
+    if (options.body) {
+      art.body = bodyForSize(objectSize(this.project, art));
+    }
+    const prefab: PrefabDef = { name, exposed: [], root: toPrefabNode(art) };
+    this.transact(`Create prefab ${name}`, () => {
+      this.project.prefabs.push(prefab);
+    });
+    this.openPrefab(name);
+    this.setStatus(`Wrote ${prefabFilePath(name)} from ${asset.key} — nothing placed; make one with new ${name}()`);
     return this.project.prefabs.find((p) => p.name === name) ?? null;
   }
 
@@ -1694,161 +1741,19 @@ export class ProjectStore {
   }
 
   // -------------------------------------------------------------------
-  // Script components — the behaviour attached to an object
+  // Class fields — values for the editable fields of an object's own class
   // -------------------------------------------------------------------
-
-  /**
-   * The project's script index, when one is running. It is derived state, not
-   * project data: it never enters a transaction, and validation consults it
-   * only to say whether a reference still resolves.
-   */
-  scriptIndex: ScriptRegistry | null = null;
-
-  setScriptIndex(index: ScriptRegistry | null): void {
-    this.scriptIndex = index;
-  }
-
-  /** The scripts an object actually has — a prefab's list, under its overrides. */
-  scriptsFor(obj: SceneObject): ScriptRef[] {
-    return scriptsOf(obj.prefab ? resolveObject(this.project, obj) : obj);
-  }
 
   private objectById(id: string): SceneObject | undefined {
     return this.scene?.objects.find((o) => o.id === id);
   }
 
   /**
-   * The array a write may mutate directly, or null when the object still
-   * inherits its list from a prefab. A null answer is not a refusal: single
-   * values are written as overrides instead (see setScriptProp).
-   */
-  private writableScripts(obj: SceneObject): ScriptRef[] | null {
-    if (!obj.prefab || !findPrefab(this.project, obj.prefab)) {
-      if (!obj.scripts) obj.scripts = [];
-      return obj.scripts;
-    }
-    const owned = obj.overrides?.[SCRIPT_LIST_PATH];
-    return Array.isArray(owned) ? (owned as ScriptRef[]) : null;
-  }
-
-  /**
-   * Hands the instance the whole list, because it is about to change the list
-   * itself rather than a value in it — attaching, removing or reordering a
-   * script inherited from a prefab is an override of `scripts`.
-   *
-   * Per-value overrides are folded in first: once the array is owned they
-   * would be applied twice, and their order against the array is not defined.
-   */
-  private ownScripts(obj: SceneObject): ScriptRef[] {
-    const existing = this.writableScripts(obj);
-    if (existing) return existing;
-    const list = structuredClone(this.scriptsFor(obj));
-    const overrides: Record<string, unknown> = { ...(obj.overrides ?? {}) };
-    for (const path of Object.keys(overrides)) {
-      if (path.startsWith("scripts.")) delete overrides[path];
-    }
-    overrides[SCRIPT_LIST_PATH] = list;
-    obj.overrides = overrides;
-    return list;
-  }
-
-  /**
-   * Adds a script to every selected object, at the end of the run order. The
-   * argument is a class from the index — a name and the file it was found in —
-   * because an attach that cannot resolve is not one the editor should make.
-   */
-  attachScript(ids: string[], cls: { name: string; src: string }): void {
-    if (!ids.length) return;
-    this.transact(`Attach ${cls.name}`, () => {
-      for (const id of ids) {
-        const obj = this.objectById(id);
-        if (!obj) continue;
-        const list = this.writableScripts(obj) ?? this.ownScripts(obj);
-        list.push(newScriptRef(cls.name, cls.src));
-      }
-    });
-    this.setStatus(`Attached ${cls.name} to ${ids.length} object(s)`);
-  }
-
-  detachScript(id: string, index: number): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    const name = this.scriptsFor(obj)[index]?.class ?? "script";
-    this.transact(`Detach ${name}`, () => {
-      const list = this.writableScripts(obj) ?? this.ownScripts(obj);
-      list.splice(index, 1);
-    });
-  }
-
-  /** Run order IS execution order, so the list is the thing being edited. */
-  moveScript(id: string, index: number, delta: number): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    const target = index + delta;
-    if (target < 0 || target >= this.scriptsFor(obj).length) return;
-    this.transact("Reorder scripts", () => {
-      const list = this.writableScripts(obj) ?? this.ownScripts(obj);
-      const [moved] = list.splice(index, 1);
-      list.splice(target, 0, moved);
-    });
-  }
-
-  /**
-   * The checkbox is enabled state, not deletion: the values a disabled script
-   * holds are kept, and the runtime still constructs it.
-   */
-  setScriptEnabled(id: string, index: number, enabled: boolean): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    this.transact(enabled ? "Enable script" : "Disable script", () => {
-      const list = this.writableScripts(obj);
-      if (list) {
-        if (list[index]) list[index].enabled = enabled;
-        return;
-      }
-      this.writeOverride(obj, scriptEnabledPath(index), enabled);
-    });
-  }
-
-  /**
-   * Writes one property value. On a prefab instance this records an override
-   * against the prefab's value rather than editing the definition — which is
-   * what keeps a scene full of instances predictable.
-   */
-  setScriptProp(id: string, index: number, name: string, value: unknown): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    this.transact(`Set ${name}`, () => {
-      const list = this.writableScripts(obj);
-      if (list) {
-        if (list[index]) list[index].props[name] = value;
-        return;
-      }
-      this.writeOverride(obj, scriptPropPath(index, name), value);
-    });
-  }
-
-  /** Drops a value so the field falls back to the class's declared default. */
-  clearScriptProp(id: string, index: number, name: string): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    this.transact(`Clear ${name}`, () => {
-      const list = this.writableScripts(obj);
-      if (list) {
-        if (list[index]) delete list[index].props[name];
-        return;
-      }
-      // An inherited script's value can only be un-set back to the prefab's.
-      this.revertOverrideIn(obj, scriptPropPath(index, name));
-    });
-  }
-
-  /**
-   * Sets one `@property` field of the object's own class.
+   * Sets one editable field of the object's own class.
    *
    * Stored on the object rather than as an override: the class is the
    * project's code, not part of the prefab's exposure contract, and a field the
-   * developer chose to publish with a decorator does not need publishing twice.
+   * developer chose to mark editable does not need publishing twice.
    */
   setClassProp(id: string, name: string, value: unknown): void {
     const obj = this.objectById(id);
@@ -1867,30 +1772,6 @@ export class ProjectStore {
       if (Object.keys(rest).length) obj.props = rest;
       else delete obj.props;
     });
-  }
-
-  /** Points a reference at a class again after the file moved or was renamed. */
-  relinkScript(id: string, index: number, cls: { name: string; src: string }): void {
-    const obj = this.objectById(id);
-    if (!obj) return;
-    this.transact(`Relink ${cls.name}`, () => {
-      const list = this.writableScripts(obj) ?? this.ownScripts(obj);
-      const script = list[index];
-      if (!script) return;
-      script.class = cls.name;
-      script.src = cls.src;
-    });
-  }
-
-  private writeOverride(obj: SceneObject, path: string, value: unknown): void {
-    obj.overrides = { ...(obj.overrides ?? {}), [path]: structuredClone(value) };
-  }
-
-  private revertOverrideIn(obj: SceneObject, path: string): void {
-    if (!obj.overrides) return;
-    const next = { ...obj.overrides };
-    delete next[path];
-    obj.overrides = next;
   }
 
   // -------------------------------------------------------------------
@@ -1928,57 +1809,6 @@ export class ProjectStore {
       }
     });
     if (this.ui.animKey === key) this.ui.animKey = this.project.anims[0]?.key ?? null;
-  }
-
-  /**
-   * Script references are validated against the index, never against the file
-   * system: a class that cannot be resolved is an error the user can act on
-   * (relink, or fix the class), and a value the class no longer declares is a
-   * warning rather than something the editor quietly deletes.
-   */
-  private validateScripts(
-    scene: SceneData,
-    obj: SceneObject,
-  ): { level: "error" | "warn"; message: string }[] {
-    const index = this.scriptIndex;
-    if (!index) return [];
-    const issues: { level: "error" | "warn"; message: string }[] = [];
-    const where = `${scene.key}/${obj.name}`;
-
-    this.scriptsFor(obj).forEach((ref) => {
-      const resolution = index.resolve(ref);
-      if (resolution.status === "missing") {
-        issues.push({
-          level: "error",
-          message: `${where}: script "${ref.class}" (${ref.src}) does not resolve — relink it or restore the class`,
-        });
-        return;
-      }
-      if (resolution.status === "moved") {
-        issues.push({
-          level: "warn",
-          message: `${where}: "${ref.class}" now lives in ${resolution.cls.src} — relink to keep the reference exact`,
-        });
-      }
-      const declared = index.properties(resolution.cls);
-      for (const [name, value] of Object.entries(ref.props ?? {})) {
-        const property = declared.find((p) => p.name === name);
-        if (!property) {
-          issues.push({
-            level: "warn",
-            message: `${where}: "${ref.class}.${name}" is set in this scene but is no longer declared`,
-          });
-          continue;
-        }
-        if (!fitsType(property.type, value)) {
-          issues.push({
-            level: "warn",
-            message: `${where}: "${ref.class}.${name}" holds a ${typeof value} but is declared ${property.type}`,
-          });
-        }
-      }
-    });
-    return issues;
   }
 
   /** Missing anim keys are a validation error, not a silent no-op. */
@@ -2034,7 +1864,6 @@ export class ProjectStore {
             message: `${scene.key}/${obj.name}: prefab "${obj.prefab}" is missing`,
           });
         }
-        issues.push(...this.validateScripts(scene, obj));
       }
       for (const layer of scene.layers) {
         if (layer.kind !== "tile") continue;

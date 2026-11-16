@@ -1,7 +1,5 @@
-import { getPath, walkNodes } from "../../shared/prefabs";
-import { scriptEnabledPath, scriptPropPath } from "../../shared/scripts";
+import { getPath } from "../../shared/prefabs";
 import type { PrefabNode, ResolvedPrefab } from "../../shared/types";
-import type { ScriptRegistry } from "../scripts/registry";
 
 /**
  * The exposure catalogue: every value a prefab COULD publish to its instances,
@@ -13,25 +11,22 @@ import type { ScriptRegistry } from "../scripts/registry";
  * value belongs to, not for the JSON path it happens to live at.
  */
 
-export type ExposureSource = "script" | "component" | "data";
+export type ExposureSource = "component" | "data";
 
 export interface ExposureEntry {
   path: string;
-  /** "SlimeAI.chaseSpeed" — how the field is named in the list. */
+  /** "Body.bounce" — how the field is named in the list. */
   label: string;
-  /** "script property · num" */
+  /** "component field · num" */
   from: string;
   source: ExposureSource;
   /** The definition's value, shown beside the field. */
   value: unknown;
   /**
-   * Set when an exposed path no longer exists in the definition — the class
-   * dropped the @property, or the component was removed. The entry keeps its
-   * place, greyed, until someone resolves it.
+   * Set when an exposed path no longer exists in the definition. The entry
+   * keeps its place, greyed, until someone resolves it.
    */
   orphaned?: boolean;
-  /** A reference field may only point at objects inside the prefab. */
-  refScope?: { lid: string; name: string }[];
 }
 
 /** Component fields worth publishing, in the order the inspector shows them. */
@@ -54,58 +49,15 @@ const COMPONENT_FIELDS: { path: string; label: string; type: string }[] = [
 ];
 
 /**
- * Every publishable field of a definition, script properties first — those are
- * the ones a level is usually varying.
+ * Every publishable field of a definition. The class's own editable fields are
+ * not here: a placed instance sets those directly, without exposure.
  */
 export function exposureCatalog(
   prefab: ResolvedPrefab,
-  registry: ScriptRegistry | null,
   exposed: string[] = prefab.exposed,
 ): ExposureEntry[] {
   const root = prefab.root;
   const entries: ExposureEntry[] = [];
-  const refScope = walkNodes(root).map((n) => ({ lid: n.lid, name: n.name }));
-
-  (root.scripts ?? []).forEach((script, index) => {
-    const resolution = registry?.resolve(script);
-    const cls = resolution && resolution.status !== "missing" ? resolution.cls : null;
-    const properties = cls && registry ? registry.properties(cls) : [];
-
-    entries.push({
-      path: scriptEnabledPath(index),
-      label: `${script.class} enabled`,
-      from: "script component · bool",
-      source: "script",
-      value: script.enabled,
-    });
-
-    for (const property of properties) {
-      if (property.codeOnly) continue;
-      const path = scriptPropPath(index, property.name);
-      entries.push({
-        path,
-        label: `${script.class}.${property.name}`,
-        from: `script property · ${property.type}`,
-        source: "script",
-        value: script.props[property.name] ?? property.default,
-        refScope: property.type === "ref" ? refScope : undefined,
-      });
-    }
-
-    // The class could not be read, but the values the scene holds are real and
-    // may already be exposed — offer them rather than hiding the rows.
-    if (!properties.length) {
-      for (const key of Object.keys(script.props ?? {})) {
-        entries.push({
-          path: scriptPropPath(index, key),
-          label: `${script.class}.${key}`,
-          from: cls ? "script property · unread" : "script property · class missing",
-          source: "script",
-          value: script.props[key],
-        });
-      }
-    }
-  });
 
   for (const field of COMPONENT_FIELDS) {
     const value = getPath(root, field.path);
@@ -138,7 +90,7 @@ export function exposureCatalog(
       path,
       label: path,
       from: "no longer declared — resolve or unexpose",
-      source: "script",
+      source: "component",
       value: undefined,
       orphaned: true,
     });
@@ -181,7 +133,6 @@ function detailOf(node: PrefabNode): string {
         : `body ${node.body.width} × ${node.body.height}`,
     );
   }
-  if (node.scripts?.length) bits.push(`${node.scripts.length} script(s)`);
   if (node.playOnSpawn) bits.push(`plays ${node.playOnSpawn}`);
   return bits.join(" · ") || node.type;
 }

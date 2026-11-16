@@ -8,18 +8,15 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "sample": "vite build --config scripts/sample.vite.config.ts && node node_modules/.sample/main.js samples",
+    "check": "npm run sample && vite build --config scripts/check.vite.config.ts && node node_modules/.check/main.js samples/coin-run samples/holdout",
     "dev:app": "node scripts/dev-electron.mjs",
     "build:main": "vite build --config electron/vite.config.ts && vite build --config electron/vite.preload.config.ts",
     "build:app": "npm run build && npm run build:main",
     "start:app": "npm run build:app && electron .",
-    "sample": "vite build --config scripts/sample-game.vite.config.ts && node node_modules/.sample-game/build.js samples",
-    "anim-lab": "vite build --config scripts/anim-lab.vite.config.ts && node node_modules/.anim-lab/anim-lab.js samples",
-    "sample:pdf": "npm run sample && electron scripts/sample-game/pdf.cjs \"samples/coin-rush-build-guide.html\" \"samples/Coin Rush - Build Guide.pdf\"",
     "icon": "vite build --config scripts/icon.vite.config.ts && node node_modules/.icon/make-icon.js",
     "pack": "npm run icon && npm run build:app && electron-builder --dir",
-    "dist": "npm run icon && npm run build:app && electron-builder",
-    "breakout": "vite build --config scripts/breakout.vite.config.ts && node node_modules/.breakout/build.js samples",
-    "twin-stick": "vite build --config scripts/twin-stick.vite.config.ts && node node_modules/.twin-stick/build.js samples"
+    "dist": "npm run icon && npm run build:app && electron-builder"
   },
   "dependencies": {
     "chokidar": "^5.0.0",

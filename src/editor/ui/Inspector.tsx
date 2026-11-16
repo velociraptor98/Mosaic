@@ -25,7 +25,7 @@ const TABS: { id: InspectorTab; label: string }[] = [
   { id: "object", label: "Object" },
   { id: "tile", label: "Map" },
   { id: "physics", label: "Physics" },
-  { id: "scripts", label: "Scripts" },
+  { id: "scripts", label: "Code" },
   { id: "prefab", label: "Prefab" },
   { id: "anim", label: "Anim" },
   { id: "scene", label: "Scene" },
@@ -34,10 +34,6 @@ const TABS: { id: InspectorTab; label: string }[] = [
 export function Inspector() {
   const { store } = useEditor();
   useStoreVersion(store);
-  // The count rides on the tab for the same reason it rides on the outliner
-  // row: an object having behaviour should be visible without opening it.
-  const selected = store.selection[0];
-  const scriptCount = selected ? store.scriptsFor(selected).length : 0;
 
   return (
     <aside className="panel inspector">
@@ -49,7 +45,6 @@ export function Inspector() {
             onClick={() => store.setUi({ inspectorTab: tab.id })}
           >
             {tab.label}
-            {tab.id === "scripts" && scriptCount > 0 && <span className="tab-count">{scriptCount}</span>}
           </button>
         ))}
       </div>

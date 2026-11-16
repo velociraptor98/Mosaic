@@ -122,6 +122,8 @@ export class EditorScene extends Phaser.Scene {
   private resolvedVersion = -1;
   private altDown = false;
   private spaceDown = false;
+  /** The last frame request answered; see ProjectStore.frameSelection. */
+  private framed = 0;
 
   constructor() {
     super("EditorScene");
@@ -203,7 +205,51 @@ export class EditorScene extends Phaser.Scene {
     this.applyCamera();
     this.syncTileLayers();
     this.syncSprites();
+    this.answerFrameRequest();
     this.drawGrid();
+  }
+
+  /**
+   * Fits the selection — or the whole scene, with nothing selected — in view.
+   *
+   * Zooms out as far as it takes to fit, but never zooms in past 100% unless
+   * the view already was: framing one small sprite at 400% loses the level
+   * around it, which is the thing you were trying to find it in.
+   */
+  private answerFrameRequest(): void {
+    const request = this.store.ui.frameRequest;
+    if (request === this.framed) return;
+    this.framed = request;
+    const scene = this.store.scene;
+    if (!scene) return;
+
+    // The selection and everything under it: a container is framed by its parts.
+    const wanted = new Set(this.store.view.selection);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const obj of scene.objects) {
+        if (obj.parentId && wanted.has(obj.parentId) && !wanted.has(obj.id)) {
+          wanted.add(obj.id);
+          grew = true;
+        }
+      }
+    }
+    let box: Phaser.Geom.Rectangle | null = null;
+    for (const id of wanted) {
+      const sprite = this.sprites.get(id);
+      if (!sprite) continue;
+      const b = sprite.getBounds();
+      box = box ? Phaser.Geom.Rectangle.Union(box, b, box) : b;
+    }
+    box ??= new Phaser.Geom.Rectangle(0, 0, scene.settings.width, scene.settings.height);
+
+    const cam = this.cameras.main;
+    const pad = 64;
+    const fit = Math.min(cam.width / (box.width + pad * 2), cam.height / (box.height + pad * 2));
+    const zoom = Phaser.Math.Clamp(Math.min(fit, Math.max(cam.zoom, 1)), 0.2, 4);
+    cam.setZoom(zoom);
+    cam.centerOn(box.centerX, box.centerY);
+    this.store.setCamera({ x: cam.scrollX, y: cam.scrollY, zoom });
   }
 
   private applyCamera(): void {
@@ -234,7 +280,7 @@ export class EditorScene extends Phaser.Scene {
       const signature = `${mapView.signature}/${tile.layer}`;
       let view = this.tileViews.get(tile.id);
       if (view && view.signature !== signature) {
-        view.layer.destroy();
+        view.layer.destroy(false);
         this.tileViews.delete(tile.id);
         view = undefined;
       }
@@ -254,9 +300,13 @@ export class EditorScene extends Phaser.Scene {
       view.layer.setAlpha(this.layerAlpha(layer));
     });
 
+    // Only the view goes. destroy() on its own also takes the layer's data
+    // out of the map, and the map is shared: another scene placing the same
+    // layer — Title and Level_01 both drawing Level_01's Ground — then found
+    // nothing to create, and drew an empty canvas after a scene switch.
     for (const [id, view] of [...this.tileViews]) {
       if (seen.has(id)) continue;
-      view.layer.destroy();
+      view.layer.destroy(false);
       this.tileViews.delete(id);
     }
     for (const [key, view] of [...this.mapViews]) {

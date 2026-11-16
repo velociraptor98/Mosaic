@@ -11,14 +11,13 @@ import {
   type TemplateId,
 } from "../store/templates";
 import { DEFAULT_GROUPS } from "../../shared/definitions";
-import { SCRIPT_BASE_FILE } from "../../shared/scripts";
-import { scriptBaseSource } from "../scripts/stub";
 import {
   CONFIG_PATH,
   MANIFEST_PATH,
   pendingTilemaps,
   prefabPath,
   scenePath,
+  serializeConfig,
   toManifest,
 } from "./serialize";
 
@@ -101,9 +100,8 @@ const PHASER_VERSION = "^4.2.1";
 export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   const slug = slugify(opts.name);
   const root = joinPath(opts.location, slug);
-  // `@property` is a decorator, and a JS project has no compiler configured
-  // to accept one. A JS scaffold gets the same layout and the same classes,
-  // minus the decorated fields.
+  // Editable fields are marked in doc comments, so a JS scaffold gets the same
+  // layout and the same classes as a TypeScript one.
   const typed = opts.language === "ts";
   const e = typed ? "ts" : "js";
   const { scene, prefabs, assets: maps } = createSceneFromTemplate(
@@ -141,7 +139,7 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   ) => files.push({ rel, contents, note, skipped, encoding });
 
   add("package.json", packageJson(slug, opts), `name: ${slug}`);
-  add(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "editor + scene defaults");
+  add(CONFIG_PATH, serializeConfig(config), "editor + scene defaults");
   add(MANIFEST_PATH, JSON.stringify(toManifest(project), null, 2) + "\n", "editor manifest");
   add("index.html", indexHtml(opts.name, e), "");
   add(
@@ -207,13 +205,7 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   add(
     "tsconfig.json",
     typed ? tsconfigJson() : "",
-    typed ? "decorators, for @property" : "skipped",
-    !typed,
-  );
-  add(
-    SCRIPT_BASE_FILE,
-    typed ? scriptBaseSource() : "",
-    typed ? "@property, and optional script components" : "skipped",
+    typed ? "" : "skipped",
     !typed,
   );
   add("anims.json", "[]\n", "");
@@ -397,33 +389,35 @@ ${
 
 /**
  * The player's class, as a Phaser developer would write it: a sprite subclass
- * that reads the keyboard in preUpdate. The numbers are @property fields, so
- * they can be tuned from the editor without the behaviour leaving the code.
+ * that reads the keyboard in preUpdate. The numbers are tagged `@editable` in
+ * their doc comments, so they can be tuned per instance from the editor
+ * without the behaviour leaving the code.
  */
 function playerClass(ext: string, opts: NewProjectOptions): string {
   const typed = ext === "ts";
   const t = (s: string) => (typed ? s : "");
   const topdown = opts.template === "topdown";
-  const prop = (options: string) => (typed ? `@property(${options})\n  ` : "");
+  const prop = (doc: string) => `/** ${doc} */\n  `;
   return `import Phaser from "phaser";
-${typed ? `import { property } from "../scripts/ScriptComponent";\n` : ""}import { PlayerBase } from "./Player.layout${typed ? "" : ".js"}";
+import { PlayerBase } from "./Player.layout${typed ? "" : ".js"}";
 
 /**
  * Player — this file is yours.
  *
  * The art and the body come from PlayerBase (./Player.layout.${ext}, regenerated
- * by Mosaic on every save). What the player DOES is here.${typed ? `
+ * by Mosaic on every save). What the player DOES is here.
  *
- * A field marked @property shows up in Mosaic's inspector, and the value set
- * there is assigned after the constructor runs.` : ""}
+ * A field with \`@editable\` in its doc comment shows up in Mosaic's inspector.
+ * The value written here is the default, and \`new Player(scene, x, y)\` gets
+ * it. A value set on a placed Player is assigned after the constructor runs.
  */
 export class Player extends PlayerBase {
-  ${prop("{ min: 0, max: 600 }")}speed = 220;
+  ${prop("Pixels per second. @editable { min: 0, max: 600 }")}speed = 220;
 ${
   topdown
     ? ""
     : `
-  ${prop(`{ label: "jump velocity", min: -1200, max: 0 }`)}jumpVelocity = -420;
+  ${prop(`Upward speed of a jump. @editable { label: "jump velocity", min: -1200, max: 0 }`)}jumpVelocity = -420;
 `
 }
   ${t("private ")}cursors${t(": Phaser.Types.Input.Keyboard.CursorKeys")};
@@ -449,9 +443,8 @@ ${
 }
 
 /**
- * Decorators are the one compiler setting a Mosaic project needs: `@property`
- * is what the editor reads out of a class, so a project that cannot compile
- * one cannot use script components.
+ * An ordinary Vite + TypeScript config. Mosaic needs no compiler setting of its
+ * own: editable fields are marked in doc comments, not with decorators.
  */
 function tsconfigJson(): string {
   return (
@@ -465,8 +458,6 @@ function tsconfigJson(): string {
           strict: true,
           skipLibCheck: true,
           noEmit: true,
-          experimentalDecorators: true,
-          useDefineForClassFields: false,
         },
         include: ["src"],
       },

@@ -1,5 +1,4 @@
 import { collectLoaderManifest } from "../../shared/manifest";
-import { SCRIPT_BASE_FILE, scriptsOf } from "../../shared/scripts";
 import { COLLIDES_PROPERTY } from "../../shared/tiled";
 import { findPrefab, resolveObject, resolvePrefab, resolvedIndex } from "../../shared/prefabs";
 import { DEFAULT_COLLIDE_WORLD_BOUNDS } from "../../shared/size";
@@ -54,7 +53,7 @@ export interface GeneratedFile {
 export interface CodegenOptions {
   language?: Language;
   /**
-   * The `@property` fields a class currently declares, or null when the class
+   * The editable fields a class currently declares, or null when the class
    * cannot be found. Lets the layout skip a value whose field was deleted from
    * the source, rather than assign to a property that no longer exists and
    * break the build over stale editor data.
@@ -110,7 +109,7 @@ export function generateProjectFiles(
     if (!hasGeneratedClass(project, prefab.name)) continue;
     files.push({
       path: prefabLayoutPath(prefab.name, lang),
-      contents: generatePrefabLayout(project, prefab.name, lang),
+      contents: generatePrefabLayout(project, prefab.name, lang, opts.declared),
       language: lang,
       owner: "generated",
     });
@@ -173,7 +172,11 @@ function atlasSidecar(asset: AssetDef): string {
       trimmed: false,
       spriteSourceSize: { x: 0, y: 0, w: f.w, h: f.h },
       sourceSize: { w: f.w, h: f.h },
-      pivot: { x: f.pivotX, y: f.pivotY },
+      // Only a pivot someone set. Phaser marks any frame that has one as a
+      // custom pivot, and then every setFrame and animation step resets the
+      // sprite's origin to it and flipX stops mirroring about the origin — so
+      // writing the centre on every frame overrode the game's own setOrigin.
+      ...(f.pivotX !== 0.5 || f.pivotY !== 0.5 ? { pivot: { x: f.pivotX, y: f.pivotY } } : {}),
     };
   }
   return (
@@ -234,7 +237,7 @@ function q(value: string): string {
 /** Names a generated function body may not take for one of its own locals. */
 const RESERVED = new Set([
   // the function's own vocabulary
-  "scene", "scripts", "groups", "maps", "Phaser", "ScriptHost", "joinGroup",
+  "scene", "groups", "maps", "Phaser",
   // the language's
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
   "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
@@ -301,26 +304,9 @@ export function generateSceneLayout(
   const fields: Field[] = [];
   /** Body configuration, held back until every group exists. */
   const bodyLines: string[] = [];
+  /** `applyBody()` lines in bodyLines, by index, with the object each is for. */
+  const reapply = new Map<number, SceneObject>();
   const usedPrefabClasses = new Set<string>();
-  /** Script classes this scene constructs, keyed by src::class. */
-  const scriptImports = new Map<string, { alias: string; module: string }>();
-  /**
-   * Module-scope identifiers already spoken for, so a script imported later
-   * takes an alias instead of shadowing one. Seeded with the prefab class
-   * names: a `Brick` prefab whose behaviour is a `Brick` script is the obvious
-   * way to name that object, and two imports of one name do not compile.
-   */
-  const moduleNames = new Set<string>([
-    "Phaser",
-    "ScriptHost",
-    "joinGroup",
-    `${cls}Layout`,
-    `preload${cls}`,
-    `create${cls}`,
-    ...usedPrefabs(project, scene).map(className),
-  ]);
-
-  const hasScripts = scene.objects.some((o) => scriptsOf(resolveObject(project, o)).length > 0);
   // ---- preload ----
   const P: string[] = [];
   if (!manifest.length) P.push(`  // No assets referenced by this scene.`);
@@ -359,12 +345,9 @@ export function generateSceneLayout(
   if (scene.settings.gravityY) {
     L.push(`  scene.physics.world.gravity.y = ${scene.settings.gravityY};`);
   }
-  if (hasScripts) {
-    // One host per scene owns the update loop, so scripts run in the order
-    // this file attaches them — which is the order the editor's list shows.
-    L.push(`  const scripts = new ScriptHost(scene);`);
-  }
   L.push(``);
+
+  emitAnimations(L, project);
 
   scene.layers.forEach((layer, depth) => {
     if (layer.kind === "tile") {
@@ -432,7 +415,6 @@ export function generateSceneLayout(
       if (obj.text) {
         emitText(L, v, obj, world, depth);
         fields.push({ name: v, type: "Phaser.GameObjects.Text", doc: `"${obj.name}"` });
-        emitScripts(L, v, obj, scriptImports, moduleNames, opts);
         continue;
       }
 
@@ -446,9 +428,14 @@ export function generateSceneLayout(
         const pcls = className(prefab.name);
         L.push(`  const ${v} = new ${pcls}(${constructorArgs(prefab, obj, world)});`);
         L.push(`  ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
-        if (prefab.root.body && !prefab.source) bodyLines.push(`  ${v}.applyBody();`);
+        // Kept only if the object's group config resets a setting its body
+        // needs, which is decided once the groups are known.
+        if (prefab.root.body && !prefab.source && obj.group) {
+          reapply.set(bodyLines.length, obj);
+          bodyLines.push(`  ${v}.applyBody();`);
+        }
         emitProperties(L, bodyLines, v, obj, prefab.root as unknown as SceneObject, world, ts);
-        emitClassProps(L, v, obj, prefab, opts);
+        emitClassProps(L, v, raw, obj, prefab, project, opts);
         fields.push({ name: v, type: pcls, doc: `"${obj.name}" — an instance of the ${prefab.name} prefab.` });
       } else {
         const factory = obj.body ? "scene.physics.add.sprite" : "scene.add.sprite";
@@ -467,9 +454,16 @@ export function generateSceneLayout(
         });
       }
 
-      if (obj.sounds?.spawn) L.push(`  scene.sound.play(${q(obj.sounds.spawn)});`);
-
-      emitScripts(L, v, obj, scriptImports, moduleNames, opts);
+      // Spawn cues. A prefab's constructor already plays its definition's, so
+      // `new` agrees with the editor; an instance states only what it changed.
+      const def = prefab?.root;
+      if (obj.playOnSpawn && obj.playOnSpawn !== def?.playOnSpawn) {
+        L.push(`  ${v}.play(${q(obj.playOnSpawn)});`);
+      } else if (!obj.playOnSpawn && def?.playOnSpawn) {
+        L.push(`  ${v}.stop();`);
+      }
+      const sound = obj.sounds?.spawn;
+      if (sound && sound !== def?.sounds?.spawn) L.push(`  scene.sound.play(${q(sound)});`);
     }
     L.push(``);
   });
@@ -490,24 +484,46 @@ export function generateSceneLayout(
   }
 
   // ---- groups ----
-  // Membership only. A group is how the scene's code names "every brick"; what
-  // happens when the ball meets one is that code's to say.
+  // Membership, plus the body settings its members share as the group's own
+  // config: an arcade group resets those settings on everything it takes, and
+  // config is how Phaser says what they should be. What happens when the ball
+  // meets a brick is the scene's code to say.
   if (groupVars.size) {
-    const depthOf = new Map(scene.layers.map((l, i) => [l.id, i] as const));
-    const firstObjectLayer = scene.layers.findIndex((l) => l.kind !== "tile");
-    L.push(`  // groups — an object your code adds later gets its authored body back`);
-    L.push(`  // (a group resets bodies to its own defaults) and, if it has no depth yet,`);
-    L.push(`  // the depth of the layer this group's objects were placed on.`);
+    const effective = new Map<string, Map<BodySettingKey, unknown>>();
+    L.push(`  // groups`);
     for (const [group, gv] of groupVars) {
       const placed = scene.objects
-        .map((raw) => ({ raw, obj: resolveObject(project, raw) }))
-        .filter(({ obj }) => obj.group === group && obj.body && varsById.has(obj.id));
-      const members = placed.map(({ obj }) => varsById.get(obj.id)!);
-      const depth = homeDepth(placed.map(({ raw }) => depthOf.get(raw.layerId) ?? -1), firstObjectLayer);
-      L.push(`  const ${gv} = scene.physics.add.group(${members.length ? `[${members.join(", ")}]` : ""});`);
-      L.push(`  ${gv}.createCallback = joinGroup(${depth >= 0 ? depth : ""});`);
+        .map((raw) => resolveObject(project, raw))
+        .filter((obj) => obj.group === group && obj.body && varsById.has(obj.id));
+      const members = placed.map((obj) => varsById.get(obj.id)!);
+      // Every body that can end up in this group: what is placed, and every
+      // prefab tagged with it, since code may make more of those.
+      const bodies = [
+        ...placed.map((obj) => obj.body!),
+        ...project.prefabs
+          .map((p) => resolvePrefab(project, p.name)?.root)
+          .filter((root) => root?.group === group && root.body)
+          .map((root) => root!.body!),
+      ];
+      const shared = groupBodyConfig(bodies);
+      effective.set(group, shared.effective);
+      if (shared.mixed.length) {
+        L.push(`  // ${group}: members differ on ${shared.mixed.join(", ")}, so the group does not set it.`);
+      }
+      if (shared.config.length) {
+        L.push(`  const ${gv} = scene.physics.add.group({ ${shared.config.join(", ")} });`);
+        if (members.length) L.push(`  ${gv}.addMultiple([${members.join(", ")}]);`);
+      } else {
+        L.push(`  const ${gv} = scene.physics.add.group(${members.length ? `[${members.join(", ")}]` : ""});`);
+      }
     }
     L.push(``);
+    // An applyBody() is only needed where the group's config reset something
+    // this object's body says otherwise.
+    for (const [at, obj] of [...reapply].reverse()) {
+      const settled = effective.get(obj.group!);
+      if (settled && !bodyNeedsReapply(obj.body!, settled)) bodyLines.splice(at, 1);
+    }
     if (bodyLines.length) {
       L.push(`  // bodies, after their groups: a group applies its own defaults`);
       L.push(`  // to every child it takes, and would overwrite these.`);
@@ -516,39 +532,6 @@ export function generateSceneLayout(
     }
   } else if (bodyLines.length) {
     L.push(...bodyLines);
-    L.push(``);
-  }
-
-  // ---- animations ----
-  // Every animation the project defines, not only the ones an object names on
-  // spawn: nothing in a scene file can say what your code plays, and an
-  // animation that is merely absent fails at the moment it is asked for.
-  const anims = project.anims.filter((a) => a.frames.length > 0);
-  if (anims.length) {
-    L.push(`  // animations — global in Phaser, so a second scene finds them already there`);
-    for (const anim of anims) {
-      L.push(`  if (!scene.anims.exists(${q(anim.key)})) {`);
-      L.push(`    scene.anims.create({`);
-      L.push(`      key: ${q(anim.key)},`);
-      L.push(
-        `      frames: [${anim.frames
-          .map(
-            (f) =>
-              `{ key: ${q(f.textureKey)}, frame: ${frameLiteral(f.frame)}${f.duration ? `, duration: ${f.duration}` : ""} }`,
-          )
-          .join(", ")}],`,
-      );
-      L.push(`      frameRate: ${anim.fps},`);
-      L.push(`      repeat: ${animRepeat(anim)},`);
-      if (anim.yoyo) L.push(`      yoyo: true,`);
-      L.push(`    });`);
-      L.push(`  }`);
-    }
-    for (const raw of scene.objects) {
-      const obj = resolveObject(project, raw);
-      const v = varsById.get(obj.id);
-      if (v && obj.playOnSpawn) L.push(`  ${v}.play(${q(obj.playOnSpawn)});`);
-    }
     L.push(``);
   }
 
@@ -565,7 +548,6 @@ export function generateSceneLayout(
     ...(mapVars.size
       ? [`maps: { ${[...mapVars].map(([key, mv]) => `${propertyKey(key)}: ${mv}`).join(", ")} }`]
       : []),
-    ...(hasScripts ? ["scripts"] : []),
   ];
   L.push(`  return {`);
   for (const line of returned) L.push(`    ${line},`);
@@ -594,14 +576,6 @@ export function generateSceneLayout(
     }
     out.push(`import { ${className(name)} } from "../prefabs/${className(name)}${ts ? "" : ".js"}";`);
   }
-  if (hasScripts) {
-    out.push(`import { ScriptHost } from "${relativeModule(layoutFile, SCRIPT_BASE_FILE)}";`);
-    for (const [key, entry] of [...scriptImports].sort(([a], [b]) => a.localeCompare(b))) {
-      const name = key.split("::")[1];
-      const binding = entry.alias === name ? name : `${name} as ${entry.alias}`;
-      out.push(`import { ${binding} } from "${entry.module}";`);
-    }
-  }
   out.push(``);
 
   if (ts) {
@@ -623,10 +597,6 @@ export function generateSceneLayout(
         `  maps: { ${[...mapVars.keys()].map((key) => `${propertyKey(key)}: Phaser.Tilemaps.Tilemap`).join("; ")} };`,
       );
     }
-    if (hasScripts) {
-      out.push(`  /** Runs the script components attached in the editor. */`);
-      out.push(`  scripts: ScriptHost;`);
-    }
     out.push(`}`);
     out.push(``);
   }
@@ -645,67 +615,67 @@ export function generateSceneLayout(
   out.push(...L);
   out.push(`}`);
 
-  if (groupVars.size) {
-    out.push(``);
-    out.push(...JOIN_GROUP[lang]);
-  }
-
   out.push(``);
   return out.join("\n");
 }
 
 /**
- * The depth an object added to a group at run time is drawn at: the object
- * layer most of the group's placed members sit on (the lower on a tie), or,
- * when the scene places none, the scene's first object layer. -1 when the
- * scene has no object layer at all, and depth is then left alone.
+ * The body settings an arcade group resets on everything it takes, with
+ * Phaser's own default for each and the config key that sets it.
  */
-function homeDepth(memberDepths: number[], firstObjectLayer: number): number {
-  const counts = new Map<number, number>();
-  for (const d of memberDepths) if (d >= 0) counts.set(d, (counts.get(d) ?? 0) + 1);
-  let best = -1;
-  let most = 0;
-  for (const [d, n] of counts) {
-    if (n > most || (n === most && d < best)) [best, most] = [d, n];
-  }
-  return best >= 0 ? best : firstObjectLayer;
-}
+const BODY_SETTINGS = [
+  { key: "allowGravity", phaser: true, read: (b: BodyDef) => b.allowGravity, emit: (v: unknown) => [`allowGravity: ${v}`] },
+  { key: "immovable", phaser: false, read: (b: BodyDef) => b.immovable, emit: (v: unknown) => [`immovable: ${v}`] },
+  { key: "bounce", phaser: 0, read: (b: BodyDef) => b.bounce, emit: (v: unknown) => [`bounceX: ${v}`, `bounceY: ${v}`] },
+  {
+    key: "collideWorldBounds",
+    phaser: false,
+    read: (b: BodyDef) => b.collideWorldBounds ?? DEFAULT_COLLIDE_WORLD_BOUNDS,
+    emit: (v: unknown) => [`collideWorldBounds: ${v}`],
+  },
+] as const;
+
+type BodySettingKey = (typeof BODY_SETTINGS)[number]["key"];
 
 /**
- * Installed as each group's createCallback once the layout's own members are
- * in, so it runs only for what the game's code adds afterwards. Arcade resets
- * the body of anything a group takes to the group's defaults — gravity on,
- * world-bounds collision off, immovable off, bounce 0. The shape survives;
- * the settings do not — which silently undid the body
- * the editor authored; `applyBody()` puts it back. A depth is given only to an
- * object still at 0, the depth nothing has set: one the code placed itself is
- * left where it was put.
+ * A group's config, from the bodies that can end up in it.
+ *
+ * A setting every body agrees on goes into the config, and is left out when it
+ * is Phaser's default anyway. A setting they disagree on is left out and named,
+ * so the layout can say why. `effective` is what the group leaves each setting
+ * at once it has taken an object.
  */
-const JOIN_GROUP: Record<"ts" | "js", string[]> = {
-  ts: [
-    `/** What a group does with an object added to it after the layout ran. */`,
-    `function joinGroup(depth?: number): Phaser.Types.GameObjects.Group.GroupCallback {`,
-    `  return (child) => {`,
-    `    const made = child as Phaser.GameObjects.GameObject & {`,
-    `      applyBody?: () => unknown;`,
-    `      depth?: number;`,
-    `      setDepth?: (value: number) => unknown;`,
-    `    };`,
-    `    made.applyBody?.();`,
-    `    if (depth !== undefined && made.depth === 0) made.setDepth?.(depth);`,
-    `  };`,
-    `}`,
-  ],
-  js: [
-    `/** What a group does with an object added to it after the layout ran. */`,
-    `function joinGroup(depth) {`,
-    `  return (child) => {`,
-    `    child.applyBody?.();`,
-    `    if (depth !== undefined && child.depth === 0) child.setDepth?.(depth);`,
-    `  };`,
-    `}`,
-  ],
-};
+function groupBodyConfig(bodies: BodyDef[]): {
+  config: string[];
+  mixed: string[];
+  effective: Map<BodySettingKey, unknown>;
+} {
+  const config: string[] = [];
+  const mixed: string[] = [];
+  const effective = new Map<BodySettingKey, unknown>();
+  for (const setting of BODY_SETTINGS) {
+    const values = new Set(bodies.map((b) => setting.read(b)));
+    if (values.size === 1) {
+      const [value] = values;
+      effective.set(setting.key, value);
+      if (value !== setting.phaser) config.push(...setting.emit(value));
+    } else {
+      effective.set(setting.key, setting.phaser);
+      if (values.size > 1) mixed.push(setting.key);
+    }
+  }
+  // Friction is not authored, so a body means Arcade's own default for it:
+  // 1, which is what lets an immovable moving body carry whatever stands on
+  // it. A group's default is 0, so a group of moving platforms would stop
+  // carrying anything. Arcade only reads friction for immovable bodies.
+  if (effective.get("immovable") === true) config.push("frictionX: 1");
+  return { config, mixed, effective };
+}
+
+/** Whether a body's settings differ from what its group left them at. */
+function bodyNeedsReapply(body: BodyDef, effective: Map<BodySettingKey, unknown>): boolean {
+  return BODY_SETTINGS.some((s) => s.read(body) !== effective.get(s.key));
+}
 
 /** A spritesheet frame is a number to Phaser; an atlas frame is a name. */
 function frameLiteral(frame: string): string {
@@ -717,68 +687,61 @@ function propertyKey(name: string): string {
 }
 
 /**
- * Attaches the object's script components, in list order.
- *
- * A disabled script is still constructed and still gets its values — the
- * runtime skips create/update — so switching one off in the editor and back on
- * at runtime behaves the way the inspector implies.
- */
-function emitScripts(
-  L: string[],
-  v: string,
-  obj: SceneObject,
-  imports: Map<string, { alias: string; module: string }>,
-  aliases: Set<string>,
-  opts: CodegenOptions,
-): void {
-  for (const script of scriptsOf(obj)) {
-    const key = `${script.src}::${script.class}`;
-    let entry = imports.get(key);
-    if (!entry) {
-      // Two classes may share a name in different folders; the second one to
-      // arrive is imported under an alias rather than shadowing the first.
-      let alias = script.class;
-      let n = 2;
-      while (aliases.has(alias)) alias = `${script.class}${n++}`;
-      aliases.add(alias);
-      entry = { alias, module: relativeModule("src/scenes/x.ts", script.src) };
-      imports.set(key, entry);
-    }
-    const declared = opts.declared?.(script.src, script.class) ?? null;
-    const props = Object.entries(script.props ?? {}).filter(([k]) => !declared || declared.has(k));
-    const propsArg = props.length
-      ? `{ ${props.map(([k, val]) => `${propertyKey(k)}: ${JSON.stringify(val)}`).join(", ")} }`
-      : "{}";
-    const enabledArg = script.enabled ? "" : ", false";
-    L.push(`  scripts.add(${v}, new ${entry.alias}(), ${propsArg}${enabledArg});`);
-  }
-}
-
-/**
- * Values for the `@property` fields a prefab's own class declares.
+ * Values for the editable fields a prefab's own class declares.
  *
  * This is behaviour without a component: the class is an ordinary
  * `Phaser.GameObjects.Sprite` subclass, the field is an ordinary field, and
- * the editor sets it the way your own code would.
+ * the editor sets it after `new` the way your own code would.
+ *
+ * Only what `new` does not already give is stated. A variant's values are
+ * field initialisers on its generated class, so they are skipped here. What
+ * remains is the instance's own values, plus any value a root definition
+ * still carries from before the class became the root's default. Those still
+ * apply to placed instances, and the inspector asks for them to be moved into
+ * code. A prefab bound to the project's own class has no generated class to
+ * carry anything, so it gets every resolved value, as before.
  */
 function emitClassProps(
   L: string[],
   v: string,
+  raw: SceneObject,
   obj: SceneObject,
   prefab: { name: string; source?: PrefabSource },
+  project: ProjectData,
   opts: CodegenOptions,
 ): void {
   const where = prefab.source
     ? { src: prefab.source.module, cls: prefab.source.export === "default" ? prefab.name : prefab.source.export }
     : { src: prefabClassPath(prefab.name, opts.language ?? "ts"), cls: className(prefab.name) };
   const declared = opts.declared?.(where.src, where.cls) ?? null;
-  // `obj` is resolved, so these are the definition's defaults with the
-  // instance's own values over them.
-  for (const [key, value] of Object.entries(obj.props ?? {})) {
+  let props = obj.props ?? {};
+  if (!prefab.source) {
+    const own = raw.props ?? {};
+    const defined = resolvePrefab(project, prefab.name)?.root.props ?? {};
+    const root = resolvePrefab(project, rootPrefabName(project, prefab.name))?.root.props ?? {};
+    const legacy = Object.fromEntries(
+      Object.entries(root).filter(([k, val]) => JSON.stringify(defined[k]) === JSON.stringify(val)),
+    );
+    props = { ...legacy, ...own };
+  }
+  for (const [key, value] of Object.entries(props)) {
     if (declared && !declared.has(key)) continue;
     if (!/^[A-Za-z_$][\w$]*$/.test(key)) continue;
     L.push(`  ${v}.${key} = ${JSON.stringify(value)};`);
   }
+}
+
+/** The prefab at the top of `name`'s variant chain. */
+function rootPrefabName(project: ProjectData, name: string): string {
+  const seen = new Set<string>();
+  let current = findPrefab(project, name);
+  while (current?.base && !seen.has(current.name)) {
+    seen.add(current.name);
+    const next = findPrefab(project, current.base);
+    if (!next) break;
+    current = next;
+  }
+  return current?.name ?? name;
 }
 
 /** Text is CONTENT, so it is built here rather than left for create() to write by hand. */
@@ -797,7 +760,9 @@ function emitText(L: string[], v: string, obj: SceneObject, world: Transform, de
   );
   L.push(`  ${v}.setName(${q(obj.name)}).setDepth(${depth});`);
   if (t.stroke && t.strokeThickness) L.push(`  ${v}.setStroke(${q(t.stroke)}, ${t.strokeThickness});`);
-  if (obj.originX !== 0.5 || obj.originY !== 0.5) {
+  // Phaser's Text starts at origin (0, 0), unlike a Sprite. The editor draws
+  // text at the object's own origin, so anything else has to be stated.
+  if (obj.originX !== 0 || obj.originY !== 0) {
     L.push(`  ${v}.setOrigin(${obj.originX}, ${obj.originY});`);
   }
   if (world.rotation !== 0) L.push(`  ${v}.setAngle(${round(world.rotation)});`);
@@ -810,6 +775,39 @@ function emitText(L: string[], v: string, obj: SceneObject, world: Transform, de
   for (const [k, val] of Object.entries(obj.data ?? {})) {
     L.push(`  ${v}.setData(${q(k)}, ${JSON.stringify(val)});`);
   }
+}
+
+/**
+ * Every animation the project defines, registered before any object is built.
+ *
+ * All of them, not only the ones an object names on spawn: nothing in a scene
+ * file can say what your code plays, and an animation that is merely absent
+ * fails at the moment it is asked for. First, because a prefab plays its spawn
+ * animation in its own constructor, and the key has to exist by then.
+ */
+function emitAnimations(L: string[], project: ProjectData): void {
+  const anims = project.anims.filter((a) => a.frames.length > 0);
+  if (!anims.length) return;
+  L.push(`  // animations — global in Phaser, so a second scene finds them already there`);
+  for (const anim of anims) {
+    L.push(`  if (!scene.anims.exists(${q(anim.key)})) {`);
+    L.push(`    scene.anims.create({`);
+    L.push(`      key: ${q(anim.key)},`);
+    L.push(
+      `      frames: [${anim.frames
+        .map(
+          (f) =>
+            `{ key: ${q(f.textureKey)}, frame: ${frameLiteral(f.frame)}${f.duration ? `, duration: ${f.duration}` : ""} }`,
+        )
+        .join(", ")}],`,
+    );
+    L.push(`      frameRate: ${anim.fps},`);
+    L.push(`      repeat: ${animRepeat(anim)},`);
+    if (anim.yoyo) L.push(`      yoyo: true,`);
+    L.push(`    });`);
+    L.push(`  }`);
+  }
+  L.push(``);
 }
 
 /** The camera, from the scene's own settings rather than from hand-written code. */
@@ -1007,6 +1005,7 @@ export function generatePrefabLayout(
   project: ProjectData,
   name: string,
   lang: Language = "ts",
+  declared?: CodegenOptions["declared"],
 ): string {
   const ts = lang === "ts";
   // Resolved: a variant has no tree of its own, and the class it becomes has
@@ -1051,14 +1050,18 @@ export function generatePrefabLayout(
       if (JSON.stringify(pdata[k]) === JSON.stringify(v)) continue;
       L.push(`    this.setData(${q(k)}, ${JSON.stringify(v)});`);
     }
-    L.push(`  }`);
-    if (JSON.stringify(node.props ?? {}) !== JSON.stringify(pnode.props ?? {})) {
-      L.push(``);
-      emitDefaults(L, node.props ?? {}, ts, true);
+    if (node.playOnSpawn !== pnode.playOnSpawn) {
+      L.push(node.playOnSpawn ? `    this.play(${q(node.playOnSpawn)});` : `    this.stop();`);
     }
+    L.push(`  }`);
+    emitVariantFields(L, pcls, node.props ?? {}, pnode.props ?? {}, ts, declared?.(prefabClassPath(parentName, lang), pcls) ?? null);
     if (bodyChanged) {
       L.push(``);
       emitApplyBody(L, node.body!, ts, !!pnode.body);
+    }
+    if ((node.sounds?.spawn ?? "") !== (pnode.sounds?.spawn ?? "")) {
+      L.push(``);
+      emitSpawnSound(L, node.sounds?.spawn ?? "", ts, true);
     }
     L.push(`}`);
     L.push(``);
@@ -1089,18 +1092,21 @@ export function generatePrefabLayout(
   for (const [k, v] of Object.entries(node.data ?? {})) {
     L.push(`    this.setData(${q(k)}, ${JSON.stringify(v)});`);
   }
-  if (node.playOnSpawn) {
-    L.push(`    // Plays ${q(node.playOnSpawn)} on spawn — started by the scene layout, once the`);
-    L.push(`    // animation is registered. A play() here would run before the key exists.`);
+  // Spawn cues run here, so `new` from code plays them as a placed one does.
+  if (node.playOnSpawn) L.push(`    this.play(${q(node.playOnSpawn)});`);
+  const voiced = familyHasSpawnSound(project, name);
+  if (voiced) {
+    L.push(`    const sound = this.spawnSound();`);
+    L.push(`    if (sound) scene.sound.play(sound);`);
   }
   L.push(`  }`);
-  L.push(``);
-  emitDefaults(L, node.props ?? {}, ts, false);
-  L.push(``);
-  emitSpawn(L, cls, ts);
   if (node.body) {
     L.push(``);
     emitApplyBody(L, node.body, ts, false);
+  }
+  if (voiced) {
+    L.push(``);
+    emitSpawnSound(L, node.sounds?.spawn ?? "", ts, false);
   }
   L.push(`}`);
   L.push(``);
@@ -1108,56 +1114,72 @@ export function generatePrefabLayout(
 }
 
 /**
- * The values the editor set on the definition for the class's own @property
- * fields. Static, because they cannot be applied in this constructor: your
- * class's field initialisers run after it and would put the code's defaults
- * straight back. `spawn` applies them afterwards.
+ * The values a variant sets on its parent's editable fields, as ordinary field
+ * initialisers.
+ *
+ * The variant's base class extends the parent's class (yours), and a
+ * subclass's field initialisers run after its parent's. So a plain
+ * `new Enemy_Fast(scene, x, y)` starts with the variant's numbers, the same way
+ * it would if you had written the subclass by hand. Nothing has to be applied
+ * after construction.
+ *
+ * A root prefab has no equivalent. Its class is yours, and the initialiser you
+ * wrote there is the default.
  */
-function emitDefaults(L: string[], props: Record<string, unknown>, ts: boolean, overrides: boolean): void {
-  const entries = Object.entries(props).filter(([k]) => /^[A-Za-z_$][\w$]*$/.test(k));
-  const literal = entries.length
-    ? `{ ${entries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }`
-    : "{}";
-  L.push(`  /** What the editor set on this prefab's definition, for the class's @property fields. */`);
-  L.push(
-    ts
-      ? `  static ${overrides ? "override " : ""}readonly defaults: Readonly<Record<string, unknown>> = ${literal};`
-      : `  static defaults = ${literal};`,
+function emitVariantFields(
+  L: string[],
+  parentClass: string,
+  props: Record<string, unknown>,
+  parentProps: Record<string, unknown>,
+  ts: boolean,
+  declared: Set<string> | null,
+): void {
+  const entries = Object.entries(props).filter(
+    ([k, v]) =>
+      /^[A-Za-z_$][\w$]*$/.test(k) &&
+      JSON.stringify(v) !== JSON.stringify(parentProps[k]) &&
+      (!declared || declared.has(k)),
   );
+  if (!entries.length) return;
+  L.push(``);
+  L.push(`  // Set on this variant in the editor. They run after ${parentClass}'s own`);
+  L.push(`  // initialisers, so \`new\` starts with these.`);
+  for (const [k, v] of entries) {
+    L.push(
+      ts
+        ? `  override ${k}: ${parentClass}[${q(k)}] = ${JSON.stringify(v)};`
+        : `  ${k} = ${JSON.stringify(v)};`,
+    );
+  }
 }
 
 /**
- * Making one from code, the way the layout makes the ones placed in the
- * editor: constructed, then given the definition's values. Called on your
- * class — `Bullet.spawn(scene, x, y)` — so it builds your class, and a variant
- * builds the variant.
+ * True when any prefab in `name`'s family — the root and every variant below it
+ * — plays a sound on spawn.
+ *
+ * The sound is played in the root's constructor, so a variant cannot simply
+ * play a different one after it: the root's would already be playing. It is
+ * asked for through a method instead, which a variant overrides.
  */
-function emitSpawn(L: string[], cls: string, ts: boolean): void {
-  L.push(`  /**`);
-  L.push(`   * Makes one at run time, with the values the editor set on the definition.`);
-  L.push(`   * Call it on your own class: \`${cls}.spawn(scene, x, y)\`.`);
-  L.push(`   */`);
-  if (ts) {
-    L.push(`  static spawn<T extends Phaser.GameObjects.GameObject>(`);
-    L.push(`    this: (new (scene: Phaser.Scene, x: number, y: number) => T) & { defaults: object },`);
-    L.push(`    scene: Phaser.Scene,`);
-    L.push(`    x: number,`);
-    L.push(`    y: number,`);
-    L.push(`  ): T {`);
-  } else {
-    L.push(`  static spawn(scene, x, y) {`);
-  }
-  L.push(`    const made = new this(scene, x, y);`);
-  L.push(`    Object.assign(made, this.defaults);`);
-  L.push(`    return made;`);
+function familyHasSpawnSound(project: ProjectData, name: string): boolean {
+  const root = rootPrefabName(project, name);
+  return project.prefabs.some(
+    (p) => rootPrefabName(project, p.name) === root && !!resolvePrefab(project, p.name)?.root.sounds?.spawn,
+  );
+}
+
+function emitSpawnSound(L: string[], key: string, ts: boolean, overrides: boolean): void {
+  L.push(`  /** The sound played when one is made: "on spawn" in the editor. */`);
+  L.push(`  ${overrides && ts ? "override " : ""}spawnSound()${ts ? ": string" : ""} {`);
+  L.push(`    return ${q(key)};`);
   L.push(`  }`);
 }
 
 function emitApplyBody(L: string[], b: BodyDef, ts: boolean, overrides: boolean): void {
   L.push(`  /**`);
-  L.push(`   * The body authored in the editor. Public and idempotent because joining an`);
-  L.push(`   * arcade group overwrites a body with the GROUP's defaults, so the layout's`);
-  L.push(`   * groups call this again for anything added to them.`);
+  L.push(`   * The body authored in the editor. Public and idempotent: joining an arcade`);
+  L.push(`   * group resets body settings to the group's config, so call this again after`);
+  L.push(`   * adding one to a group configured differently.`);
   L.push(`   */`);
   L.push(`  ${overrides && ts ? "override " : ""}applyBody()${ts ? ": this" : ""} {`);
   L.push(`    const body = this.body${ts ? " as Phaser.Physics.Arcade.Body" : ""};`);
@@ -1188,14 +1210,15 @@ export function generatePrefabClass(name: string, lang: Language = "ts"): string
 /**
  * ${name} — this file is yours.
  *
- * Mosaic wrote it once and will not touch it again. The art, the body and the
- * defaults you author in the editor arrive through ${cls}Base
- * (./${cls}.layout.${lang}, regenerated on every save). Behaviour goes here, the
- * way it would on any Phaser sprite — and a field marked @property shows up in
- * the editor's inspector for every ${name} you place.
+ * Mosaic wrote it once and will not touch it again. The art and the body you
+ * author in the editor arrive through ${cls}Base (./${cls}.layout.${lang},
+ * regenerated on every save). Behaviour goes here, the way it would on any
+ * Phaser sprite. Put \`@editable\` in a field's doc comment, optionally with
+ * limits like \`@editable { min: 0, max: 600 }\`, and it shows up in the
+ * editor's inspector for every ${name} you place. The value written here is
+ * the default.
  *
- * To make one from code, use \`${cls}.spawn(scene, x, y)\`: it is \`new\` plus the
- * values the editor set on the definition.
+ * Make one from code with \`new ${cls}(scene, x, y)\`.
  */
 export class ${cls} extends ${cls}Base {
   // preUpdate(time${ts ? ": number" : ""}, delta${ts ? ": number" : ""})${ts ? ": void" : ""} {

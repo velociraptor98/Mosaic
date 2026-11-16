@@ -31,7 +31,7 @@ export function PrefabPanel() {
 // ---------------------------------------------------------------- definition
 
 function DefinitionView() {
-  const { store, workspace } = useEditor();
+  const { store } = useEditor();
   const doc = store.prefabDoc!;
   const resolved = store.prefabDocResolved();
   const [section, setSection] = useState<"contents" | "expose" | "variants">("contents");
@@ -39,7 +39,7 @@ function DefinitionView() {
 
   const usage = prefabUsage(store.project, doc.name);
   const total = usage.reduce((n, u) => n + u.count, 0);
-  const catalog = exposureCatalog(resolved, workspace.scripts, doc.exposed);
+  const catalog = exposureCatalog(resolved, doc.exposed);
 
   return (
     <div className="stack">
@@ -230,9 +230,8 @@ function ExposeSection({ catalog }: { catalog: ExposureEntry[] }) {
 
       {catalog.some((e) => e.orphaned) && (
         <div className="hint">
-          A greyed row is exposed but no longer declared — the class dropped the{" "}
-          <code>@property</code>, or the component went away. It keeps its place until you resolve
-          it, rather than shrinking the contract behind your back.
+          A greyed row is exposed but no longer exists in the definition. It keeps its place until
+          you resolve it, rather than shrinking the contract behind your back.
         </div>
       )}
 

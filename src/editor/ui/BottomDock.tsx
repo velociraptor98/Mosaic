@@ -3,9 +3,10 @@ import { prefabUsage } from "../../shared/propagate";
 import { imageSize, readFileAsDataUrl } from "../assets/slice";
 import type { AnimDef, AssetDef } from "../../shared/types";
 import { AnimPreview } from "./AnimPreview";
+import { NewPrefabDialog } from "./dialogs/NewPrefabDialog";
 import { NumberField, TextField } from "./fields";
 import { useEditor, useScripts, useStoreVersion } from "./context";
-import { isScriptComponent, sourceFiles } from "../scripts/parse";
+import { sourceFiles } from "../scripts/parse";
 import { platform } from "../platform";
 
 export function BottomDock() {
@@ -55,6 +56,7 @@ export function BottomDock() {
 function AssetBrowser() {
   const { store, openDialog } = useEditor();
   const [filter, setFilter] = useState<"all" | AssetDef["kind"]>("all");
+  const [prefabFrom, setPrefabFrom] = useState<AssetDef | null>(null);
   const assets = store.project.assets.filter((a) => filter === "all" || a.kind === filter);
   const placement = store.ui.placement;
 
@@ -143,8 +145,18 @@ function AssetBrowser() {
               </span>
             </button>
             <ReplaceArtButton assetId={asset.id} />
+            {asset.kind !== "audio" && asset.kind !== "tilemap" && (
+              <button
+                className="mini new-prefab"
+                title="New prefab from this art — for what your code makes with new"
+                onClick={() => setPrefabFrom(asset)}
+              >
+                ◆+
+              </button>
+            )}
           </div>
         ))}
+        {prefabFrom && <NewPrefabDialog asset={prefabFrom} onClose={() => setPrefabFrom(null)} />}
       </div>
     </div>
   );
@@ -441,11 +453,9 @@ function AnimEditor() {
 /**
  * Every source file in the project, and what the editor can do with each.
  *
- * The Scripts tab used to be a list of ScriptComponents, which meant a project
- * written before Mosaic showed an empty panel while its whole game sat on disk
- * beside it. What a person wants to know here is "what code is in this
- * project, and what does the editor understand about it" — so everything is
- * listed, and each file says which of three things it is.
+ * What a person wants to know here is "what code is in this project, and what
+ * does the editor understand about it", so every file is listed with its
+ * classes, and a class backing a prefab says so.
  */
 function ScriptBrowser() {
   const { store, workspace } = useEditor();
@@ -485,7 +495,6 @@ function ScriptBrowser() {
             </span>
           </div>
           {file.classes.map((cls) => {
-            const attachable = isScriptComponent(workspace.scripts.index, cls);
             const bound = boundByClass.get(cls.name);
             return (
               <div key={cls.name} className="script-class">
@@ -496,13 +505,12 @@ function ScriptBrowser() {
                   {cls.name}
                 </button>
                 <span className="note">{cls.base ? `extends ${cls.base}` : "no base class"}</span>
-                {attachable && <span className="chip on">attachable</span>}
                 {bound && (
                   <span className="chip on" title={`Instances construct ${cls.name} from ${cls.src}`}>
                     bound to prefab
                   </span>
                 )}
-                {!attachable && !bound && cls.ctorParams && (
+                {!bound && cls.ctorParams && (
                   <span className="note">
                     ({cls.ctorParams.join(", ")})
                   </span>

@@ -40,13 +40,12 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
     for (const node of walkNodes(prefab.root)) if (node.texture) needed.add(node.texture);
   }
 
-  // Audio the scene actually references. Clips used to load only if something
-  // else happened to pull them in, because nothing in the format named one.
-  for (const obj of scene.objects) {
-    const resolved = resolveObject(project, obj);
-    if (resolved.sounds?.spawn) needed.add(resolved.sounds.spawn);
-  }
-  if (scene.settings.music?.key) needed.add(scene.settings.music.key);
+  // Every clip the project has, for the reason every animation is registered:
+  // nearly all sound is played by code — a shot, a hit, a pickup — and nothing
+  // in a scene file can say which. A clip the scene's data never names used to
+  // arrive unloaded, and `sound.play()` throws for a key it has not got.
+  // Phaser keeps what one scene loaded, so the next scene's loader skips it.
+  for (const asset of project.assets) if (asset.kind === "audio") needed.add(asset.key);
 
   return project.assets.filter((a) => needed.has(a.key)).map(loaderEntry);
 }

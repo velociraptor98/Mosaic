@@ -92,7 +92,7 @@ export function SourceDrawer() {
       </div>
 
       <footer>
-        highlighted lines are the <code>@property</code> declarations the inspector is rendering
+        highlighted lines are the <code>@editable</code> fields the inspector is rendering
       </footer>
     </aside>
   );

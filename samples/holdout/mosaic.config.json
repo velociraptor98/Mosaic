@@ -1,0 +1,17 @@
+{
+  "canvas": {
+    "width": 1024,
+    "height": 576
+  },
+  "tile": 64,
+  "scale": "FIT",
+  "physics": "arcade",
+  "pixelArt": false,
+  "language": "ts",
+  "paths": {
+    "src": "src",
+    "scenes": "src/scenes",
+    "prefabs": "src/prefabs",
+    "assets": "assets"
+  }
+}

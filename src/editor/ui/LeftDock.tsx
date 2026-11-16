@@ -5,6 +5,7 @@ import type { SceneObject, TileLayer } from "../../shared/types";
 import { platform } from "../platform";
 import { prefabUsage } from "../../shared/propagate";
 import { MANIFEST_PATH, prefabPath, scenePath } from "../project/serialize";
+import { sourceFiles } from "../scripts/parse";
 import { useEditor, useScripts, useStoreVersion, useWorkspace } from "./context";
 
 const TABS: { id: LeftTab; label: string }[] = [
@@ -60,19 +61,7 @@ function ProjectTree() {
   useWorkspace(workspace);
   useScripts(workspace.scripts);
   const git = workspace.git;
-  const scriptFiles = workspace.scripts.files();
-  const allSourceCount = workspace.scripts.index.classes.length;
-  // How many objects, across every scene, actually run each class. A script
-  // nothing uses is worth seeing as much as one everything uses.
-  const usage = new Map<string, number>();
-  for (const scene of store.project.scenes) {
-    for (const obj of scene.objects) {
-      for (const script of store.scriptsFor(obj)) {
-        const key = `${script.src}::${script.class}`;
-        usage.set(key, (usage.get(key) ?? 0) + 1);
-      }
-    }
-  }
+  const codeFiles = sourceFiles(workspace.scripts.index);
 
   return (
     <div className="tree">
@@ -195,53 +184,33 @@ function ProjectTree() {
           class the project has is as much a part of it as a scene is. */}
       {platform.canOpenProjects && (
         <>
-          <div className="tree-group">scripts</div>
+          <div className="tree-group">code</div>
           {workspace.scripts.loading && <div className="empty">Indexing src/…</div>}
-          {!workspace.scripts.loading && scriptFiles.length === 0 && (
-            <div className="empty">
-              {/* "No script components" is true but reads as "no code here",
-                  which for an imported project is flatly wrong — its whole
-                  game is on disk. Say which of the two situations it is. */}
-              {allSourceCount > 0 ? (
-                <>
-                  {allSourceCount} source file(s) indexed, none of them Mosaic script components —
-                  see the Scripts tab in the dock for what is here.
-                </>
-              ) : (
-                <>No script components yet. Select an object and use + Add in the Scripts tab to write one.</>
-              )}
-            </div>
+          {!workspace.scripts.loading && codeFiles.length === 0 && (
+            <div className="empty">No source files under src/ yet.</div>
           )}
-          {scriptFiles.map((file) => {
-            const uses = file.components.reduce(
-              (n, cls) => n + (usage.get(`${file.src}::${cls.name}`) ?? 0),
-              0,
-            );
+          {codeFiles.map((file) => {
+            const first = file.classes[0];
             return (
               <div key={file.src} className="tree-row-wrap">
                 <button
                   className="tree-row"
-                  title={file.components
-                    .map((c) => `${c.name} · ${c.properties.length} @property`)
+                  title={file.classes
+                    .map((c) => `${c.name} · ${c.properties.length} editable`)
                     .join("\n")}
                   onClick={() =>
-                    store.setUi({
-                      sourceView: { src: file.src, className: file.components[0].name },
-                    })
+                    first && store.setUi({ sourceView: { src: file.src, className: first.name } })
                   }
                 >
                   <span className="glyph">ƒ</span>
                   {file.src.replace(/^src\//, "")}
                   <GitBadge code={git[file.src]} />
-                  <span className="meta">
-                    {file.components.map((c) => c.name).join(", ")}
-                    {uses > 0 ? ` · ${uses}×` : ""}
-                  </span>
+                  <span className="meta">{file.classes.map((c) => c.name).join(", ")}</span>
                 </button>
                 <button
                   className="mini"
                   title="Open in your editor"
-                  onClick={() => void workspace.scripts.openExternal(file.src, file.components[0].line)}
+                  onClick={() => void workspace.scripts.openExternal(file.src, first?.line)}
                 >
                   ↗
                 </button>
@@ -286,7 +255,6 @@ function ProjectTree() {
 function Outliner() {
   const { store } = useEditor();
   const scene = store.scene;
-  const scriptCount = (obj: SceneObject) => store.scriptsFor(obj).length;
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropId, setDropId] = useState<string | null>(null);
   if (!scene) return <div className="empty">No scene.</div>;
@@ -316,17 +284,15 @@ function Outliner() {
           onClick={(e) =>
             e.shiftKey ? store.toggleSelection(obj.id) : store.setSelection([obj.id])
           }
+          onDoubleClick={() => {
+            store.setSelection([obj.id]);
+            store.frameSelection();
+          }}
+          title="Double-click to bring it into view (F)"
         >
           <span className="glyph">{glyphFor(obj, store, doc?.rootId)}</span>
           <span className="name">{obj.name}</span>
           {obj.prefab && <span className="meta">{obj.prefab}</span>}
-          {/* The badge is the script count: the canvas should say an object
-              has behaviour without the inspector being opened. */}
-          {scriptCount(obj) > 0 && (
-            <span className="script-badge" title={`${scriptCount(obj)} script(s)`}>
-              {scriptCount(obj)}
-            </span>
-          )}
           <button
             className="mini"
             title={obj.visible ? "Hide" : "Show"}

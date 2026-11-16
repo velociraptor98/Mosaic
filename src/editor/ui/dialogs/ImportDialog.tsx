@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ATLAS_DOC_EXT, parsePhaserAtlas } from "../../assets/atlasJson";
 import { imageSize, inferAssetKind, readFileAsDataUrl } from "../../assets/slice";
 import { platform } from "../../platform";
 import { uid } from "../../store/ids";
@@ -9,7 +10,7 @@ import {
   tiledFromDataUrl,
   tiledToDataUrl,
 } from "../../../shared/tiled";
-import type { AssetDef, AssetKind } from "../../../shared/types";
+import type { AssetDef, AssetFrame, AssetKind } from "../../../shared/types";
 import { Dialog } from "./Dialog";
 import { useEditor } from "../context";
 
@@ -26,6 +27,8 @@ interface Row {
   frameHeight: number;
   margin: number;
   spacing: number;
+  /** An atlas's frames, read from the packer's document. */
+  frames?: AssetFrame[];
 }
 
 /**
@@ -58,6 +61,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         height,
         kind: asset.kind,
         key: asset.key,
+        frames: asset.frames,
         frameWidth: 32,
         frameHeight: 32,
         margin: 0,
@@ -97,7 +101,16 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
   const addFiles = async (files: FileList | File[]) => {
     const next: Row[] = [];
-    for (const file of Array.from(files)) {
+    const list = Array.from(files);
+    // An atlas document picked beside its sheet: frames by the sheet's stem.
+    const atlasFrames = new Map<string, AssetFrame[]>();
+    for (const file of list) {
+      if (!ATLAS_DOC_EXT.test(file.name)) continue;
+      const frames = parsePhaserAtlas(await file.text());
+      if (frames?.length) atlasFrames.set(file.name.replace(/\.\w+$/, ""), frames);
+    }
+    for (const file of list) {
+      if (/\.xml$/i.test(file.name)) continue;
       // The browser build has no folder, so a map travels inside the project.
       if (MAP_EXT.test(file.name)) {
         const map = parseTiledMap(await file.text());
@@ -118,12 +131,14 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       }
       const url = await readFileAsDataUrl(file);
       const { width, height } = await imageSize(url);
+      const frames = atlasFrames.get(file.name.replace(/\.\w+$/, ""));
       next.push({
         file,
         url,
         width,
         height,
-        kind: inferAssetKind(file),
+        frames,
+        kind: frames ? "atlas" : inferAssetKind(file),
         key: file.name.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_"),
         frameWidth: 32,
         frameHeight: 32,
@@ -143,6 +158,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       url: row.url,
       width: row.width,
       height: row.height,
+      ...(row.kind === "atlas" && row.frames ? { frames: row.frames } : {}),
       ...(row.kind === "spritesheet"
         ? {
             frameWidth: row.frameWidth,
@@ -220,7 +236,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <input
             type="file"
             multiple
-            accept="image/*,audio/*,.json,.tmj"
+            accept="image/*,audio/*,.json,.tmj,.xml"
             onChange={(e) => e.target.files && void addFiles(e.target.files)}
           />
           Drop images or audio here, or click to choose.
@@ -242,6 +258,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             <span className="meta">
               {row.rel ?? `assets/${row.file.name}`} · {row.width}×{row.height}
               {row.file.size ? ` · ${Math.round(row.file.size / 1024)}kb` : ""}
+              {row.kind === "atlas" && row.frames ? ` · ${row.frames.length} frames` : ""}
             </span>
           </div>
           <select

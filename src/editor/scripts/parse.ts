@@ -1,8 +1,18 @@
-import type { PropertyType } from "../../runtime/scripts";
-import { SCRIPT_BASE_CLASS } from "../../shared/scripts";
+import type { PropertyType } from "../../shared/scripts";
 
 /**
- * Reads `@property` declarations out of a project's own source.
+ * Reads editable-field declarations out of a project's own source.
+ *
+ * A field is editable when its doc comment carries an `@editable` tag:
+ *
+ *   /** Pixels per second. @editable { min: 0, max: 600 } *\/
+ *   speed = 220;
+ *
+ * That is a comment, so the class compiles and runs exactly as it would
+ * without Mosaic: no import, no decorator, no compiler setting, and it works
+ * in plain JavaScript. The comment's description becomes the inspector's hint.
+ * The older `@property(...)` decorator is still read, so projects written
+ * against it keep working.
  *
  * Mosaic never executes your code to find out what a script exposes — the
  * editor is a scene editor, not a sandbox for game code — so the class's
@@ -25,7 +35,7 @@ export interface ScriptProperty {
   step?: number;
   options?: string[];
   hint?: string;
-  /** 1-based line of the `@property` decorator. */
+  /** 1-based line of the annotation: the `@editable` doc comment or the decorator. */
   line: number;
   /** 1-based line of the field itself. */
   endLine: number;
@@ -152,6 +162,7 @@ function scan(source: string): { code: string[]; depth: number[]; balanced: bool
 
 export function parseScriptFile(src: string, source: string): ParsedFile {
   const { code, depth, balanced } = scan(source);
+  const raw = source.split(/\r?\n/);
   const classes: ScriptClass[] = [];
 
   let current: ScriptClass | null = null;
@@ -263,10 +274,21 @@ export function parseScriptFile(src: string, source: string): ParsedFile {
       continue;
     }
 
+    // A field whose doc comment says `@editable`.
+    if (!pending && line.trim()) {
+      const doc = editableDoc(raw, i);
+      if (doc && !isMethodLine(line)) {
+        const field = FIELD_RE.exec(line);
+        const property = field ? toProperty(field, doc, i + 1) : null;
+        if (property) current.properties.push(property);
+      }
+      continue;
+    }
+
     if (!pending) continue;
     if (!line.trim()) continue;
     // A decorator that annotates a method, not a field, exposes nothing.
-    if (/\(.*\)\s*\{?\s*$/.test(line) && !/=/.test(line)) {
+    if (isMethodLine(line)) {
       pending = null;
       continue;
     }
@@ -283,6 +305,70 @@ export function parseScriptFile(src: string, source: string): ParsedFile {
     classes,
     error: balanced ? undefined : "unbalanced braces — the file may not compile",
   };
+}
+
+/** A member line that declares a method rather than a field. */
+function isMethodLine(line: string): boolean {
+  return /\(.*\)\s*\{?\s*$/.test(line) && !/=/.test(line);
+}
+
+/**
+ * The `@editable` doc comment that annotates line `i`, if there is one: either
+ * a `/** … *\/` block ending on the line directly above, or one that sits on
+ * the same line in front of the field.
+ */
+function editableDoc(
+  raw: string[],
+  i: number,
+): { options: Record<string, unknown>; line: number } | null {
+  let text: string | null = null;
+  let line = i + 1;
+  const inline = /^\s*\/\*\*([\s\S]*?)\*\/\s*\S/.exec(raw[i]);
+  if (inline) text = inline[1];
+  else if (i > 0 && /\*\/\s*$/.test(raw[i - 1])) {
+    for (let k = i - 1; k >= 0; k--) {
+      const open = raw[k].indexOf("/**");
+      if (open >= 0) {
+        text = raw
+          .slice(k, i)
+          .join("\n")
+          .slice(open + 3)
+          .replace(/\*\/\s*$/, "");
+        line = k + 1;
+        break;
+      }
+      // Stop at a plain block comment or anything that is not comment body.
+      if (raw[k].includes("/*") || (k < i - 1 && !/^\s*\*/.test(raw[k]))) break;
+    }
+  }
+  if (text === null) return null;
+  // Strip the leading `*` of each comment line.
+  const body = text
+    .split("\n")
+    .map((l) => l.replace(/^\s*\*(?!\/)\s?/, ""))
+    .join("\n");
+  const tag = /@editable\b/.exec(body);
+  if (!tag) return null;
+
+  const after = body.slice(tag.index + tag[0].length).trimStart();
+  let options: Record<string, unknown> = {};
+  if (after.startsWith("{")) {
+    let open = 0;
+    for (let c = 0; c < after.length; c++) {
+      if (after[c] === "{") open++;
+      else if (after[c] === "}" && --open === 0) {
+        options = parseOptions(after.slice(0, c + 1));
+        break;
+      }
+    }
+  }
+  // The description: everything before the first tag, as one line.
+  const description = body
+    .slice(0, body.search(/(^|\s)@\w/) >= 0 ? body.search(/(^|\s)@\w/) : body.length)
+    .replace(/\s+/g, " ")
+    .trim();
+  if (description && options.hint === undefined) options = { ...options, hint: description };
+  return { options, line };
 }
 
 /** Accumulates a decorator call that may run over several lines. */
@@ -458,84 +544,28 @@ export function buildIndex(files: ParsedFile[]): ScriptIndex {
   };
 }
 
-/** True when the class extends ScriptComponent, directly or through a base. */
-export function isScriptComponent(index: ScriptIndex, cls: ScriptClass): boolean {
-  const seen = new Set<string>();
-  let base = cls.base;
-  while (base) {
-    const name = base.split(".").pop()!;
-    if (name === SCRIPT_BASE_CLASS) return true;
-    if (seen.has(name)) return false;
-    seen.add(name);
-    base = index.classes.find((c) => c.name === name)?.base ?? null;
-  }
-  return false;
-}
-
-/**
- * What the attach picker offers: real, exported, concrete components. Abstract
- * and non-exported classes are indexed — a subclass needs them to resolve —
- * but attaching one could never work, so they are not offered.
- */
-export function attachableClasses(index: ScriptIndex): ScriptClass[] {
-  return index.classes
-    .filter((c) => c.exported && !c.abstract && isScriptComponent(index, c))
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-export interface ComponentFile {
+export interface SourceFile {
   src: string;
-  /** Every class the file declares, component or not, in declaration order. */
+  /** Every class the file declares, in declaration order. */
   classes: ScriptClass[];
-  /** The ones that are actually script components. */
-  components: ScriptClass[];
 }
 
 /**
- * The project's script files, for the Project panel.
- *
- * Only files that declare at least one component: the index reads every source
- * file under src/, but main.ts and the generated scene classes are not scripts
- * and listing them would bury the ones that are.
+ * Every source file the project has, with the classes in it, for the Project
+ * panel. A file that declares no class (the entry point, usually) is listed
+ * too: it is still the project's code.
  */
-/**
- * Every source file the project has, with the classes in it.
- *
- * `componentFiles` answers a narrower question — which files declare something
- * ATTACHABLE — and returns nothing at all for a project written before Mosaic,
- * where no class extends ScriptComponent. That made the editor look like it had
- * found no code in a folder full of it. This is the honest inventory: the panel
- * decides what to say about each entry.
- */
-export function sourceFiles(index: ScriptIndex): ComponentFile[] {
+export function sourceFiles(index: ScriptIndex): SourceFile[] {
   const bySrc = new Map<string, ScriptClass[]>();
-  // Seeded with every file, so one that declares no class still appears.
   for (const src of index.files) bySrc.set(src, []);
   for (const cls of index.classes) {
     const list = bySrc.get(cls.src) ?? [];
     list.push(cls);
     bySrc.set(cls.src, list);
   }
-  const out: ComponentFile[] = [];
-  for (const [src, classes] of bySrc) {
-    out.push({ src, classes, components: classes.filter((c) => isScriptComponent(index, c)) });
-  }
-  return out.sort((a, b) => a.src.localeCompare(b.src));
-}
-
-export function componentFiles(index: ScriptIndex): ComponentFile[] {
-  const bySrc = new Map<string, ScriptClass[]>();
-  for (const cls of index.classes) {
-    const list = bySrc.get(cls.src) ?? [];
-    list.push(cls);
-    bySrc.set(cls.src, list);
-  }
-  const out: ComponentFile[] = [];
-  for (const [src, classes] of bySrc) {
-    const components = classes.filter((c) => isScriptComponent(index, c));
-    if (components.length) out.push({ src, classes, components });
-  }
-  return out.sort((a, b) => a.src.localeCompare(b.src));
+  return [...bySrc]
+    .map(([src, classes]) => ({ src, classes }))
+    .sort((a, b) => a.src.localeCompare(b.src));
 }
 
 /** Every property a class exposes, including those it inherits. */

@@ -137,25 +137,6 @@ export interface BodyDef {
 }
 
 /**
- * A script component attached to an object.
- *
- * The class lives in the project's own source tree; the scene file stores only
- * the reference and the values authored in the editor. `src` is what makes the
- * reference resolvable when two classes share a name, and it is kept even when
- * the class cannot be found, so an unresolved script is never silently dropped.
- */
-export interface ScriptRef {
-  /** Exported class name, e.g. "PlayerController". */
-  class: string;
-  /** Project-relative source path, e.g. "src/scripts/PlayerController.ts". */
-  src: string;
-  /** Disabled scripts are still constructed; create/update are skipped. */
-  enabled: boolean;
-  /** Values for the class's @property fields. Undeclared keys are stale. */
-  props: Record<string, unknown>;
-}
-
-/**
  * A text object's own settings.
  *
  * Text is CONTENT — a score readout, a label, a title — so it is authored here
@@ -219,16 +200,12 @@ export interface SceneObject {
   /** Audio cues the object plays for itself. */
   sounds?: SoundRefs;
   /**
-   * Attached behaviour, in execution order: update() is called in list order.
-   */
-  scripts?: ScriptRef[];
-  /**
-   * Values for the `@property` fields of the object's own class.
+   * Values for the editable fields of the object's own class.
    *
    * A prefab is backed by a class the project owns — an ordinary Phaser sprite
-   * subclass — and a field that class marks `@property` is set from here. This
-   * is behaviour without a component: nothing is attached, the class simply has
-   * fields and the editor gives them values.
+   * subclass — and a field that class marks `@editable` is set from here.
+   * Nothing is attached: the class simply has fields, and the editor gives
+   * them values.
    */
   props?: Record<string, unknown>;
   /** Set when this object is a prefab instance. */

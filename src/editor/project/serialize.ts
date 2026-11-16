@@ -58,7 +58,11 @@ export function toManifest(project: ProjectData): ProjectManifest {
     name: project.name,
     scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: scenePath(s.key) })),
     assets: project.assets.map(({ url: _url, ...rest }) => rest),
-    prefabs: project.prefabs.map((p) => ({ ...p, file: prefabPath(p.name) })),
+    // By name, the order they are read back in, so opening a project does
+    // not rewrite this file just to reorder it.
+    prefabs: [...project.prefabs]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({ ...p, file: prefabPath(p.name) })),
     anims: project.anims,
     groups: project.groups,
   };
@@ -69,7 +73,7 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
     { rel: MANIFEST_PATH, contents: JSON.stringify(toManifest(project), null, 2) + "\n" },
     // Scene defaults live in their own file, so a developer can read and edit
     // them without wading through the editor's manifest.
-    { rel: CONFIG_PATH, contents: JSON.stringify(project.config, null, 2) + "\n" },
+    { rel: CONFIG_PATH, contents: serializeConfig(project.config) },
     ...project.scenes.map((scene) => ({
       rel: scenePath(scene.key),
       contents: JSON.stringify(scene, null, 2) + "\n",
@@ -113,6 +117,19 @@ export interface LoadResult {
    * worth putting on their disk unprompted.
    */
   deferWrite: boolean;
+}
+
+/**
+ * mosaic.config.json as written, in one key order whoever writes it.
+ *
+ * The New Project flow and a save used to order the keys differently, so the
+ * first open of every new project rewrote the file and left a diff in git that
+ * nobody had made.
+ */
+export function serializeConfig(config: ProjectConfig): string {
+  const { canvas, tile, scale, physics, pixelArt, language, paths, ...rest } = config;
+  const ordered = { canvas, tile, scale, physics, pixelArt, ...(language ? { language } : {}), paths, ...rest };
+  return JSON.stringify(ordered, null, 2) + "\n";
 }
 
 /** mosaic.config.json, defaulted field by field so a partial file still opens. */
@@ -224,6 +241,7 @@ export function projectFromSource(
   if (!scenes.length) issues.push("No scene files found — started you on a fresh scene.");
   migrateLegacyTextures(project, issues);
   migrateLegacyAnimLoop(project, issues);
+  dropScriptComponents(project, issues);
   orderScenes(project, manifest);
   return { project, issues, scaffolded: false, deferWrite: false };
 }
@@ -288,6 +306,49 @@ function migrateLegacyAnimLoop(project: ProjectData, issues: string[]): void {
   }
   if (moved) {
     issues.push(`Converted ${moved} animation(s) from loop to a repeat count — save to write it back`);
+  }
+}
+
+/**
+ * Script components were removed: behaviour lives in prefab classes and the
+ * scene class, the way it does in any Phaser game. A folder written while they
+ * existed still names them on its objects. Those references are dropped on the
+ * way in, with a note, and the classes themselves are left alone: they are the
+ * project's code, and moving their logic is the developer's call.
+ */
+function dropScriptComponents(project: ProjectData, issues: string[]): void {
+  const isScriptPath = (path: string) => path === "scripts" || path.startsWith("scripts.");
+  const dropPaths = (record: Record<string, unknown> | undefined) => {
+    if (!record) return false;
+    let hit = false;
+    for (const key of Object.keys(record)) {
+      if (isScriptPath(key)) {
+        delete record[key];
+        hit = true;
+      }
+    }
+    return hit;
+  };
+  let objects = 0;
+  const strip = (holder: object) => {
+    const h = holder as { scripts?: unknown[]; overrides?: Record<string, unknown> };
+    const had = Array.isArray(h.scripts) && h.scripts.length > 0;
+    delete h.scripts;
+    if (dropPaths(h.overrides) || had) objects += 1;
+  };
+
+  for (const scene of project.scenes) for (const obj of scene.objects) strip(obj);
+  for (const prefab of project.prefabs) {
+    if (prefab.root) for (const node of walkNodes(prefab.root)) strip(node);
+    if (dropPaths(prefab.diff as Record<string, unknown> | undefined)) objects += 1;
+    if (prefab.exposed) prefab.exposed = prefab.exposed.filter((path) => !isScriptPath(path));
+  }
+
+  if (objects) {
+    issues.push(
+      `${objects} object(s) had script components, which Mosaic no longer generates. ` +
+        "Their classes are untouched: move that behaviour into a prefab class or the scene class, then save.",
+    );
   }
 }
 

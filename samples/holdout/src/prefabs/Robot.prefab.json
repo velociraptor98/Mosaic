@@ -1,0 +1,15 @@
+{
+  "name": "Robot",
+  "exposed": [],
+  "base": "Zombie",
+  "diff": {
+    "scaleX": 1.2,
+    "scaleY": 1.2,
+    "frame": "robot1_hold.png",
+    "playOnSpawn": "robot_walk",
+    "props.speed": 52,
+    "props.health": 8,
+    "props.damage": 20,
+    "props.points": 40
+  }
+}

@@ -11,7 +11,6 @@ export type DialogName =
   | "importphaser"
   | "atlas"
   | "prefab"
-  | "attachscript"
   | "scripttrust"
   | "export"
   | "package"
@@ -78,9 +77,8 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "prefab.save", title: "Save prefab (show what it costs)…", category: "Prefabs", run: () => { if (store.prefabDoc) store.planPrefabSave(workspace.writeBlockedReason); else store.setStatus("No prefab document is open"); } },
     { id: "prefab.close", title: "Back to scene (leave prefab edit mode)", category: "Prefabs", run: () => store.closePrefab() },
     { id: "prefab.expose", title: "Show the prefab's exposed fields", category: "Prefabs", run: () => store.setUi({ inspectorTab: "prefab" }) },
-    { id: "script.attach", title: "Attach script to selection…", category: "Scripts", run: () => openDialog("attachscript") },
-    { id: "script.inspect", title: "Show scripts on selection", category: "Scripts", run: () => store.setUi({ inspectorTab: "scripts" }) },
-    { id: "script.reindex", title: "Re-index scripts from disk", category: "Scripts", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
+    { id: "code.inspect", title: "Show the selection's class fields", category: "Code", run: () => store.setUi({ inspectorTab: "scripts" }) },
+    { id: "code.reindex", title: "Re-read the project's source from disk", category: "Code", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
 
     { id: "tool.select", title: "Tool: Select", category: "Tools", binding: "V", run: () => store.setUi({ tool: "select" }) },
     { id: "tool.place", title: "Tool: Place", category: "Tools", binding: "B", run: () => store.setUi({ tool: "place" }) },
@@ -88,6 +86,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "view.snap", title: "Toggle snapping", category: "View", binding: "S", run: () => store.setUi({ snap: !store.ui.snap }) },
     { id: "view.grid", title: "Toggle grid", category: "View", binding: "G", run: () => store.setUi({ showGrid: !store.ui.showGrid }) },
     { id: "view.bodies", title: "Toggle physics bodies", category: "View", binding: "F2", run: () => store.setUi({ showBodies: !store.ui.showBodies }) },
+    { id: "view.frame", title: "Frame selection (or the whole scene)", category: "View", binding: "F", run: () => store.frameSelection() },
     { id: "view.anim", title: "Open animation editor", category: "View", run: () => store.setUi({ dockTab: "anim" }) },
     { id: "view.assets", title: "Open asset browser", category: "View", run: () => store.setUi({ dockTab: "assets" }) },
 

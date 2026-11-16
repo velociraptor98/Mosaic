@@ -133,7 +133,6 @@ export class Workspace {
 
   constructor(store: ProjectStore) {
     this.store = store;
-    store.setScriptIndex(this.scripts);
     // Install output streams to the status bar; failure is a banner, not a
     // blocker — the project is usable either way.
     platform.onInstallProgress((p) => {
@@ -452,17 +451,25 @@ export class Workspace {
     }
     // Described last, once every image the project has is known — a tileset
     // names its image, and the image may be an asset discovered in this pass.
+    // What each map's layers were before is kept, so the scenes can tell a
+    // layer new in Tiled from one they leave out.
+    this.knownLayers = new Map();
     for (const asset of project.assets) {
       const map = out.get(asset.key);
-      if (map) asset.tilemap = describeTiledMap(map, asset.path, project.assets);
+      if (!map) continue;
+      this.knownLayers.set(asset.key, asset.tilemap?.layers);
+      asset.tilemap = describeTiledMap(map, asset.path, project.assets);
     }
     return out;
   }
 
+  /** Each map's layer names as they were before the last read. */
+  private knownLayers = new Map<string, string[] | undefined>();
+
   /** Hands the parsed maps to the store and lets every scene catch up with them. */
   private applyTilemaps(maps: Map<string, TiledMap>): void {
     for (const [key, map] of maps) this.store.setTilemap(key, map);
-    const notes = this.store.reconcileTilemaps();
+    const notes = this.store.reconcileTilemaps(this.knownLayers);
     if (notes.length) this.store.setStatus(notes[0]);
   }
 
@@ -543,7 +550,7 @@ export class Workspace {
     );
   }
 
-  /** The `@property` fields a class declares right now, bases included. */
+  /** The editable fields a class declares right now, bases included. */
   private declaredProps = (src: string, className: string): Set<string> | null => {
     const index = this.scripts.index;
     const cls =
