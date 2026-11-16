@@ -1,10 +1,8 @@
-import type { PackageRequest, PackageResult } from "../../../electron/contract";
+import type { DevServerResult, PackageRequest, PackageResult } from "../../../electron/contract";
 import type {
   CreateResult,
   EditorOpen,
   InstallProgress,
-  ScriptBundle,
-  ScriptEntry,
   ScriptFileIpc,
   TargetCheck,
   Toolchain,
@@ -15,8 +13,6 @@ export type {
   CreateResult,
   EditorOpen,
   InstallProgress,
-  ScriptBundle,
-  ScriptEntry,
   TargetCheck,
   Toolchain,
 };
@@ -96,7 +92,13 @@ export interface ProjectChange {
   kind: ChangeKind;
 }
 
-export type { PackageRequest, PackageResult, PackagedFile, PhaserChoice } from "../../../electron/contract";
+export type {
+  DevServerResult,
+  PackageRequest,
+  PackageResult,
+  PackagedFile,
+  PhaserChoice,
+} from "../../../electron/contract";
 
 export interface Platform {
   readonly kind: "browser" | "electron";
@@ -112,13 +114,15 @@ export interface Platform {
   createProject(): Promise<ProjectLocation | null>;
   readProject(root: string): Promise<ProjectSource | null>;
   writeFiles(root: string, files: DiskFile[]): Promise<WriteOutcome>;
+  /** Removes scene data and generated layouts left behind by a deletion. */
+  removeFiles(root: string, rels: string[]): Promise<string[]>;
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFile[]>;
+  /** Opens a Tiled map in Tiled. */
+  openInTiled(root: string, rel: string): Promise<{ ok: boolean; via: "tiled" | "system" | "none"; error?: string }>;
   /** Opens a file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
-  /** Compiles the project's script classes so the play-test can run them. */
-  bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
 
   // --- Importing a hand-written Phaser project ---------------------------
   /** True when this platform can run a project's own code to record a scene. */
@@ -131,8 +135,16 @@ export interface Platform {
    * for a folder the user has explicitly trusted.
    */
   recordScene(root: string, entry: string): Promise<SceneRecordingResult>;
-  /** Compiles the project's entry point so the editor can run its real game. */
-  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+
+  // --- Running the game --------------------------------------------------
+  /** True when this platform can start the project's own dev server. */
+  readonly canRunGame: boolean;
+  /**
+   * Starts `npm run dev` in the project, or returns the server already
+   * running. Executes the project's code — only for a folder the user trusts.
+   */
+  startDevServer(root: string): Promise<DevServerResult>;
+  stopDevServer(root: string): Promise<void>;
 
   // --- Shipping the game -------------------------------------------------
   /** True when this platform can build a shippable folder. */

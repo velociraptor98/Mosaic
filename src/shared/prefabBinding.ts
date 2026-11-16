@@ -1,5 +1,3 @@
-import type { PrefabSource } from "./types";
-
 /**
  * Whether a project class can be constructed from a scene snapshot, and how.
  *
@@ -46,45 +44,4 @@ export function bindArgs(params: string[]): BindArg[] | null {
 /** Why a class could not be bound, for the import's issue list. */
 export function unbindableParams(params: string[]): string[] {
   return params.filter((p) => !VOCABULARY[p.toLowerCase()]);
-}
-
-export function canBind(source: PrefabSource | undefined): boolean {
-  return !!source && bindArgs(source.params) !== null;
-}
-
-/** What a caller knows about the instance it is constructing. */
-export interface BindContext {
-  scene: unknown;
-  x: number;
-  y: number;
-  name: string;
-  texture: string;
-  frame: string;
-}
-
-/**
- * The runtime argument list for a bound constructor.
- *
- * The exporter turns the same plan into source text. Both go through
- * `bindArgs`, so a parameter the generated code fills one way cannot be filled
- * another way by the play-test — which would show one thing in the editor and
- * ship another.
- */
-export function boundArgValues(plan: BindArg[], ctx: BindContext): unknown[] {
-  return plan.map((arg) => {
-    switch (arg.kind) {
-      case "scene":
-        return ctx.scene;
-      case "x":
-        return ctx.x;
-      case "y":
-        return ctx.y;
-      case "name":
-        return ctx.name;
-      case "texture":
-        return ctx.texture;
-      case "frame":
-        return ctx.frame;
-    }
-  });
 }

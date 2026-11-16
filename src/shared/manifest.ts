@@ -8,11 +8,14 @@ import { resolvePrefab, resolveObject, walkNodes } from "./prefabs";
 export function collectLoaderManifest(project: ProjectData, scene: SceneData): LoaderEntry[] {
   const needed = new Set<string>();
 
+  // A tile layer needs its map, and the map needs the image behind each of
+  // its tilesets.
   for (const layer of scene.layers) {
-    if (layer.kind === "tile") {
-      const tileset = project.assets.find((a) => a.id === (layer as TileLayer).tilesetId);
-      if (tileset) needed.add(tileset.key);
-    }
+    if (layer.kind !== "tile") continue;
+    const map = project.assets.find((a) => a.kind === "tilemap" && a.key === (layer as TileLayer).map);
+    if (!map) continue;
+    needed.add(map.key);
+    for (const set of map.tilemap?.tilesets ?? []) if (set.image) needed.add(set.image);
   }
 
   for (const obj of scene.objects) {
@@ -27,23 +30,22 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
     for (const frame of anim.frames) needed.add(frame.textureKey);
   }
 
-  // Prefab definitions used by this scene pull in their own art — resolved,
-  // so a variant that swapped its texture loads the one it actually draws.
-  for (const obj of scene.objects) {
-    if (!obj.prefab) continue;
-    const prefab = resolvePrefab(project, obj.prefab);
+  // Every prefab's art, placed here or not. A prefab is also something the
+  // game's code spawns — a bullet, an enemy from a spawner — and one that is
+  // never placed in the editor still has to arrive with its texture loaded.
+  // Resolved, so a variant that swapped its texture loads the one it draws.
+  for (const def of project.prefabs) {
+    const prefab = resolvePrefab(project, def.name);
     if (!prefab) continue;
     for (const node of walkNodes(prefab.root)) if (node.texture) needed.add(node.texture);
   }
 
-  // Audio the scene actually references. Clips used to load only if something
-  // else happened to pull them in, because nothing in the format named one.
-  for (const obj of scene.objects) {
-    const resolved = resolveObject(project, obj);
-    if (resolved.sounds?.spawn) needed.add(resolved.sounds.spawn);
-    if (resolved.sounds?.overlap) needed.add(resolved.sounds.overlap);
-  }
-  if (scene.settings.music?.key) needed.add(scene.settings.music.key);
+  // Every clip the project has, for the reason every animation is registered:
+  // nearly all sound is played by code — a shot, a hit, a pickup — and nothing
+  // in a scene file can say which. A clip the scene's data never names used to
+  // arrive unloaded, and `sound.play()` throws for a key it has not got.
+  // Phaser keeps what one scene loaded, so the next scene's loader skips it.
+  for (const asset of project.assets) if (asset.kind === "audio") needed.add(asset.key);
 
   return project.assets.filter((a) => needed.has(a.key)).map(loaderEntry);
 }
@@ -67,17 +69,9 @@ export function loaderEntry(asset: AssetDef): LoaderEntry {
       return { key: asset.key, type: "atlas", url: asset.url, frames: asset.frames ?? [] };
     case "audio":
       return { key: asset.key, type: "audio", url: asset.url };
+    case "tilemap":
+      return { key: asset.key, type: "tilemap", url: asset.url };
     default:
       return { key: asset.key, type: "image", url: asset.url };
   }
-}
-
-/** Every texture key the project knows about, for Inspector pickers. */
-export function textureChoices(project: ProjectData): { key: string; frames: string[] }[] {
-  return project.assets
-    .filter((a) => a.kind !== "audio")
-    .map((a) => ({
-      key: a.key,
-      frames: a.kind === "atlas" ? (a.frames ?? []).map((f) => f.name) : [],
-    }));
 }

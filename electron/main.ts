@@ -2,7 +2,6 @@ import { BrowserWindow, app, shell } from "electron";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { registerIpc } from "./ipc";
-import { runSmoke } from "./smoke";
 import { registerAssetProtocol, registerAssetScheme } from "./assets";
 import { mosaicIcon } from "./appIcon";
 
@@ -47,11 +46,9 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
       sandbox: false,
       // Chromium throttles requestAnimationFrame to nothing in a window it
-      // considers hidden, which stops the play-test's game loop dead — the
-      // scene stays active, sprites keep their bodies, and not one frame runs.
-      // An editor whose canvas freezes when its window is occluded is wrong on
-      // its own terms, and it also made every headless assertion about a
-      // running game depend on whether the window happened to be visible.
+      // considers hidden, which stops the running game's loop dead — and the
+      // editor's canvas with it. A tool whose game freezes when its window is
+      // occluded is wrong on its own terms.
       backgroundThrottling: false,
     },
   });
@@ -75,30 +72,7 @@ app.whenReady().then(() => {
   app.dock?.setIcon(APP_ICON);
   registerAssetProtocol();
   registerIpc();
-  const win = createWindow();
-
-  // `npm run smoke:app` boots the real shell and drives the real renderer
-  // against the real filesystem — see electron/smoke.ts.
-  if (process.env.MOSAIC_SMOKE) {
-    let failed: string | null = null;
-    win.webContents.on("did-fail-load", (_e, code, description) => {
-      failed = `${code} ${description}`;
-    });
-    win.webContents.once("did-finish-load", () => {
-      setTimeout(() => {
-        if (failed) {
-          console.error(`[smoke] FAILED: ${failed}`);
-          app.exit(1);
-          return;
-        }
-        void runSmoke(win);
-      }, 1200);
-    });
-    setTimeout(() => {
-      console.error("[smoke] FAILED: timed out");
-      app.exit(1);
-    }, 90000);
-  }
+  createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

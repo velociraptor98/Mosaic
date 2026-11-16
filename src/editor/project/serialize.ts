@@ -4,13 +4,13 @@ import {
   DEFAULT_PATHS,
   type AnimDef,
   type AssetDef,
-  type CollisionRule,
   type PrefabDef,
   type ProjectConfig,
   type ProjectData,
   type SceneData,
 } from "../../shared/types";
 import { ensureLids, walkNodes } from "../../shared/prefabs";
+import { MAP_EXT, serializeTiledMap, tiledFromDataUrl, type TiledMap } from "../../shared/tiled";
 import type { DiskFile, ProjectSource } from "../platform/types";
 import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset } from "../store/templates";
 
@@ -50,7 +50,6 @@ export interface ProjectManifest {
   prefabs: (PrefabDef & { file?: string })[];
   anims: AnimDef[];
   groups: string[];
-  collision: Record<string, Record<string, CollisionRule>>;
 }
 
 /** The manifest as it ships: asset metadata and paths, never asset bytes. */
@@ -59,10 +58,13 @@ export function toManifest(project: ProjectData): ProjectManifest {
     name: project.name,
     scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: scenePath(s.key) })),
     assets: project.assets.map(({ url: _url, ...rest }) => rest),
-    prefabs: project.prefabs.map((p) => ({ ...p, file: prefabPath(p.name) })),
+    // By name, the order they are read back in, so opening a project does
+    // not rewrite this file just to reorder it.
+    prefabs: [...project.prefabs]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((p) => ({ ...p, file: prefabPath(p.name) })),
     anims: project.anims,
     groups: project.groups,
-    collision: project.collision,
   };
 }
 
@@ -71,7 +73,7 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
     { rel: MANIFEST_PATH, contents: JSON.stringify(toManifest(project), null, 2) + "\n" },
     // Scene defaults live in their own file, so a developer can read and edit
     // them without wading through the editor's manifest.
-    { rel: CONFIG_PATH, contents: JSON.stringify(project.config, null, 2) + "\n" },
+    { rel: CONFIG_PATH, contents: serializeConfig(project.config) },
     ...project.scenes.map((scene) => ({
       rel: scenePath(scene.key),
       contents: JSON.stringify(scene, null, 2) + "\n",
@@ -80,7 +82,26 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
       rel: prefabPath(prefab.name),
       contents: JSON.stringify(prefab, null, 2) + "\n",
     })),
+    ...pendingTilemaps(project).map(({ asset, map }) => ({
+      rel: asset.path,
+      contents: serializeTiledMap(map),
+    })),
   ];
+}
+
+/**
+ * Maps Mosaic made and has not yet put on disk: a template's terrain, or a
+ * converted tile layer. Each is written once, by the first save, and is a
+ * file edited in Tiled from then on — Mosaic never writes it a second time.
+ */
+export function pendingTilemaps(project: ProjectData): { asset: AssetDef; map: TiledMap }[] {
+  const out: { asset: AssetDef; map: TiledMap }[] = [];
+  for (const asset of project.assets) {
+    if (asset.kind !== "tilemap" || !asset.url.startsWith("data:")) continue;
+    const map = tiledFromDataUrl(asset.url);
+    if (map) out.push({ asset, map });
+  }
+  return out;
 }
 
 export interface LoadResult {
@@ -98,6 +119,19 @@ export interface LoadResult {
   deferWrite: boolean;
 }
 
+/**
+ * mosaic.config.json as written, in one key order whoever writes it.
+ *
+ * The New Project flow and a save used to order the keys differently, so the
+ * first open of every new project rewrote the file and left a diff in git that
+ * nobody had made.
+ */
+export function serializeConfig(config: ProjectConfig): string {
+  const { canvas, tile, scale, physics, pixelArt, language, paths, ...rest } = config;
+  const ordered = { canvas, tile, scale, physics, pixelArt, ...(language ? { language } : {}), paths, ...rest };
+  return JSON.stringify(ordered, null, 2) + "\n";
+}
+
 /** mosaic.config.json, defaulted field by field so a partial file still opens. */
 function readConfig(contents: string | null | undefined, issues: string[]): ProjectConfig {
   if (!contents) return structuredClone(DEFAULT_CONFIG);
@@ -112,6 +146,7 @@ function readConfig(contents: string | null | undefined, issues: string[]): Proj
     scale: parsed.scale ?? DEFAULT_CONFIG.scale,
     physics: parsed.physics ?? DEFAULT_CONFIG.physics,
     pixelArt: parsed.pixelArt ?? DEFAULT_CONFIG.pixelArt,
+    ...(parsed.language === "ts" || parsed.language === "js" ? { language: parsed.language } : {}),
     paths: {
       src: parsed.paths?.src ?? DEFAULT_PATHS.src,
       scenes: parsed.paths?.scenes ?? DEFAULT_PATHS.scenes,
@@ -200,13 +235,13 @@ export function projectFromSource(
     prefabs: readPrefabs(source.prefabs, manifest, issues),
     anims: manifest?.anims ?? [],
     groups: manifest?.groups?.length ? manifest.groups : [...DEFAULT_GROUPS],
-    collision: manifest?.collision ?? {},
     assets,
   };
 
   if (!scenes.length) issues.push("No scene files found — started you on a fresh scene.");
   migrateLegacyTextures(project, issues);
   migrateLegacyAnimLoop(project, issues);
+  dropScriptComponents(project, issues);
   orderScenes(project, manifest);
   return { project, issues, scaffolded: false, deferWrite: false };
 }
@@ -274,6 +309,49 @@ function migrateLegacyAnimLoop(project: ProjectData, issues: string[]): void {
   }
 }
 
+/**
+ * Script components were removed: behaviour lives in prefab classes and the
+ * scene class, the way it does in any Phaser game. A folder written while they
+ * existed still names them on its objects. Those references are dropped on the
+ * way in, with a note, and the classes themselves are left alone: they are the
+ * project's code, and moving their logic is the developer's call.
+ */
+function dropScriptComponents(project: ProjectData, issues: string[]): void {
+  const isScriptPath = (path: string) => path === "scripts" || path.startsWith("scripts.");
+  const dropPaths = (record: Record<string, unknown> | undefined) => {
+    if (!record) return false;
+    let hit = false;
+    for (const key of Object.keys(record)) {
+      if (isScriptPath(key)) {
+        delete record[key];
+        hit = true;
+      }
+    }
+    return hit;
+  };
+  let objects = 0;
+  const strip = (holder: object) => {
+    const h = holder as { scripts?: unknown[]; overrides?: Record<string, unknown> };
+    const had = Array.isArray(h.scripts) && h.scripts.length > 0;
+    delete h.scripts;
+    if (dropPaths(h.overrides) || had) objects += 1;
+  };
+
+  for (const scene of project.scenes) for (const obj of scene.objects) strip(obj);
+  for (const prefab of project.prefabs) {
+    if (prefab.root) for (const node of walkNodes(prefab.root)) strip(node);
+    if (dropPaths(prefab.diff as Record<string, unknown> | undefined)) objects += 1;
+    if (prefab.exposed) prefab.exposed = prefab.exposed.filter((path) => !isScriptPath(path));
+  }
+
+  if (objects) {
+    issues.push(
+      `${objects} object(s) had script components, which Mosaic no longer generates. ` +
+        "Their classes are untouched: move that behaviour into a prefab class or the scene class, then save.",
+    );
+  }
+}
+
 function isPrefab(value: unknown): value is PrefabDef {
   const p = value as PrefabDef | null;
   if (!p || typeof p.name !== "string") return false;
@@ -338,7 +416,10 @@ function reconcileAssets(
 
   for (const asset of declared) {
     if (asset.generated) {
-      // Procedural placeholders have no file; the editor draws them.
+      // Procedural placeholders are drawn by the editor. A scaffolded project
+      // also has them on disk, for the game to load — the same asset, so the
+      // file is claimed here rather than listed a second time below.
+      claimed.add(asset.path);
       out.push({ ...asset, url: "" } as AssetDef);
       continue;
     }
@@ -353,6 +434,9 @@ function reconcileAssets(
   const keys = new Set(out.map((a) => a.key));
   for (const file of onDisk) {
     if (claimed.has(file.rel)) continue;
+    // Tiled maps and atlas documents are read by content, not guessed at by
+    // name — the workspace does that once it can open the files.
+    if (MAP_EXT.test(file.rel)) continue;
     const base = file.rel.replace(/^assets\//, "").replace(/\.\w+$/, "").replace(/[^\w]+/g, "_");
     let key = base || "asset";
     let n = 2;

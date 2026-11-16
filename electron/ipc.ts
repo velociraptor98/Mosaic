@@ -4,9 +4,9 @@ import fs, { constants as fsConstants } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
-import { bundleScripts } from "./bundleScripts";
 import { packageGame } from "./packageGame";
-import { bundleEntry, findGameEntries, recordScene } from "./recordScene";
+import { findGameEntries, recordScene } from "./recordScene";
+import { startDevServer, stopAllDevServers, stopDevServer } from "./devServer";
 import { spawn } from "node:child_process";
 import os from "node:os";
 import {
@@ -21,8 +21,6 @@ import {
   type RecentProject,
   type CreateResult,
   type EditorOpen,
-  type ScriptBundle,
-  type ScriptEntry,
   type ScriptFileIpc,
   type InstallProgress,
   type TargetCheck,
@@ -32,57 +30,25 @@ import {
   type SceneRecording,
   type PackageRequest,
   type PackageResult,
+  type DevServerResult,
 } from "./contract";
+import {
+  ASSET_DIR,
+  CONFIG,
+  DEFAULT_SCENE_DIR,
+  listScripts,
+  MANIFEST,
+  SKIP_DIRS,
+  projectPaths,
+  readIfExists,
+  readProjectFiles,
+  toPosix,
+} from "./projectFiles";
 
 const execFileAsync = promisify(execFile);
 
-const MANIFEST = "phaser.editor.json";
-const CONFIG = "mosaic.config.json";
-const DEFAULT_SCENE_DIR = "src/scenes";
-const DEFAULT_SRC_DIR = "src";
-const DEFAULT_PREFAB_DIR = "src/prefabs";
-const ASSET_DIR = "assets";
-
-interface Paths {
-  src: string;
-  scenes: string;
-  prefabs: string;
-  assets: string;
-}
-
-/**
- * Where this project keeps things, per its own config.
- *
- * Read fresh rather than cached: the config is a file the user can edit in
- * their own editor, and a stale layout is worse than a re-read.
- */
-async function projectPaths(root: string): Promise<Paths> {
-  const raw = await readIfExists(path.join(root, CONFIG));
-  let parsed: { paths?: Partial<Paths> } = {};
-  try {
-    parsed = raw ? JSON.parse(raw) : {};
-  } catch {
-    parsed = {};
-  }
-  const clean = (v: string | undefined, fallback: string) => {
-    const t = (v ?? "").trim().replace(/^\/+|\/+$/g, "");
-    // A path that escapes the root is not a layout choice, it is a bug or an
-    // attack; either way the default is the safe answer.
-    return !t || t.startsWith("..") ? fallback : t;
-  };
-  return {
-    src: clean(parsed.paths?.src, DEFAULT_SRC_DIR),
-    scenes: clean(parsed.paths?.scenes, DEFAULT_SCENE_DIR),
-    prefabs: clean(parsed.paths?.prefabs, DEFAULT_PREFAB_DIR),
-    assets: clean(parsed.paths?.assets, ASSET_DIR),
-  };
-}
-const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
-const AUDIO_EXT = /\.(mp3|ogg|wav|m4a)$/i;
-const SCRIPT_EXT = /\.(ts|tsx|js|jsx|mts|mjs)$/i;
-/** Source files are read whole for the index; anything huge is not source. */
-const MAX_SCRIPT_BYTES = 512 * 1024;
-const SKIP_DIRS = new Set(["node_modules", "dist", "build", ".git", "coverage", ".next"]);
+/** Files Mosaic writes and may therefore delete: scene data and generated layouts. */
+const REMOVABLE = /\.(scene|prefab)\.json$|\.layout\.(ts|js)$/;
 
 const watchers = new Map<string, FSWatcher>();
 
@@ -98,10 +64,6 @@ function resolveInside(root: string, rel: string): string {
     throw new Error(`Path escapes the project root: ${rel}`);
   }
   return abs;
-}
-
-function toPosix(rel: string): string {
-  return rel.split(path.sep).join("/");
 }
 
 // ---------------------------------------------------------------- recents
@@ -128,133 +90,6 @@ async function rememberRecent(folder: ProjectFolder): Promise<void> {
   } catch {
     /* recents are a convenience, never a hard failure */
   }
-}
-
-// ------------------------------------------------------------ file reading
-
-async function readIfExists(abs: string): Promise<string | null> {
-  try {
-    return await fs.readFile(abs, "utf8");
-  } catch {
-    return null;
-  }
-}
-
-async function readDirFiles(
-  root: string,
-  dir: string,
-  match: RegExp,
-): Promise<{ rel: string; contents: string }[]> {
-  const abs = path.join(root, dir);
-  let names: string[];
-  try {
-    names = await fs.readdir(abs);
-  } catch {
-    return [];
-  }
-  const out: { rel: string; contents: string }[] = [];
-  for (const name of names.sort()) {
-    if (!match.test(name)) continue;
-    const contents = await readIfExists(path.join(abs, name));
-    if (contents !== null) out.push({ rel: toPosix(path.join(dir, name)), contents });
-  }
-  return out;
-}
-
-/**
- * Does this folder already hold somebody's codebase?
- *
- * The question is not "is it empty" — a folder someone dropped sprites into
- * before opening it is still ours to scaffold, and that is a normal way to
- * start. The question is whether there is SOURCE here, because that is what
- * Mosaic cannot read and must not bury under a starter scene.
- *
- * So: art and dotfiles do not count, and anything else does.
- */
-async function isOccupied(root: string, paths: Paths): Promise<boolean> {
-  try {
-    const entries = await fs.readdir(root, { withFileTypes: true });
-    return entries.some((entry) => {
-      if (entry.name.startsWith(".")) return false;
-      if (entry.isDirectory()) return entry.name !== paths.assets.split("/")[0];
-      return !IMAGE_EXT.test(entry.name) && !AUDIO_EXT.test(entry.name);
-    });
-  } catch {
-    return false;
-  }
-}
-
-async function listAssets(root: string, assetDir: string): Promise<AssetFileInfo[]> {
-  const out: AssetFileInfo[] = [];
-  const walk = async (dir: string): Promise<void> => {
-    let entries;
-    try {
-      entries = await fs.readdir(path.join(root, dir), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const rel = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        await walk(rel);
-        continue;
-      }
-      if (!IMAGE_EXT.test(entry.name) && !AUDIO_EXT.test(entry.name)) continue;
-      const stat = await fs.stat(path.join(root, rel));
-      out.push({ rel: toPosix(rel), bytes: stat.size, modified: stat.mtimeMs });
-    }
-  };
-  await walk(assetDir);
-  return out;
-}
-
-/**
- * Every source file under src/, read whole.
- *
- * The main process stays dumb here too: it does not know what a script is, it
- * just hands the renderer the text. Parsing, and deciding which classes are
- * script components, happens above the platform seam where the browser build
- * would do it as well.
- */
-async function listScripts(root: string, srcDir: string): Promise<ScriptFileIpc[]> {
-  const out: ScriptFileIpc[] = [];
-  const walk = async (dir: string): Promise<void> => {
-    let entries;
-    try {
-      entries = await fs.readdir(path.join(root, dir), { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const rel = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name)) continue;
-        await walk(rel);
-        continue;
-      }
-      if (!SCRIPT_EXT.test(entry.name) || entry.name.endsWith(".d.ts")) continue;
-      const abs = path.join(root, rel);
-      const stat = await fs.stat(abs).catch(() => null);
-      if (!stat || stat.size > MAX_SCRIPT_BYTES) continue;
-      const contents = await readIfExists(abs);
-      if (contents !== null) out.push({ rel: toPosix(rel), contents, modified: stat.mtimeMs });
-    }
-  };
-  await walk(srcDir);
-
-  // Nothing under the configured source root usually means the project does not
-  // have one. A folder Mosaic scaffolded keeps its code in `src/`; a project
-  // that predates Mosaic frequently keeps it loose at the root, and the Phaser
-  // examples all do. Assuming `src/` there indexed zero files — which left the
-  // Scripts panel empty and, worse, gave the importer no classes to bind an
-  // object to, so an imported scene silently had no behaviour attached.
-  //
-  // Falling back rather than changing the default keeps a Mosaic project's
-  // index exactly as it was: its `src/` is never empty.
-  if (!out.length && srcDir !== ".") await walk(".");
-
-  out.sort((a, b) => a.rel.localeCompare(b.rel));
-  return out;
 }
 
 /**
@@ -354,23 +189,7 @@ export function registerIpc(): void {
 
   ipcMain.handle(
     IPC.readProjectFiles,
-    async (_e, root: string): Promise<ProjectFiles | null> => {
-      try {
-        await fs.access(root);
-      } catch {
-        return null;
-      }
-      const paths = await projectPaths(root);
-      return {
-        root,
-        manifest: await readIfExists(path.join(root, MANIFEST)),
-        config: await readIfExists(path.join(root, CONFIG)),
-        scenes: await readDirFiles(root, paths.scenes, /\.scene\.json$/),
-        prefabs: await readDirFiles(root, paths.prefabs, /\.prefab\.json$/),
-        assets: await listAssets(root, paths.assets),
-        occupied: await isOccupied(root, paths),
-      };
-    },
+    async (_e, root: string): Promise<ProjectFiles | null> => readProjectFiles(root),
   );
 
   ipcMain.handle(
@@ -391,6 +210,23 @@ export function registerIpc(): void {
     },
   );
 
+  ipcMain.handle(IPC.removeFiles, async (_e, root: string, rels: string[]): Promise<string[]> => {
+    const removed: string[] = [];
+    for (const rel of rels) {
+      // The renderer names the files, so the rule about WHICH files is
+      // enforced here: only what Mosaic generates or owns as data. A class the
+      // user wrote can never be deleted through this, whatever is asked for.
+      if (!REMOVABLE.test(rel)) continue;
+      try {
+        await fs.rm(resolveInside(root, rel), { force: true });
+        removed.push(rel);
+      } catch {
+        /* a file that will not go is left; the next save tries again */
+      }
+    }
+    return removed;
+  });
+
   ipcMain.handle(IPC.readText, async (_e, root: string, rel: string) =>
     readIfExists(resolveInside(root, rel)),
   );
@@ -399,18 +235,34 @@ export function registerIpc(): void {
     projectPaths(root).then((p) => listScripts(root, p.src)),
   );
 
+  ipcMain.handle(IPC.openInTiled, async (_e, root: string, rel: string) => {
+    let abs: string;
+    try {
+      abs = resolveInside(root, rel);
+    } catch (err) {
+      return { ok: false, via: "none", error: (err as Error).message };
+    }
+    if (!(await exists(abs))) return { ok: false, via: "none", error: `${rel} is not on disk yet — save first` };
+    // Tiled by name first: a `.json` map belongs to no app in particular, and
+    // handing it to the OS would open a text editor.
+    const attempts: { cmd: string; args: string[] }[] =
+      process.platform === "darwin"
+        ? [{ cmd: "open", args: ["-a", "Tiled", abs] }]
+        : [{ cmd: "tiled", args: [abs] }];
+    for (const attempt of attempts) {
+      try {
+        await execFileAsync(attempt.cmd, attempt.args, { timeout: 5000, shell: process.platform === "win32" });
+        return { ok: true, via: "tiled" };
+      } catch {
+        /* not installed, or not on PATH */
+      }
+    }
+    const error = await shell.openPath(abs);
+    return error ? { ok: false, via: "none", error } : { ok: true, via: "system" };
+  });
+
   ipcMain.handle(IPC.openInEditor, async (_e, root: string, rel: string, line?: number) =>
     openInEditor(root, rel, line),
-  );
-
-  ipcMain.handle(
-    IPC.bundleScripts,
-    async (_e, root: string, entries: ScriptEntry[]): Promise<ScriptBundle> => {
-      // Every entry is resolved against the root before it reaches the
-      // bundler, so a renderer cannot ask for a file outside the project.
-      for (const entry of entries) resolveInside(root, entry.src);
-      return bundleScripts(root, entries);
-    },
   );
 
   ipcMain.handle(
@@ -452,17 +304,11 @@ export function registerIpc(): void {
     },
   );
 
-  ipcMain.handle(
-    IPC.bundleEntry,
-    async (_e, root: string, entry: string): Promise<{ code: string | null; error?: string }> => {
-      resolveInside(root, entry);
-      try {
-        return { code: await bundleEntry(root, entry) };
-      } catch (err) {
-        return { code: null, error: (err as Error).message };
-      }
-    },
+  ipcMain.handle(IPC.devServerStart, async (_e, root: string): Promise<DevServerResult> =>
+    startDevServer(root),
   );
+
+  ipcMain.handle(IPC.devServerStop, async (_e, root: string) => stopDevServer(root));
 
   ipcMain.handle(IPC.importAssets, async (_e, root: string): Promise<AssetFileInfo[]> => {
     const result = await dialog.showOpenDialog({
@@ -471,7 +317,8 @@ export function registerIpc(): void {
       filters: [
         // The atlas document goes in the Art filter beside the sheet it
         // describes: they are picked together or the frames are lost.
-        { name: "Art", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "json"] },
+        { name: "Art", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp", "json", "xml"] },
+        { name: "Tiled maps", extensions: ["tmj", "json"] },
         { name: "Audio", extensions: ["mp3", "ogg", "wav", "m4a"] },
       ],
     });
@@ -710,9 +557,20 @@ export function registerIpc(): void {
     child.on("close", (code) => send({ root, done: true, code }));
   });
 
+  // A dev server runs in its own process group, so it outlives a main process
+  // that is killed rather than quit. These are the ways that happens.
+  process.once("exit", stopAllDevServers);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(signal, () => {
+      stopAllDevServers();
+      app.quit();
+    });
+  }
+
   app.on("will-quit", () => {
     for (const watcher of watchers.values()) void watcher.close();
     watchers.clear();
+    stopAllDevServers();
   });
 }
 

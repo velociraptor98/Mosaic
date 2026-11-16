@@ -1,0 +1,34 @@
+{
+  "name": "Barrel",
+  "exposed": [],
+  "root": {
+    "name": "Barrel",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 0.75,
+    "scaleY": 0.75,
+    "originX": 0.5,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "tiles",
+    "frame": "315",
+    "group": "barrel",
+    "body": {
+      "shape": "circle",
+      "width": 32,
+      "height": 32,
+      "radius": 24,
+      "offsetX": 8,
+      "offsetY": 8,
+      "immovable": true,
+      "allowGravity": false,
+      "bounce": 0,
+      "collideWorldBounds": false
+    },
+    "data": {},
+    "lid": "nmwjcrwovd",
+    "children": []
+  }
+}

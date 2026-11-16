@@ -60,18 +60,6 @@ export function setPath(target: Record<string, unknown>, path: string, value: un
   node[parts[parts.length - 1]] = value;
 }
 
-/** Deletes a leaf, and any now-empty containers the path walked through. */
-export function deletePath(target: Record<string, unknown>, path: string): void {
-  const parts = path.split(".");
-  const chain: Record<string, unknown>[] = [target];
-  for (let i = 0; i < parts.length - 1; i++) {
-    const next = chain[i][parts[i]];
-    if (next === null || typeof next !== "object") return;
-    chain.push(next as Record<string, unknown>);
-  }
-  delete chain[chain.length - 1][parts[parts.length - 1]];
-}
-
 export function findPrefab(project: ProjectData, name: string | undefined): PrefabDef | undefined {
   if (!name) return undefined;
   return project.prefabs.find((p) => p.name === name);
@@ -99,10 +87,6 @@ export function walkNodes(root: PrefabNode): PrefabNode[] {
   return out;
 }
 
-export function nodeByLid(root: PrefabNode, lid: string): PrefabNode | undefined {
-  return walkNodes(root).find((n) => n.lid === lid);
-}
-
 /**
  * Gives every node a local id, in place. Folders written by an older build
  * have none, so this runs on load as well as on authoring.
@@ -113,21 +97,6 @@ export function ensureLids(root: PrefabNode): PrefabNode {
     if (!node.lid) node.lid = newLid();
   }
   return root;
-}
-
-/** "Sprite" / "Enemies/HitFlash" — the path shown when two children share a name. */
-export function nodePath(root: PrefabNode, lid: string): string {
-  const trail: string[] = [];
-  const walk = (node: PrefabNode, above: string[]): boolean => {
-    const here = [...above, node.name];
-    if (node.lid === lid) {
-      trail.push(...here);
-      return true;
-    }
-    return (node.children ?? []).some((c) => walk(c, here));
-  };
-  walk(root, []);
-  return trail.join(" / ");
 }
 
 // ---------------------------------------------------------------------------
@@ -251,6 +220,11 @@ export function resolveObject(project: ProjectData, obj: SceneObject): SceneObje
   for (const [path, value] of Object.entries(obj.overrides ?? {})) {
     setPath(resolved, path, structuredClone(value));
   }
+  // Class properties merge rather than replace: the definition supplies
+  // defaults, and an instance states only the fields it set for itself.
+  const merged = { ...(prefab.root.props ?? {}), ...(obj.props ?? {}) };
+  if (Object.keys(merged).length) resolved.props = merged;
+  else delete resolved.props;
   return resolved as unknown as SceneObject;
 }
 
@@ -265,11 +239,6 @@ export function resolvedIndex(
   scene: { objects: SceneObject[] },
 ): Map<string, SceneObject> {
   return new Map(scene.objects.map((o) => [o.id, resolveObject(project, o)]));
-}
-
-/** The value the definition would supply for a path, ignoring overrides. */
-export function definitionValue(prefab: ResolvedPrefab, path: string): unknown {
-  return getPath(prefab.root, path);
 }
 
 export function isOverridden(obj: SceneObject, path: string): boolean {
@@ -287,22 +256,6 @@ export function isExposed(prefab: ResolvedPrefab | undefined, path: string): boo
 export function toPrefabNode(obj: SceneObject, children: PrefabNode[] = []): PrefabNode {
   const { id: _id, layerId: _layerId, parentId: _parentId, ...rest } = structuredClone(obj);
   return { ...rest, lid: newLid(), children };
-}
-
-/**
- * Child nodes of a prefab instance, positioned in world space. These render
- * as part of the instance and are not individually selectable — the instance
- * is the unit of editing.
- */
-export function instanceChildren(
-  prefab: ResolvedPrefab,
-  instance: SceneObject,
-): { node: PrefabNode; x: number; y: number }[] {
-  return (prefab.root.children ?? []).map((node) => ({
-    node,
-    x: instance.x + node.x,
-    y: instance.y + node.y,
-  }));
 }
 
 /**

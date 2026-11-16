@@ -121,7 +121,3 @@ export function toBase64(bytes: Uint8Array): string {
 export function encodePngBase64(bitmap: Bitmap): string {
   return toBase64(encodePng(bitmap));
 }
-
-export function encodePngDataUrl(bitmap: Bitmap): string {
-  return `data:image/png;base64,${encodePngBase64(bitmap)}`;
-}

@@ -1,0 +1,34 @@
+{
+  "name": "Bullet",
+  "exposed": [],
+  "root": {
+    "name": "Bullet",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 0.5,
+    "scaleY": 0.5,
+    "originX": 0.5,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "tanks",
+    "frame": "bulletYellowSilver_outline.png",
+    "group": "bullet",
+    "body": {
+      "shape": "circle",
+      "width": 32,
+      "height": 32,
+      "radius": 8,
+      "offsetX": 2,
+      "offsetY": 9,
+      "immovable": false,
+      "allowGravity": false,
+      "bounce": 0,
+      "collideWorldBounds": false
+    },
+    "data": {},
+    "lid": "nmwjcrwotb",
+    "children": []
+  }
+}

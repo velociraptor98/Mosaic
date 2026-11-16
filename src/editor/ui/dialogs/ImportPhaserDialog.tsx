@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useEditor } from "../context";
 import { Dialog } from "./Dialog";
-import { isTrusted, trustRoot } from "../../scripts/runtime";
+import { isTrusted, trustRoot } from "../../scripts/trust";
 import {
   applyImport,
   findEntries,
@@ -192,7 +192,7 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
             The game is compiled and run once, in a separate hidden window that is closed
             afterwards, and is stopped if it takes too long. Recording writes nothing — only
             pressing Import does, and it says what first. The answer is remembered by the editor for
-            this folder, the same trust play-test asks for.
+            this folder, the same trust RUN asks for.
           </p>
         </div>
       </Dialog>

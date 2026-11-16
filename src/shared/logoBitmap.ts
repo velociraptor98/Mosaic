@@ -25,8 +25,6 @@ export type Rgb = readonly [number, number, number];
 /** The identity sheet's one permitted filled field, and the mark reversed on it. */
 export const FIELD: Rgb = [0x1d, 0x2d, 0x3d]; // --color-accent-900
 export const REVERSED: Rgb = [0xf2, 0xf2, 0xf3]; // --color-bg
-export const ACCENT: Rgb = [0x59, 0x80, 0xa6]; // --color-accent
-
 /**
  * The mark occupies the middle 47% of the icon, which is the inset the
  * identity sheet's app-icon cut uses (a 242-unit mark on a 512-unit field).
@@ -112,10 +110,4 @@ function blend(bitmap: Bitmap, px: number, py: number, [r, g, b]: Rgb, alpha: nu
   bitmap.data[i + 1] = Math.round(bitmap.data[i + 1] * (1 - a) + g * a);
   bitmap.data[i + 2] = Math.round(bitmap.data[i + 2] * (1 - a) + b * a);
   bitmap.data[i + 3] = 255;
-}
-
-/** The RGBA of one pixel, for tests and for sampling. */
-export function pixelAt(bitmap: Bitmap, x: number, y: number): [number, number, number, number] {
-  const i = (y * bitmap.width + x) * 4;
-  return [bitmap.data[i], bitmap.data[i + 1], bitmap.data[i + 2], bitmap.data[i + 3]];
 }

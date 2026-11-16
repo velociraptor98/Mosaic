@@ -98,7 +98,6 @@ export function nameFrames(
 export function inferAssetKind(file: File): AssetKind {
   const name = file.name.toLowerCase();
   if (/\.(mp3|ogg|wav|m4a)$/.test(name)) return "audio";
-  if (/tile(set|s)?[-_.]/.test(name) || /[-_.]tiles?\./.test(name)) return "tileset";
   if (/(sheet|sprites?|atlas|anim)/.test(name)) return "spritesheet";
   return "image";
 }

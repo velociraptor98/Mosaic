@@ -7,7 +7,7 @@ import { useEditor, useStoreVersion } from "../context";
 /**
  * Export game… — the build, not the source.
  *
- * Export scene… writes code for a developer to read and a bundler to compile.
+ * Saving writes code for a developer to read and a bundler to compile.
  * This writes the thing you send someone: one folder, index.html first, no
  * install. It exists because "the game is finished" used to be the point where
  * Mosaic handed you back to a terminal.
@@ -22,7 +22,7 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
 
   const root = workspace.location?.root ?? "";
   const entries = workspace.gameEntries;
-  const [entry, setEntry] = useState(workspace.gameEntry ?? "src/main.ts");
+  const [entry, setEntry] = useState(entries[0] ?? "src/main.ts");
   const [outDir, setOutDir] = useState("build/web");
   const [minify, setMinify] = useState(true);
   const [copyAssets, setCopyAssets] = useState(true);
@@ -66,7 +66,7 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
       <Dialog title="Export game" subtitle="Not available in the browser build." onClose={onClose}>
         <p className="muted">
           Packaging writes a folder to disk and compiles the project's own source, so it needs the
-          desktop app. Export scene… still writes the code either way.
+          desktop app.
         </p>
       </Dialog>
     );

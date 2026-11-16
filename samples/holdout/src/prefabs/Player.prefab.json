@@ -1,0 +1,34 @@
+{
+  "name": "Player",
+  "exposed": [],
+  "root": {
+    "name": "Player",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 1,
+    "scaleY": 1,
+    "originX": 0.3333333333333333,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "characters",
+    "frame": "survivor1_gun.png",
+    "group": "player",
+    "body": {
+      "shape": "circle",
+      "width": 32,
+      "height": 32,
+      "radius": 15,
+      "offsetX": 2,
+      "offsetY": 6.5,
+      "immovable": false,
+      "allowGravity": false,
+      "bounce": 0,
+      "collideWorldBounds": true
+    },
+    "data": {},
+    "lid": "nmwjcrwoo9",
+    "children": []
+  }
+}

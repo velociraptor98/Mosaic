@@ -12,10 +12,11 @@ export const IPC = {
   createFolder: "mosaic:createFolder",
   readProjectFiles: "mosaic:readProjectFiles",
   writeFiles: "mosaic:writeFiles",
+  removeFiles: "mosaic:removeFiles",
   readText: "mosaic:readText",
   readScripts: "mosaic:readScripts",
   openInEditor: "mosaic:openInEditor",
-  bundleScripts: "mosaic:bundleScripts",
+  openInTiled: "mosaic:openInTiled",
   importAssets: "mosaic:importAssets",
   copyAssets: "mosaic:copyAssets",
   watch: "mosaic:watch",
@@ -35,7 +36,8 @@ export const IPC = {
   install: "mosaic:install",
   findGameEntries: "mosaic:findGameEntries",
   recordScene: "mosaic:recordScene",
-  bundleEntry: "mosaic:bundleEntry",
+  devServerStart: "mosaic:devServerStart",
+  devServerStop: "mosaic:devServerStop",
   packageGame: "mosaic:packageGame",
 } as const;
 
@@ -90,32 +92,6 @@ export interface ScriptFileIpc {
   rel: string;
   contents: string;
   modified: number;
-}
-
-/** One class the renderer wants compiled into the play-test bundle. */
-export interface ScriptEntry {
-  /** Project-relative POSIX path. */
-  src: string;
-  className: string;
-  /**
-   * The name the module exports it under, when that differs from the class
-   * name. `"default"` for `export default class` — the form the Phaser
-   * examples use throughout, and one a named import cannot reach.
-   */
-  exportName?: string;
-}
-
-/**
- * A compiled bundle of the project's script classes, as an IIFE that assigns
- * `MosaicScripts` and takes the editor's Phaser instance as `__mosaicPhaser`.
- */
-export interface ScriptBundle {
-  code: string | null;
-  /** Set when the project's code did not compile. */
-  error?: string;
-  warnings: string[];
-  /** Project-relative paths that went into the bundle. */
-  modules: string[];
 }
 
 /** What happened when the renderer asked to open a file outside Mosaic. */
@@ -178,6 +154,20 @@ export interface FileChange {
   kind: ChangeKind;
 }
 
+/** What happened when RUN asked for the project's dev server. */
+export interface DevServerResult {
+  ok: boolean;
+  /** Where the game is being served, e.g. "http://localhost:5173/". */
+  url?: string;
+  /** Why it is not, in a form the UI can act on rather than only show. */
+  code?: "no-package" | "no-script" | "not-installed" | "exited" | "timeout" | "spawn";
+  error?: string;
+  /** The tail of what the server printed. */
+  log: string;
+  /** The package.json script that was run. */
+  script?: string;
+}
+
 /** What Export game… asks the main process to build. */
 export interface PackageRequest {
   root: string;
@@ -233,19 +223,25 @@ export interface MosaicApi {
   createFolder(): Promise<ProjectFolder | null>;
   readProjectFiles(root: string): Promise<ProjectFiles | null>;
   writeFiles(root: string, files: WriteRequest[]): Promise<WriteResultIpc>;
+  /**
+   * Deletes files Mosaic itself wrote for a scene or prefab that no longer
+   * exists. Anything that is not scene data or a generated layout is refused.
+   */
+  removeFiles(root: string, rels: string[]): Promise<string[]>;
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFileIpc[]>;
+  /** Opens a map in Tiled, or in whatever the OS has for the file if Tiled is not found. */
+  openInTiled(root: string, rel: string): Promise<{ ok: boolean; via: "tiled" | "system" | "none"; error?: string }>;
   /** Opens a project file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
-  /** Compiles the project's script classes for the play-test. */
-  bundleScripts(root: string, entries: ScriptEntry[]): Promise<ScriptBundle>;
   /** Files that construct a `Phaser.Game` — the candidate import entries. */
   findGameEntries(root: string): Promise<string[]>;
   /** Runs one of them and reports what its scenes built. */
   recordScene(root: string, entry: string): Promise<SceneRecording>;
-  /** Compiles an entry point so the renderer can run the project's own game. */
-  bundleEntry(root: string, entry: string): Promise<{ code: string | null; error?: string }>;
+  /** Starts the project's own dev server, or returns the one already running. */
+  devServerStart(root: string): Promise<DevServerResult>;
+  devServerStop(root: string): Promise<void>;
   /** Bundles the whole game into a folder that runs with nothing installed. */
   packageGame(request: PackageRequest): Promise<PackageResult>;
   importAssets(root: string): Promise<AssetFileInfo[]>;
@@ -280,8 +276,7 @@ export interface MosaicApi {
  * One scene, as it existed the moment its `create()` returned.
  *
  * Deliberately untyped beyond this: the renderer owns the mapping into Mosaic's
- * model, and the main process stays dumb about what a scene means — the same
- * split `bundleScripts` already keeps.
+ * model, and the main process stays dumb about what a scene means.
  */
 export interface SceneRecording {
   ok: boolean;

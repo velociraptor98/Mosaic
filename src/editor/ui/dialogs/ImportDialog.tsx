@@ -1,8 +1,16 @@
 import { useState } from "react";
+import { ATLAS_DOC_EXT, parsePhaserAtlas } from "../../assets/atlasJson";
 import { imageSize, inferAssetKind, readFileAsDataUrl } from "../../assets/slice";
 import { platform } from "../../platform";
 import { uid } from "../../store/ids";
-import type { AssetDef, AssetKind } from "../../../shared/types";
+import {
+  MAP_EXT,
+  describeTiledMap,
+  parseTiledMap,
+  tiledFromDataUrl,
+  tiledToDataUrl,
+} from "../../../shared/tiled";
+import type { AssetDef, AssetFrame, AssetKind } from "../../../shared/types";
 import { Dialog } from "./Dialog";
 import { useEditor } from "../context";
 
@@ -19,6 +27,8 @@ interface Row {
   frameHeight: number;
   margin: number;
   spacing: number;
+  /** An atlas's frames, read from the packer's document. */
+  frames?: AssetFrame[];
 }
 
 /**
@@ -51,6 +61,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
         height,
         kind: asset.kind,
         key: asset.key,
+        frames: asset.frames,
         frameWidth: 32,
         frameHeight: 32,
         margin: 0,
@@ -65,6 +76,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await addCopied(await platform.importAssets(root));
+      // A Tiled map picked alongside the art is already in assets/ — it is a
+      // file, with nothing to confirm about it — so it is read where it lies.
+      await workspace.rescanTilemaps();
     } finally {
       setBusy(false);
     }
@@ -79,6 +93,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await addCopied(await platform.copyAssets(root, paths));
+      await workspace.rescanTilemaps();
     } finally {
       setBusy(false);
     }
@@ -86,15 +101,44 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 
   const addFiles = async (files: FileList | File[]) => {
     const next: Row[] = [];
-    for (const file of Array.from(files)) {
+    const list = Array.from(files);
+    // An atlas document picked beside its sheet: frames by the sheet's stem.
+    const atlasFrames = new Map<string, AssetFrame[]>();
+    for (const file of list) {
+      if (!ATLAS_DOC_EXT.test(file.name)) continue;
+      const frames = parsePhaserAtlas(await file.text());
+      if (frames?.length) atlasFrames.set(file.name.replace(/\.\w+$/, ""), frames);
+    }
+    for (const file of list) {
+      if (/\.xml$/i.test(file.name)) continue;
+      // The browser build has no folder, so a map travels inside the project.
+      if (MAP_EXT.test(file.name)) {
+        const map = parseTiledMap(await file.text());
+        if (!map) continue; // an atlas document, or not JSON at all
+        next.push({
+          file,
+          url: tiledToDataUrl(map),
+          width: map.width * map.tilewidth,
+          height: map.height * map.tileheight,
+          kind: "tilemap",
+          key: file.name.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_"),
+          frameWidth: 0,
+          frameHeight: 0,
+          margin: 0,
+          spacing: 0,
+        });
+        continue;
+      }
       const url = await readFileAsDataUrl(file);
       const { width, height } = await imageSize(url);
+      const frames = atlasFrames.get(file.name.replace(/\.\w+$/, ""));
       next.push({
         file,
         url,
         width,
         height,
-        kind: inferAssetKind(file),
+        frames,
+        kind: frames ? "atlas" : inferAssetKind(file),
         key: file.name.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_"),
         frameWidth: 32,
         frameHeight: 32,
@@ -114,17 +158,28 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       url: row.url,
       width: row.width,
       height: row.height,
-      ...(row.kind === "spritesheet" || row.kind === "tileset"
+      ...(row.kind === "atlas" && row.frames ? { frames: row.frames } : {}),
+      ...(row.kind === "spritesheet"
         ? {
             frameWidth: row.frameWidth,
             frameHeight: row.frameHeight,
             margin: row.margin,
             spacing: row.spacing,
-            tileCollides: row.kind === "tileset" ? [] : undefined,
           }
         : {}),
     }));
+    // A map is described against every image the project will have once this
+    // import lands — the art it draws with is often in the same drop.
+    const known = [...store.project.assets, ...assets];
+    for (const asset of assets) {
+      if (asset.kind !== "tilemap") continue;
+      const map = tiledFromDataUrl(asset.url);
+      if (map) asset.tilemap = describeTiledMap(map, asset.path, known);
+    }
     store.importAssets(assets);
+    store.hydrateTilemaps();
+    // On desktop the maps are files, and may have been waiting for this art.
+    void workspace.rescanTilemaps();
     onClose();
   };
 
@@ -181,7 +236,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <input
             type="file"
             multiple
-            accept="image/*,audio/*"
+            accept="image/*,audio/*,.json,.tmj,.xml"
             onChange={(e) => e.target.files && void addFiles(e.target.files)}
           />
           Drop images or audio here, or click to choose.
@@ -203,6 +258,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             <span className="meta">
               {row.rel ?? `assets/${row.file.name}`} · {row.width}×{row.height}
               {row.file.size ? ` · ${Math.round(row.file.size / 1024)}kb` : ""}
+              {row.kind === "atlas" && row.frames ? ` · ${row.frames.length} frames` : ""}
             </span>
           </div>
           <select
@@ -213,13 +269,16 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               )
             }
           >
-            {(["image", "spritesheet", "tileset", "atlas", "audio"] as AssetKind[]).map((k) => (
+            {(row.kind === "tilemap"
+              ? (["tilemap"] as AssetKind[])
+              : (["image", "spritesheet", "atlas", "audio"] as AssetKind[])
+            ).map((k) => (
               <option key={k} value={k}>
                 {k}
               </option>
             ))}
           </select>
-          {(row.kind === "spritesheet" || row.kind === "tileset") && (
+          {row.kind === "spritesheet" && (
             <span className="frame-config">
               <input
                 type="number"

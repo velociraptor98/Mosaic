@@ -6,9 +6,6 @@ import { useEditor, useStoreVersion } from "./context";
 const TOOLS: { id: Tool; label: string; key: string; hint: string }[] = [
   { id: "select", label: "Select", key: "V", hint: "Click, marquee, drag handles" },
   { id: "place", label: "Place", key: "B", hint: "Click the canvas to instantiate the armed asset" },
-  { id: "brush", label: "Brush", key: "P", hint: "Paint tiles — one undo per stroke" },
-  { id: "rect", label: "Rect", key: "R", hint: "Drag a rectangle of tiles" },
-  { id: "erase", label: "Erase", key: "E", hint: "Erase tiles (putTile -1)" },
 ];
 
 export function Toolbar() {

@@ -12,14 +12,20 @@ export interface EditorSceneInit {
   bridge: EditorBridge;
 }
 
-interface TileLayerView {
+/** One Tiled map, parsed by Phaser, shared by every layer the scene places from it. */
+interface MapView {
   map: Phaser.Tilemaps.Tilemap;
-  layer: Phaser.Tilemaps.TilemapLayer;
-  shadow: number[][];
+  tilesets: Phaser.Tilemaps.Tileset[];
+  /** The map's revision and the textures it found, so a change to either rebuilds. */
   signature: string;
 }
 
-type DragKind = "move" | "scale" | "body" | "marquee" | "pan" | "rect" | null;
+interface TileLayerView {
+  layer: Phaser.Tilemaps.TilemapLayer;
+  signature: string;
+}
+
+type DragKind = "move" | "scale" | "body" | "marquee" | "pan" | null;
 
 const HANDLE_SIZE = 8;
 const SNAP_THRESHOLD_PX = 6;
@@ -37,7 +43,6 @@ const INK = {
   body: 0x1d2d3d, // accent-900, dashed
   guide: 0x94bce3, // accent-400
   marquee: 0x5980a6, // accent
-  rect: 0x728fab, // accent-2
   container: 0x728fab, // accent-2
 } as const;
 
@@ -95,6 +100,7 @@ export class EditorScene extends Phaser.Scene {
   private bridge!: EditorBridge;
 
   private tileViews = new Map<string, TileLayerView>();
+  private mapViews = new Map<string, MapView>();
   private sprites = new Map<string, Phaser.GameObjects.Sprite>();
   private gridGfx!: Phaser.GameObjects.Graphics;
   private overlayGfx!: Phaser.GameObjects.Graphics;
@@ -110,15 +116,14 @@ export class EditorScene extends Phaser.Scene {
   private dragBodyOrigin: { width: number; height: number; offsetX: number; offsetY: number } | null = null;
   private handleIndex = -1;
   private marquee = { x: 0, y: 0, w: 0, h: 0 };
-  private rectStart = { col: 0, row: 0 };
-  private rectEnd = { col: 0, row: 0 };
   private guides: { x: number | null; y: number | null } = { x: null, y: null };
   /** Prefab resolution memo, rebuilt only when the store actually changes. */
   private resolvedCache = new Map<string, SceneObject>();
   private resolvedVersion = -1;
   private altDown = false;
   private spaceDown = false;
-  private lastPaintCell = "";
+  /** The last frame request answered; see ProjectStore.frameSelection. */
+  private framed = 0;
 
   constructor() {
     super("EditorScene");
@@ -130,9 +135,10 @@ export class EditorScene extends Phaser.Scene {
   }
 
   create(): void {
-    // create() runs again every time the editor comes back from a play-test,
-    // so the caches from the previous run must not survive into this one.
+    // create() can run more than once, so the caches from a previous run must
+    // not survive into this one.
     this.tileViews.clear();
+    this.mapViews.clear();
     this.sprites.clear();
     this.drag = null;
     this.guides = { x: null, y: null };
@@ -199,7 +205,51 @@ export class EditorScene extends Phaser.Scene {
     this.applyCamera();
     this.syncTileLayers();
     this.syncSprites();
+    this.answerFrameRequest();
     this.drawGrid();
+  }
+
+  /**
+   * Fits the selection — or the whole scene, with nothing selected — in view.
+   *
+   * Zooms out as far as it takes to fit, but never zooms in past 100% unless
+   * the view already was: framing one small sprite at 400% loses the level
+   * around it, which is the thing you were trying to find it in.
+   */
+  private answerFrameRequest(): void {
+    const request = this.store.ui.frameRequest;
+    if (request === this.framed) return;
+    this.framed = request;
+    const scene = this.store.scene;
+    if (!scene) return;
+
+    // The selection and everything under it: a container is framed by its parts.
+    const wanted = new Set(this.store.view.selection);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const obj of scene.objects) {
+        if (obj.parentId && wanted.has(obj.parentId) && !wanted.has(obj.id)) {
+          wanted.add(obj.id);
+          grew = true;
+        }
+      }
+    }
+    let box: Phaser.Geom.Rectangle | null = null;
+    for (const id of wanted) {
+      const sprite = this.sprites.get(id);
+      if (!sprite) continue;
+      const b = sprite.getBounds();
+      box = box ? Phaser.Geom.Rectangle.Union(box, b, box) : b;
+    }
+    box ??= new Phaser.Geom.Rectangle(0, 0, scene.settings.width, scene.settings.height);
+
+    const cam = this.cameras.main;
+    const pad = 64;
+    const fit = Math.min(cam.width / (box.width + pad * 2), cam.height / (box.height + pad * 2));
+    const zoom = Phaser.Math.Clamp(Math.min(fit, Math.max(cam.zoom, 1)), 0.2, 4);
+    cam.setZoom(zoom);
+    cam.centerOn(box.centerX, box.centerY);
+    this.store.setCamera({ x: cam.scrollX, y: cam.scrollY, zoom });
   }
 
   private applyCamera(): void {
@@ -209,75 +259,102 @@ export class EditorScene extends Phaser.Scene {
     cam.setScroll(camera.x, camera.y);
   }
 
+  /**
+   * Tile layers are drawn by Phaser's own Tiled parser, from the same map
+   * file the game loads — so what shows here is what `tilemapTiledJSON` will
+   * show there. Nothing about a tile is editable: that is Tiled's job.
+   */
   private syncTileLayers(): void {
     const scene = this.store.scene!;
     const seen = new Set<string>();
+    const usedMaps = new Set<string>();
 
     scene.layers.forEach((layer, depth) => {
       if (layer.kind !== "tile") return;
       seen.add(layer.id);
       const tile = layer as TileLayer;
-      const tileset = this.store.project.assets.find((a) => a.id === tile.tilesetId);
-      if (!tileset || !this.textures.exists(tileset.key)) return;
+      const mapView = this.mapView(tile.map);
+      if (!mapView) return;
+      usedMaps.add(tile.map);
 
-      const signature = `${tile.tilesetId}:${tile.cols}x${tile.rows}:${tile.tileWidth}x${tile.tileHeight}`;
+      const signature = `${mapView.signature}/${tile.layer}`;
       let view = this.tileViews.get(tile.id);
       if (view && view.signature !== signature) {
-        view.layer.destroy();
-        view.map.destroy();
+        view.layer.destroy(false);
         this.tileViews.delete(tile.id);
         view = undefined;
       }
-
       if (!view) {
-        const map = this.make.tilemap({
-          data: tile.data.map((row) => [...row]),
-          tileWidth: tile.tileWidth,
-          tileHeight: tile.tileHeight,
-        });
-        const image = map.addTilesetImage(
-          tileset.key,
-          tileset.key,
-          tileset.frameWidth ?? tile.tileWidth,
-          tileset.frameHeight ?? tile.tileHeight,
-          tileset.margin ?? 0,
-          tileset.spacing ?? 0,
-        );
-        if (!image) return;
-        const created = map.createLayer(0, image, 0, 0, false) as Phaser.Tilemaps.TilemapLayer | null;
+        // A layer the map no longer has is simply not drawn; the Layers panel
+        // and validation both say why.
+        if (mapView.map.getLayerIndexByName(tile.layer) === null) return;
+        const created = mapView.map.createLayer(tile.layer, mapView.tilesets, 0, 0);
         if (!created) return;
-        view = {
-          map,
-          layer: created,
-          shadow: tile.data.map((row) => [...row]),
-          signature,
-        };
+        view = { layer: created as Phaser.Tilemaps.TilemapLayer, signature };
         this.tileViews.set(tile.id, view);
-      } else {
-        // Only push the cells that actually changed — a paint stroke should
-        // not rebuild the whole layer.
-        for (let r = 0; r < tile.rows; r++) {
-          for (let c = 0; c < tile.cols; c++) {
-            const next = tile.data[r]?.[c] ?? -1;
-            if (view.shadow[r]?.[c] === next) continue;
-            view.map.putTileAt(next, c, r, false, view.layer);
-            if (!view.shadow[r]) view.shadow[r] = [];
-            view.shadow[r][c] = next;
-          }
-        }
       }
+      if (!view) return;
 
       view.layer.setDepth(depth * 100);
       view.layer.setVisible(layer.visible);
       view.layer.setAlpha(this.layerAlpha(layer));
     });
 
+    // Only the view goes. destroy() on its own also takes the layer's data
+    // out of the map, and the map is shared: another scene placing the same
+    // layer — Title and Level_01 both drawing Level_01's Ground — then found
+    // nothing to create, and drew an empty canvas after a scene switch.
     for (const [id, view] of [...this.tileViews]) {
       if (seen.has(id)) continue;
-      view.layer.destroy();
-      view.map.destroy();
+      view.layer.destroy(false);
       this.tileViews.delete(id);
     }
+    for (const [key, view] of [...this.mapViews]) {
+      if (usedMaps.has(key)) continue;
+      view.map.destroy();
+      this.mapViews.delete(key);
+    }
+  }
+
+  /** The Phaser tilemap for a Tiled map, rebuilt when the file or its art changes. */
+  private mapView(key: string): MapView | null {
+    const data = this.store.tilemapData(key);
+    const info = this.store.project.assets.find((a) => a.kind === "tilemap" && a.key === key)?.tilemap;
+    if (!data || !info) return null;
+
+    // Tilesets whose image has arrived. One that has not is left out, and the
+    // signature changes when it does, so the layer redraws with it.
+    const ready = info.tilesets.filter((t) => t.image && this.textures.exists(t.image));
+    const signature = `${key}@${this.store.tilemapRevision(key)}:${ready.map((t) => t.image).join(",")}`;
+    const existing = this.mapViews.get(key);
+    if (existing?.signature === signature) return existing;
+
+    if (existing) {
+      // The layers belong to the old map; they go first.
+      for (const [id, view] of [...this.tileViews]) {
+        if (!view.signature.startsWith(`${existing.signature}/`)) continue;
+        view.layer.destroy();
+        this.tileViews.delete(id);
+      }
+      existing.map.destroy();
+      this.mapViews.delete(key);
+    }
+    if (!ready.length) return null;
+
+    const cacheKey = `mosaic-map:${key}`;
+    this.cache.tilemap.remove(cacheKey);
+    this.cache.tilemap.add(cacheKey, {
+      format: Phaser.Tilemaps.Formats.TILED_JSON,
+      // Phaser's parser writes into what it is given.
+      data: structuredClone(data),
+    });
+    const map = this.make.tilemap({ key: cacheKey });
+    const tilesets = ready
+      .map((t) => map.addTilesetImage(t.name, t.image!))
+      .filter((t): t is Phaser.Tilemaps.Tileset => !!t);
+    const view: MapView = { map, tilesets, signature };
+    this.mapViews.set(key, view);
+    return view;
   }
 
   private layerAlpha(layer: Layer): number {
@@ -477,21 +554,6 @@ export class EditorScene extends Phaser.Scene {
       g.strokeRect(this.marquee.x, this.marquee.y, this.marquee.w, this.marquee.h);
     }
 
-    if (this.drag === "rect") {
-      const layer = this.store.activeLayer;
-      if (layer?.kind === "tile") {
-        const tw = layer.tileWidth;
-        const th = layer.tileHeight;
-        const c0 = Math.min(this.rectStart.col, this.rectEnd.col);
-        const c1 = Math.max(this.rectStart.col, this.rectEnd.col);
-        const r0 = Math.min(this.rectStart.row, this.rectEnd.row);
-        const r1 = Math.max(this.rectStart.row, this.rectEnd.row);
-        g.lineStyle(1.5 / zoom, INK.rect, 1);
-        g.fillStyle(INK.rect, 0.15);
-        g.fillRect(c0 * tw, r0 * th, (c1 - c0 + 1) * tw, (r1 - r0 + 1) * th);
-        g.strokeRect(c0 * tw, r0 * th, (c1 - c0 + 1) * tw, (r1 - r0 + 1) * th);
-      }
-    }
   }
 
   /**
@@ -628,13 +690,6 @@ export class EditorScene extends Phaser.Scene {
     return this.store.ui.snap !== this.altDown;
   }
 
-  private cellAt(p: Phaser.Input.Pointer, layer: TileLayer) {
-    return {
-      col: Math.floor(p.worldX / layer.tileWidth),
-      row: Math.floor(p.worldY / layer.tileHeight),
-    };
-  }
-
   private onPointerDown(p: Phaser.Input.Pointer): void {
     const scene = this.store.scene;
     if (!scene) return;
@@ -647,30 +702,6 @@ export class EditorScene extends Phaser.Scene {
     }
 
     const tool = this.store.ui.tool;
-
-    if (tool === "brush" || tool === "erase") {
-      const layer = this.store.activeLayer;
-      if (layer?.kind !== "tile") {
-        this.store.setStatus("Pick a tile layer in the LAYERS panel to paint on");
-        return;
-      }
-      this.store.beginStroke(tool === "erase" ? "Erase tiles" : "Paint tiles");
-      this.lastPaintCell = "";
-      this.paintAt(p, layer);
-      return;
-    }
-
-    if (tool === "rect") {
-      const layer = this.store.activeLayer;
-      if (layer?.kind !== "tile") {
-        this.store.setStatus("Rect fill needs a tile layer");
-        return;
-      }
-      this.drag = "rect";
-      this.rectStart = this.cellAt(p, layer);
-      this.rectEnd = this.rectStart;
-      return;
-    }
 
     if (tool === "place") {
       this.placeAt(p);
@@ -745,18 +776,19 @@ export class EditorScene extends Phaser.Scene {
     const scene = this.store.scene;
     if (!scene) return;
 
+    // The cell under the pointer, on a tile layer: it is how a position in the
+    // editor is matched to a tile in Tiled.
     const layer = this.store.activeLayer;
+    const grid =
+      layer?.kind === "tile"
+        ? this.store.project.assets.find((a) => a.kind === "tilemap" && a.key === layer.map)?.tilemap
+        : undefined;
     this.bridge.send("cursor", {
       x: Math.round(p.worldX),
       y: Math.round(p.worldY),
-      col: layer?.kind === "tile" ? Math.floor(p.worldX / layer.tileWidth) : -1,
-      row: layer?.kind === "tile" ? Math.floor(p.worldY / layer.tileHeight) : -1,
+      col: grid ? Math.floor(p.worldX / grid.tileWidth) : -1,
+      row: grid ? Math.floor(p.worldY / grid.tileHeight) : -1,
     });
-
-    if ((this.store.ui.tool === "brush" || this.store.ui.tool === "erase") && p.isDown) {
-      if (layer?.kind === "tile") this.paintAt(p, layer);
-      return;
-    }
 
     switch (this.drag) {
       case "pan": {
@@ -786,22 +818,12 @@ export class EditorScene extends Phaser.Scene {
           h: Math.abs(p.worldY - this.dragStart.y),
         };
         break;
-      case "rect": {
-        if (layer?.kind === "tile") this.rectEnd = this.cellAt(p, layer);
-        break;
-      }
       default:
         break;
     }
   }
 
   private onPointerUp(p: Phaser.Input.Pointer): void {
-    const tool = this.store.ui.tool;
-    if (tool === "brush" || tool === "erase") {
-      this.store.endStroke();
-      this.lastPaintCell = "";
-    }
-
     switch (this.drag) {
       case "move":
       case "scale":
@@ -818,14 +840,6 @@ export class EditorScene extends Phaser.Scene {
         );
         break;
       }
-      case "rect": {
-        const layer = this.store.activeLayer;
-        if (layer?.kind === "tile") {
-          const tileId = this.store.ui.brush?.tileId ?? 0;
-          this.store.rectFill(layer.id, this.rectStart, this.rectEnd, tileId);
-        }
-        break;
-      }
       default:
         break;
     }
@@ -836,15 +850,6 @@ export class EditorScene extends Phaser.Scene {
   // -------------------------------------------------------------------
   // Tools
   // -------------------------------------------------------------------
-
-  private paintAt(p: Phaser.Input.Pointer, layer: TileLayer): void {
-    const { col, row } = this.cellAt(p, layer);
-    const cell = `${col},${row}`;
-    if (cell === this.lastPaintCell) return;
-    this.lastPaintCell = cell;
-    const tileId = this.store.ui.tool === "erase" ? -1 : (this.store.ui.brush?.tileId ?? 0);
-    this.store.putTile(layer.id, col, row, tileId);
-  }
 
   /**
    * Placement drops the object at the pointer, snapped, on the active object

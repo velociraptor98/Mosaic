@@ -1,7 +1,7 @@
 import type { MosaicApi } from "../../../electron/contract";
 import type { AssetDef } from "../../shared/types";
 import { uid } from "../store/ids";
-import { atlasSidecarPath, parsePhaserAtlas } from "../assets/atlasJson";
+import { atlasSidecarPaths, parsePhaserAtlas } from "../assets/atlasJson";
 import type {
   Platform,
   ProjectChange,
@@ -39,7 +39,6 @@ function assetKeyFor(rel: string): string {
 
 function kindFor(rel: string): AssetDef["kind"] {
   if (/\.(mp3|ogg|wav|m4a)$/i.test(rel)) return "audio";
-  if (/tile(set|s)?[-_.]|[-_.]tiles?\./i.test(rel)) return "tileset";
   if (/(sheet|sprites?|atlas|anim)/i.test(rel)) return "spritesheet";
   return "image";
 }
@@ -72,7 +71,10 @@ export function createElectronPlatform(api: MosaicApi): Platform {
     canImportPhaser: true,
     findGameEntries: (root) => api.findGameEntries(root),
     recordScene: (root, entry) => api.recordScene(root, entry),
-    bundleEntry: (root, entry) => api.bundleEntry(root, entry),
+
+    canRunGame: true,
+    startDevServer: (root) => api.devServerStart(root),
+    stopDevServer: (root) => api.devServerStop(root),
 
     canPackage: true,
     packageGame: (request) => api.packageGame(request),
@@ -81,10 +83,11 @@ export function createElectronPlatform(api: MosaicApi): Platform {
       return api.writeFiles(root, files);
     },
 
+    removeFiles: (root, rels) => api.removeFiles(root, rels),
     readText: (root, rel) => api.readText(root, rel),
     readScripts: (root) => api.readScripts(root),
+    openInTiled: (root, rel) => api.openInTiled(root, rel),
     openInEditor: (root, rel, line) => api.openInEditor(root, rel, line),
-    bundleScripts: (root, entries) => api.bundleScripts(root, entries),
 
     async importAssets(root: string): Promise<AssetDef[]> {
       return withAtlases(root, await api.importAssets(root));
@@ -136,7 +139,7 @@ export function createElectronPlatform(api: MosaicApi): Platform {
   /**
    * Art that arrived with its own atlas document comes in AS an atlas.
    *
-   * The `.json` beside a `.png` is the packer's output, and reading it is the
+   * The `.json` or `.xml` beside a `.png` is the packer's output, and reading it is the
    * difference between frames called `blue1` and frames called `frame_7`. The
    * document itself is not an asset — it is metadata about one — so it never
    * becomes an entry of its own.
@@ -144,17 +147,18 @@ export function createElectronPlatform(api: MosaicApi): Platform {
   async function withAtlases(root: string, files: { rel: string }[]): Promise<AssetDef[]> {
     const defs = toAssetDefs(
       root,
-      files.filter((f) => !/\.json$/i.test(f.rel)),
+      files.filter((f) => !/\.(json|tmj|xml)$/i.test(f.rel)),
     );
     for (const def of defs) {
       if (def.kind === "audio") continue;
-      const sidecar = atlasSidecarPath(def.path);
-      const text = await api.readText(root, sidecar).catch(() => null);
-      if (!text) continue;
-      const frames = parsePhaserAtlas(text);
-      if (!frames?.length) continue;
-      def.kind = "atlas";
-      def.frames = frames;
+      for (const sidecar of atlasSidecarPaths(def.path)) {
+        const text = await api.readText(root, sidecar).catch(() => null);
+        const frames = text ? parsePhaserAtlas(text) : null;
+        if (!frames?.length) continue;
+        def.kind = "atlas";
+        def.frames = frames;
+        break;
+      }
     }
     return defs;
   }

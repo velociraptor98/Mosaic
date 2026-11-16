@@ -1,66 +1,24 @@
-import type { PropertyType } from "../runtime/scripts";
-import type { SceneObject, ScriptRef } from "./types";
-
 /**
- * The scene-data half of script components: where their source lives, how an
- * instance addresses one value of one script, and how a stored value is
+ * The scene-data half of editable class fields: what kind of value a field
+ * holds, which source files the index reads, and how a stored value is
  * compared against the type its class declares.
  *
- * Imported by both the editor and the runtime loader, so nothing here knows
- * about React, the store, or the filesystem.
+ * Imported by the editor and the store, so nothing here knows about React or
+ * the filesystem.
  */
 
-export const SCRIPT_DIR = "src/scripts";
-/** The base class + decorator Mosaic writes into a new project. */
-export const SCRIPT_BASE_FILE = `${SCRIPT_DIR}/ScriptComponent.ts`;
-export const SCRIPT_BASE_CLASS = "ScriptComponent";
+/** What an editable field holds, as the inspector renders it. */
+export type PropertyType =
+  | "number"
+  | "string"
+  | "boolean"
+  | "enum"
+  | "object"
+  | "function"
+  | "ref";
 
-/** Files the script index will read. Everything else in src/ is ignored. */
+/** Files the source index will read. Everything else in src/ is ignored. */
 export const SCRIPT_EXT = /\.(ts|tsx|js|jsx|mts|mjs)$/;
-
-export function scriptFilePath(className: string): string {
-  return `${SCRIPT_DIR}/${className}.ts`;
-}
-
-export function scriptsOf(obj: Pick<SceneObject, "scripts">): ScriptRef[] {
-  return obj.scripts ?? [];
-}
-
-/**
- * Override paths for a prefab instance.
- *
- * Values are addressed per script index so `resolveObject`'s existing
- * definition ← overrides walk handles them with no special case: the prefab
- * supplies the whole `scripts` array, and the instance writes single leaves
- * back into it.
- */
-export function scriptPropPath(index: number, field: string): string {
-  return `scripts.${index}.props.${field}`;
-}
-
-export function scriptEnabledPath(index: number): string {
-  return `scripts.${index}.enabled`;
-}
-
-/** The path an instance uses when it changes the LIST itself, not a value. */
-export const SCRIPT_LIST_PATH = "scripts";
-
-export function isScriptOverridePath(path: string): boolean {
-  return path === SCRIPT_LIST_PATH || path.startsWith("scripts.");
-}
-
-export function newScriptRef(className: string, src: string): ScriptRef {
-  return { class: className, src, enabled: true, props: {} };
-}
-
-/** The type a stored JSON value reads as, for comparison against the class. */
-export function valueType(value: unknown): PropertyType {
-  if (typeof value === "number") return "number";
-  if (typeof value === "boolean") return "boolean";
-  if (typeof value === "string") return "string";
-  if (typeof value === "function") return "function";
-  return "object";
-}
 
 /**
  * Whether a stored value still fits the declared type. `enum` and `ref` are

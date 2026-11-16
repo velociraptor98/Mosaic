@@ -2,22 +2,19 @@ import { platform } from "./platform";
 import type { Workspace } from "./project/workspace";
 import type { ProjectStore } from "./store/project";
 import type { Playtest } from "./phaser/playtest";
+import { isTrusted } from "./scripts/trust";
 
 export type DialogName =
   | "palette"
   | "newscene"
   | "import"
   | "importphaser"
-  | "runproject"
   | "atlas"
   | "prefab"
-  | "collision"
-  | "attachscript"
   | "scripttrust"
   | "export"
   | "package"
   | "grid"
-  | "promote"
   | null;
 
 export interface CommandContext {
@@ -60,7 +57,6 @@ export function buildCommands(ctx: CommandContext): Command[] {
         { id: "project.new", title: "New project folder…", category: "Project", binding: `${mod}⇧N`, run: () => void workspace.createAndOpen() },
         { id: "project.save", title: "Save project to disk", category: "Project", binding: `${mod}S`, run: () => void workspace.saveNow() },
         { id: "project.importPhaser", title: "Import scene from a Phaser project…", category: "Project", run: () => openDialog("importphaser") },
-        { id: "project.runGame", title: "Run the project's own game", category: "Project", run: () => { if (workspace.gameEntry) openDialog("runproject"); } },
         { id: "project.reload", title: "Reload project from disk", category: "Project", run: () => void workspace.reload() },
         { id: "project.close", title: "Close project", category: "Project", binding: `${mod}W`, run: () => workspace.close() },
         { id: "project.package", title: "Export game (build a folder you can ship)…", category: "Project", binding: `${mod}⇧E`, run: () => openDialog("package") },
@@ -73,7 +69,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
     ...projectCommands,
     { id: "palette.open", title: "Open command palette", category: "General", binding: `${mod}K`, run: () => openDialog("palette") },
     { id: "scene.new", title: "New scene…", category: "Scene", binding: `${mod}N`, run: () => openDialog("newscene") },
-    { id: "scene.export", title: "Export scene…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },
+    { id: "scene.export", title: "Show generated code…", category: "Scene", binding: `${mod}E`, run: () => openDialog("export") },
     { id: "asset.import", title: "Import assets…", category: "Assets", binding: `${mod}I`, run: () => openDialog("import") },
     { id: "asset.atlas", title: "Slice atlas…", category: "Assets", run: () => openDialog("atlas") },
     { id: "prefab.create", title: "Create prefab from selection…", category: "Prefabs", binding: `${mod}⇧P`, run: () => openDialog("prefab") },
@@ -81,20 +77,16 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "prefab.save", title: "Save prefab (show what it costs)…", category: "Prefabs", run: () => { if (store.prefabDoc) store.planPrefabSave(workspace.writeBlockedReason); else store.setStatus("No prefab document is open"); } },
     { id: "prefab.close", title: "Back to scene (leave prefab edit mode)", category: "Prefabs", run: () => store.closePrefab() },
     { id: "prefab.expose", title: "Show the prefab's exposed fields", category: "Prefabs", run: () => store.setUi({ inspectorTab: "prefab" }) },
-    { id: "physics.matrix", title: "Edit collision matrix…", category: "Physics", run: () => openDialog("collision") },
-    { id: "script.attach", title: "Attach script to selection…", category: "Scripts", run: () => openDialog("attachscript") },
-    { id: "script.inspect", title: "Show scripts on selection", category: "Scripts", run: () => store.setUi({ inspectorTab: "scripts" }) },
-    { id: "script.reindex", title: "Re-index scripts from disk", category: "Scripts", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
+    { id: "code.inspect", title: "Show the selection's class fields", category: "Code", run: () => store.setUi({ inspectorTab: "scripts" }) },
+    { id: "code.reindex", title: "Re-read the project's source from disk", category: "Code", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
 
     { id: "tool.select", title: "Tool: Select", category: "Tools", binding: "V", run: () => store.setUi({ tool: "select" }) },
     { id: "tool.place", title: "Tool: Place", category: "Tools", binding: "B", run: () => store.setUi({ tool: "place" }) },
-    { id: "tool.brush", title: "Tool: Paint tiles", category: "Tools", binding: "P", run: () => store.setUi({ tool: "brush", inspectorTab: "tile" }) },
-    { id: "tool.rect", title: "Tool: Rect fill", category: "Tools", binding: "R", run: () => store.setUi({ tool: "rect", inspectorTab: "tile" }) },
-    { id: "tool.erase", title: "Tool: Erase tiles", category: "Tools", binding: "E", run: () => store.setUi({ tool: "erase", inspectorTab: "tile" }) },
 
     { id: "view.snap", title: "Toggle snapping", category: "View", binding: "S", run: () => store.setUi({ snap: !store.ui.snap }) },
     { id: "view.grid", title: "Toggle grid", category: "View", binding: "G", run: () => store.setUi({ showGrid: !store.ui.showGrid }) },
     { id: "view.bodies", title: "Toggle physics bodies", category: "View", binding: "F2", run: () => store.setUi({ showBodies: !store.ui.showBodies }) },
+    { id: "view.frame", title: "Frame selection (or the whole scene)", category: "View", binding: "F", run: () => store.frameSelection() },
     { id: "view.anim", title: "Open animation editor", category: "View", run: () => store.setUi({ dockTab: "anim" }) },
     { id: "view.assets", title: "Open asset browser", category: "View", run: () => store.setUi({ dockTab: "assets" }) },
 
@@ -107,32 +99,36 @@ export function buildCommands(ctx: CommandContext): Command[] {
 
     { id: "object.text", title: "Add text object…", category: "Objects", binding: "T", run: () => store.addText() },
 
-    { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
-    { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
+    { id: "layer.map", title: "Add a Tiled map to the scene…", category: "Layers", run: () => store.setUi({ inspectorTab: "tile" }) },
+    { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer() },
 
-    { id: "play.run", title: playtest.playing ? "Stop play-test" : "Run play-test", category: "Play", binding: `${mod}⏎`, run: () => (playtest.playing ? stopAndPrompt(ctx) : startPlaytest(ctx)) },
-    { id: "play.pause", title: "Pause / resume", category: "Play", binding: "F5", run: () => (playtest.paused ? playtest.resume() : playtest.pause()) },
-    { id: "play.step", title: "Step one frame", category: "Play", binding: "F6", run: () => playtest.step() },
+    { id: "play.run", title: playtest.run ? "Stop the game" : "Run the game", category: "Play", binding: `${mod}⏎`, run: () => (playtest.run ? playtest.stop() : startPlaytest(ctx)) },
+    { id: "play.reload", title: "Reload the running game", category: "Play", run: () => playtest.reload() },
   ];
 }
 
 /**
  * RUN, through the one door every entry point uses.
  *
- * A scene with behaviour on a project that has not been trusted asks first —
- * pressing play should never be the moment someone else's code starts running.
+ * It starts the project's own dev server, which executes the project's code —
+ * so a folder that has not been trusted asks first. Pressing play should never
+ * be the moment someone else's code starts running.
  */
 export function startPlaytest(ctx: CommandContext): void {
-  if (ctx.playtest.needsTrust()) {
+  const root = ctx.workspace.location?.root;
+  if (!ctx.playtest.canRun || !root) {
+    ctx.store.setStatus(
+      platform.canRunGame
+        ? "Save the project into this folder first — RUN runs the game from disk"
+        : "RUN needs the desktop app: it runs your project's own dev server",
+    );
+    return;
+  }
+  if (!isTrusted(root)) {
     ctx.openDialog("scripttrust");
     return;
   }
-  ctx.playtest.start();
-}
-
-export function stopAndPrompt(ctx: CommandContext): void {
-  const pending = ctx.playtest.stop();
-  if (pending.length) ctx.openDialog("promote");
+  void ctx.playtest.start();
 }
 
 /**

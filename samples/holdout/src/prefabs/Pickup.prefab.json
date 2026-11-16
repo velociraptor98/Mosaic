@@ -1,0 +1,35 @@
+{
+  "name": "Pickup",
+  "exposed": [
+    "texture"
+  ],
+  "root": {
+    "name": "Pickup",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 1.8,
+    "scaleY": 1.8,
+    "originX": 0.5,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "weapon_machine",
+    "group": "pickup",
+    "body": {
+      "shape": "box",
+      "width": 33,
+      "height": 10,
+      "radius": 16,
+      "offsetX": 0,
+      "offsetY": 0,
+      "immovable": false,
+      "allowGravity": false,
+      "bounce": 0,
+      "collideWorldBounds": false
+    },
+    "data": {},
+    "lid": "nmwjcrwp5f",
+    "children": []
+  }
+}

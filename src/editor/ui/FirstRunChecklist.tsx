@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { TileLayer } from "../../shared/types";
+import type { ProjectStore } from "../store/project";
 import { useEditor, useStoreVersion } from "./context";
 
 const KEY = "mosaic:firstrun-dismissed:v1";
@@ -24,14 +24,11 @@ function dismiss(root: string): void {
   }
 }
 
-function tileCount(scene: { layers: { kind: string }[] } | null): number {
-  if (!scene) return 0;
+/** How many times the scene's maps have been re-read — a save in Tiled moves it. */
+function mapRevision(store: ProjectStore): number {
   let n = 0;
-  for (const layer of scene.layers) {
-    if (layer.kind !== "tile") continue;
-    for (const row of (layer as TileLayer).data) {
-      for (const t of row) if (t >= 0) n += 1;
-    }
+  for (const layer of store.scene?.layers ?? []) {
+    if (layer.kind === "tile") n += store.tilemapRevision(layer.map);
   }
   return n;
 }
@@ -44,7 +41,7 @@ function tileCount(scene: { layers: { kind: string }[] } | null): number {
  * reading it. Dismissal is stored per project and never returns.
  */
 export function FirstRunChecklist({ root, installing }: { root: string; installing: boolean }) {
-  const { store, bridge } = useEditor();
+  const { store, playtest } = useEditor();
   useStoreVersion(store);
   const [hidden, setHidden] = useState(() => dismissedFor(root));
   const [ran, setRan] = useState(false);
@@ -54,27 +51,25 @@ export function FirstRunChecklist({ root, installing }: { root: string; installi
   const baseline = useRef({ tiles: 0, objects: 0 });
   useEffect(() => {
     baseline.current = {
-      tiles: tileCount(store.scene),
+      tiles: mapRevision(store),
       objects: store.scene?.objects.length ?? 0,
     };
   }, [root, store]);
 
-  useEffect(() => {
-    const onPlay = (s: { playing: boolean }) => {
-      if (s.playing) setRan(true);
-    };
-    bridge.on("playtest", onPlay);
-    return () => {
-      bridge.off("playtest", onPlay);
-    };
-  }, [bridge]);
+  useEffect(
+    () =>
+      playtest.subscribe(() => {
+        if (playtest.run) setRan(true);
+      }),
+    [playtest],
+  );
 
   const items = useMemo(() => {
     const scene = store.scene;
     return [
       { label: "project created", done: true },
       { label: `${scene?.key ?? "Level_01"} opened`, done: true },
-      { label: "paint terrain — press P", done: tileCount(scene) !== baseline.current.tiles },
+      { label: "edit the terrain — Map tab → Open in Tiled", done: mapRevision(store) !== baseline.current.tiles },
       {
         label: "place the player — press B",
         done: (scene?.objects.length ?? 0) > baseline.current.objects,

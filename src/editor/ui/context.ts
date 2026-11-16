@@ -3,7 +3,6 @@ import type { EditorBridge } from "../bridge";
 import type { DialogName } from "../commands";
 import type { Playtest } from "../phaser/playtest";
 import type { ScriptRegistry } from "../scripts/registry";
-import type { ScriptRuntime } from "../scripts/runtime";
 import type { Workspace } from "../project/workspace";
 import type { ProjectStore } from "../store/project";
 
@@ -32,11 +31,6 @@ export function useStoreVersion(store: ProjectStore): number {
 /** Re-renders the caller whenever the script index is rebuilt. */
 export function useScripts(registry: ScriptRegistry): number {
   return useSyncExternalStore(registry.subscribe, registry.getRevision);
-}
-
-/** Re-renders the caller whenever the compiled scripts change. */
-export function useScriptRuntime(runtime: ScriptRuntime): number {
-  return useSyncExternalStore(runtime.subscribe, runtime.getRevision);
 }
 
 /** Re-renders the caller whenever the workspace (disk state) changes. */

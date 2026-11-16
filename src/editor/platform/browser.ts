@@ -2,7 +2,6 @@ import type { AssetDef } from "../../shared/types";
 import type {
   CreateResult,
   EditorOpen,
-  ScriptBundle,
   ScriptFile,
   Platform,
   ProjectLocation,
@@ -41,9 +40,14 @@ export const browserPlatform: Platform = {
   async recordScene() {
     return { ok: false, error: "Importing a Phaser project needs the desktop app." };
   },
-  async bundleEntry() {
-    return { code: null, error: "Running a project's own game needs the desktop app." };
+
+  // No folder means no dev server: the browser build previews a scene from
+  // its data instead, in the editor's own canvas.
+  canRunGame: false,
+  async startDevServer() {
+    return { ok: false, error: "Running the game needs the desktop app.", log: "" };
   },
+  async stopDevServer(): Promise<void> {},
 
   canPackage: false,
   async packageGame() {
@@ -59,6 +63,9 @@ export const browserPlatform: Platform = {
   async writeFiles(): Promise<WriteOutcome> {
     return { written: [], failed: [] };
   },
+  async removeFiles(): Promise<string[]> {
+    return [];
+  },
   async readText(): Promise<string | null> {
     return null;
   },
@@ -68,16 +75,11 @@ export const browserPlatform: Platform = {
   async readScripts(): Promise<ScriptFile[]> {
     return [];
   },
+  async openInTiled() {
+    return { ok: false, via: "none" as const, error: "The browser build has no local files to open" };
+  },
   async openInEditor(): Promise<EditorOpen> {
     return { ok: false, via: "none", error: "The browser build has no local files to open" };
-  },
-  async bundleScripts(): Promise<ScriptBundle> {
-    return {
-      code: null,
-      error: "The browser build has no source tree to compile",
-      warnings: [],
-      modules: [],
-    };
   },
   async importAssets(): Promise<AssetDef[]> {
     return [];

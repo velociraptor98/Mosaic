@@ -1,19 +1,25 @@
-import { generateFiles, sceneClassName } from "../export/generate";
+import { generateProjectFiles, prefabClassPath, sceneClassPath } from "../export/generate";
+import { serializeTiledMap } from "../../shared/tiled";
 import { placeholderHeroSheetDataUrl } from "../../shared/tilesetImage";
 import { encodePngBase64 } from "../../shared/png";
 import { placeholderImages } from "../../shared/rasterise";
 import { DEFAULT_CONFIG, type ProjectConfig, type ProjectData } from "../../shared/types";
 import {
   createSceneFromTemplate,
-  defaultMatrix,
   placeholderObjectAssets,
   placeholderTilesetAsset,
   type TemplateId,
 } from "../store/templates";
 import { DEFAULT_GROUPS } from "../../shared/definitions";
-import { SCRIPT_BASE_FILE, newScriptRef, scriptFilePath } from "../../shared/scripts";
-import { samplePlayerController, scriptBaseSource } from "../scripts/stub";
-import { CONFIG_PATH, prefabPath } from "./serialize";
+import {
+  CONFIG_PATH,
+  MANIFEST_PATH,
+  pendingTilemaps,
+  prefabPath,
+  scenePath,
+  serializeConfig,
+  toManifest,
+} from "./serialize";
 
 /**
  * Plans a new project without touching the disk.
@@ -94,45 +100,31 @@ const PHASER_VERSION = "^4.2.1";
 export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   const slug = slugify(opts.name);
   const root = joinPath(opts.location, slug);
-  // Script components are a TypeScript story: the @property decorator is what
-  // the editor reads, and a JS project has no compiler configured to accept
-  // one. A JS scaffold lists them as skipped rather than writing code that
-  // will not build.
+  // Editable fields are marked in doc comments, so a JS scaffold gets the same
+  // layout and the same classes as a TypeScript one.
   const typed = opts.language === "ts";
   const e = typed ? "ts" : "js";
-  const { scene, prefabs } = createSceneFromTemplate(
+  const { scene, prefabs, assets: maps } = createSceneFromTemplate(
     "Level_01",
     "Level 01",
     opts.template,
     opts.config,
   );
 
-  const sampleScript = typed && (opts.template === "platformer" || opts.template === "runner");
-  if (sampleScript) {
-    // Behaviour goes on the Player PREFAB, not on the one object in this
-    // scene: that is how it would be authored, and it means the sample script
-    // reaches every Player the project ever places.
-    const player = prefabs.find((p) => p.name === "Player");
-    if (player?.root) {
-      player.root.scripts = [newScriptRef("PlayerController", scriptFilePath("PlayerController"))];
-    }
-  }
-
+  const config: ProjectConfig = { ...opts.config, language: opts.language };
   const project: ProjectData = {
     name: opts.name.trim() || slug,
-    config: opts.config,
+    config,
     scenes: [scene],
     prefabs,
-    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],
+    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets(), ...maps],
     anims: [],
     groups: [...DEFAULT_GROUPS],
-    collision: defaultMatrix(),
   };
 
-  const generated = generateFiles(project, scene, "both");
-  const sceneClass = generated.find((f) => f.path.endsWith(".ts") && f.path.includes("/scenes/"));
-  const sceneJson = generated.find((f) => f.path.endsWith(".scene.json"));
-  const manifest = generated.find((f) => f.path === "phaser.editor.json");
+  // The same files a save writes, so a project is in step with the editor
+  // from the first byte rather than from the first edit.
+  const code = generateProjectFiles(project, { language: opts.language });
 
   const bundled = opts.bundler !== "none";
   const hasPlayer = opts.template !== "empty";
@@ -147,8 +139,8 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   ) => files.push({ rel, contents, note, skipped, encoding });
 
   add("package.json", packageJson(slug, opts), `name: ${slug}`);
-  add(CONFIG_PATH, JSON.stringify(opts.config, null, 2) + "\n", "editor + scene defaults");
-  add("phaser.editor.json", manifest?.contents ?? "{}\n", "editor manifest");
+  add(CONFIG_PATH, serializeConfig(config), "editor + scene defaults");
+  add(MANIFEST_PATH, JSON.stringify(toManifest(project), null, 2) + "\n", "editor manifest");
   add("index.html", indexHtml(opts.name, e), "");
   add(
     `vite.config.${e}`,
@@ -163,12 +155,7 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
     opts.bundler !== "webpack",
   );
   add(`src/main.${e}`, mainFile(opts, e), "game config");
-  add(
-    `src/scenes/Level_01.${e}`,
-    renameScene(sceneClass?.contents ?? "", e),
-    "generated",
-  );
-  add("src/scenes/Level_01.scene.json", sceneJson?.contents ?? "{}\n", "editor source of truth");
+  add(scenePath(scene.key), JSON.stringify(scene, null, 2) + "\n", "what the editor edits");
   for (const prefab of prefabs) {
     add(
       prefabPath(prefab.name),
@@ -176,12 +163,29 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
       "starter prefab — yours to rename or delete",
     );
   }
-  add(
-    `src/prefabs/Player.${e}`,
-    hasPlayer ? playerPrefab(e, opts) : "",
-    hasPlayer ? "" : "skipped",
-    !hasPlayer,
-  );
+  // The terrain, as the Tiled map it is. Mosaic writes it this once.
+  for (const { asset, map } of pendingTilemaps(project)) {
+    add(asset.path, serializeTiledMap(map), "terrain — open it in Tiled");
+  }
+  const playerPath = prefabClassPath("Player", opts.language);
+  const levelPath = sceneClassPath(scene.key, opts.language);
+  for (const file of code) {
+    if (file.language === "json") continue;
+    // The two classes with something in them. A new project should move when
+    // you press a key and stop when it lands, and both of those are code: the
+    // first lives on the player, the second in the scene.
+    const contents =
+      file.path === playerPath && hasPlayer
+        ? playerClass(e, opts)
+        : file.path === levelPath && hasPlayer
+          ? levelClass(e, opts)
+          : file.contents;
+    add(
+      file.path,
+      contents,
+      file.owner === "generated" ? "generated — rewritten on every save" : "yours — written once",
+    );
+  }
   // The placeholder art the manifest declares, at the paths it declares. These
   // used to be drawn by the editor and never written, so an exported game
   // asked for five textures that did not exist and rendered nothing.
@@ -201,24 +205,12 @@ export function planScaffold(opts: NewProjectOptions): ScaffoldPlan {
   add(
     "tsconfig.json",
     typed ? tsconfigJson() : "",
-    typed ? "decorators, for @property" : "skipped",
+    typed ? "" : "skipped",
     !typed,
-  );
-  add(
-    SCRIPT_BASE_FILE,
-    typed ? scriptBaseSource() : "",
-    typed ? "ScriptComponent + @property" : "skipped",
-    !typed,
-  );
-  add(
-    scriptFilePath("PlayerController"),
-    sampleScript ? samplePlayerController() : "",
-    sampleScript ? "attached to the player" : "skipped",
-    !sampleScript,
   );
   add("anims.json", "[]\n", "");
   add(".gitignore", opts.git ? gitignore() : "", opts.git ? "" : "skipped", !opts.git);
-  add("README.md", readme(opts, slug, e), "");
+  add("README.md", readme(opts, e), "");
 
   return { slug, root, files, project, writes: files.filter((f) => !f.skipped) };
 }
@@ -227,14 +219,6 @@ function stripDataUrl(url: string): string {
   const comma = url.indexOf(",");
   return comma === -1 ? "" : url.slice(comma + 1);
 }
-
-/** The generator names the class <Key>Scene; the scaffold file is Level_01.<ext>. */
-function renameScene(contents: string, ext: string): string {
-  return contents
-    .replace(`export class ${sceneClassName("Level_01")}`, "export class Level_01")
-    .replace(/from "\.\/Level_01\.scene\.json"/, `from "./Level_01.scene.json"${ext === "js" ? " with { type: \"json\" }" : ""}`);
-}
-
 
 function packageJson(slug: string, opts: NewProjectOptions): string {
   const scripts: Record<string, string> =
@@ -324,10 +308,17 @@ function mainFile(opts: NewProjectOptions, ext: string): string {
         ? `  physics: { default: "matter", matter: { gravity: { y: 1 }, debug: false } },\n`
         : `  physics: { default: "arcade", arcade: { gravity: { x: 0, y: ${opts.template === "platformer" || opts.template === "runner" ? 900 : 0} }, debug: false } },\n`;
 
-  return `// Mirrors mosaic.config.json — keep the two in step, or let the editor
-// rewrite this file when the project defaults change.
-import Phaser from "phaser";
-import { Level_01 } from "./scenes/Level_01";
+  return `import Phaser from "phaser";
+import { Level_01 } from "./scenes/Level_01${typed ? "" : ".js"}";
+
+// Every scene the game has. A scene made in Mosaic gets a class of its own in
+// src/scenes/ — add it here, the way you would any other.
+const scenes = [Level_01];
+
+// Mosaic's RUN opens the game at ?scene=<ClassName>, so it starts on the scene
+// you are editing rather than wherever the game normally boots.
+const first = new URLSearchParams(window.location.search).get("scene");
+scenes.sort((a, b) => Number(b.name === first) - Number(a.name === first));
 
 const config${typed ? ": Phaser.Types.Core.GameConfig" : ""} = {
   type: Phaser.AUTO,
@@ -337,60 +328,123 @@ const config${typed ? ": Phaser.Types.Core.GameConfig" : ""} = {
   pixelArt: ${pixelArt},
   roundPixels: ${pixelArt},
   scale: { mode: Phaser.Scale.${scale === "NONE" ? "NONE" : scale}, autoCenter: Phaser.Scale.CENTER_BOTH },
-${physicsBlock}  scene: [Level_01],
+${physicsBlock}  scene: scenes,
 };
 
 new Phaser.Game(config);
 `;
 }
 
-function playerPrefab(ext: string, opts: NewProjectOptions): string {
+/**
+ * The scene's class for a template with terrain.
+ *
+ * The layout places things; this is where they are told about each other. A
+ * collider is one line of ordinary Phaser, written against objects the layout
+ * hands back by name.
+ */
+function levelClass(ext: string, opts: NewProjectOptions): string {
   const typed = ext === "ts";
   const t = (s: string) => (typed ? s : "");
+  const terrain = { platformer: "terrain", runner: "chunks", topdown: "walls", empty: "" }[opts.template];
+  const pickups = opts.template === "runner";
   return `import Phaser from "phaser";
+import { createLevel_01, preloadLevel_01${t(", type Level_01Layout")} } from "./Level_01.layout${typed ? "" : ".js"}";
 
 /**
- * Generated by Mosaic. Property assignments come from the prefab definition;
- * anything you write between the keep markers survives a regeneration.
+ * Level 01 — this file is yours.
+ *
+ * Mosaic wrote it once, as a starting point, and will not touch it again. What
+ * you place in the editor arrives through ./Level_01.layout.${ext}, which is
+ * regenerated on every save. The terrain is assets/maps/Level_01.tmj — open it
+ * in Tiled; a tile with the "collides" property is solid.
  */
-export class Player extends Phaser.Physics.Arcade.Sprite {
-  ${t("private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;\n  ")}constructor(scene${t(": Phaser.Scene")}, x${t(": number")}, y${t(": number")}) {
-    super(scene, x, y, "obj-player");
-    scene.add.existing(this);
-    scene.physics.add.existing(this);
-    this.setCollideWorldBounds(true);
-    this.cursors = scene.input.keyboard!.createCursorKeys();
-    // <keep id="ctor">
-    // </keep>
+export class Level_01 extends Phaser.Scene {
+  ${t("layout!: Level_01Layout;\n\n  ")}constructor() {
+    super("Level_01");
   }
 
-  ${t("override ")}preUpdate(time${t(": number")}, delta${t(": number")})${t(": void")} {
-    super.preUpdate(time, delta);
-    const speed = 220;
-    this.setVelocityX(
-      this.cursors.left.isDown ? -speed : this.cursors.right.isDown ? speed : 0,
-    );
+  preload()${t(": void")} {
+    preloadLevel_01(this);
+  }
+
+  create()${t(": void")} {
+    this.layout = createLevel_01(this);
+    const { player, ${terrain}${pickups ? ", groups" : ""} } = this.layout;
+
+    // What collides with what is yours to say.
+    this.physics.add.collider(player, ${terrain});
 ${
-  opts.template === "topdown"
-    ? `    this.setVelocityY(
-      this.cursors.up.isDown ? -speed : this.cursors.down.isDown ? speed : 0,
-    );`
-    : `    if (this.cursors.up.isDown && this.body${t("!")}.blocked.down) this.setVelocityY(-420);`
-}
-    // <keep id="update">
-    // </keep>
-  }
+  pickups
+    ? `    this.physics.add.overlap(player, groups.pickup, (_player, pickup) => {
+      ${typed ? "(pickup as Phaser.GameObjects.GameObject)" : "pickup"}.destroy();
+    });
+`
+    : ""
+}  }
 
-  // <keep id="body">
-  // </keep>
+  update(_time${t(": number")}, _delta${t(": number")})${t(": void")} {}
 }
 `;
 }
 
 /**
- * Decorators are the one compiler setting a Mosaic project needs: `@property`
- * is what the editor reads out of a class, so a project that cannot compile
- * one cannot use script components.
+ * The player's class, as a Phaser developer would write it: a sprite subclass
+ * that reads the keyboard in preUpdate. The numbers are tagged `@editable` in
+ * their doc comments, so they can be tuned per instance from the editor
+ * without the behaviour leaving the code.
+ */
+function playerClass(ext: string, opts: NewProjectOptions): string {
+  const typed = ext === "ts";
+  const t = (s: string) => (typed ? s : "");
+  const topdown = opts.template === "topdown";
+  const prop = (doc: string) => `/** ${doc} */\n  `;
+  return `import Phaser from "phaser";
+import { PlayerBase } from "./Player.layout${typed ? "" : ".js"}";
+
+/**
+ * Player — this file is yours.
+ *
+ * The art and the body come from PlayerBase (./Player.layout.${ext}, regenerated
+ * by Mosaic on every save). What the player DOES is here.
+ *
+ * A field with \`@editable\` in its doc comment shows up in Mosaic's inspector.
+ * The value written here is the default, and \`new Player(scene, x, y)\` gets
+ * it. A value set on a placed Player is assigned after the constructor runs.
+ */
+export class Player extends PlayerBase {
+  ${prop("Pixels per second. @editable { min: 0, max: 600 }")}speed = 220;
+${
+  topdown
+    ? ""
+    : `
+  ${prop(`Upward speed of a jump. @editable { label: "jump velocity", min: -1200, max: 0 }`)}jumpVelocity = -420;
+`
+}
+  ${t("private ")}cursors${t(": Phaser.Types.Input.Keyboard.CursorKeys")};
+
+  constructor(scene${t(": Phaser.Scene")}, x${t(": number")}, y${t(": number")}) {
+    super(scene, x, y);
+    this.cursors = scene.input.keyboard${t("!")}.createCursorKeys();
+  }
+
+  ${t("override ")}preUpdate(time${t(": number")}, delta${t(": number")})${t(": void")} {
+    super.preUpdate(time, delta);
+    const { left, right, up, down } = this.cursors;
+    this.setVelocityX(left.isDown ? -this.speed : right.isDown ? this.speed : 0);
+${
+  topdown
+    ? `    this.setVelocityY(up.isDown ? -this.speed : down.isDown ? this.speed : 0);`
+    : `    void down;
+    if (up.isDown && this.body.blocked.down) this.setVelocityY(this.jumpVelocity);`
+}
+  }
+}
+`;
+}
+
+/**
+ * An ordinary Vite + TypeScript config. Mosaic needs no compiler setting of its
+ * own: editable fields are marked in doc comments, not with decorators.
  */
 function tsconfigJson(): string {
   return (
@@ -404,8 +458,6 @@ function tsconfigJson(): string {
           strict: true,
           skipLibCheck: true,
           noEmit: true,
-          experimentalDecorators: true,
-          useDefineForClassFields: false,
         },
         include: ["src"],
       },
@@ -426,7 +478,7 @@ build
 `;
 }
 
-function readme(opts: NewProjectOptions, slug: string, ext: string): string {
+function readme(opts: NewProjectOptions, ext: string): string {
   const run =
     opts.bundler === "none"
       ? "Serve `index.html` with any static server."
@@ -440,15 +492,33 @@ ${run}
 ## Layout
 
 \`\`\`
-src/scenes/Level_01.scene.json   the editor's source of truth
-src/scenes/Level_01.${ext}${" ".repeat(Math.max(0, 12 - ext.length))}generated from it — edit inside // <keep> markers
-src/prefabs/                     one class per prefab
-src/scripts/                     ScriptComponent + the behaviour you attach
+src/main.${ext}                      the game config and the scene list — yours
+src/scenes/Level_01.${ext}           the scene class — yours
+src/scenes/Level_01.layout.${ext}    what the editor placed — generated
+src/scenes/Level_01.scene.json   the data the editor edits
+src/prefabs/Player.${ext}            a prefab's class — yours
+src/prefabs/Player.layout.${ext}     its art and body — generated
+assets/maps/Level_01.tmj         the terrain — a Tiled map, edited in Tiled
 assets/                          art and audio, copied in by the editor
 mosaic.config.json               canvas, tile size, scale mode, physics
 \`\`\`
 
-Open this folder in Mosaic to edit the scenes. Regenerating rewrites the
-generated files around your keep regions; \`${slug}\`'s hand-written code is safe.
+One rule covers all of it: **\`*.layout.${ext}\` is generated, everything else is
+yours.** Open this folder in Mosaic to lay scenes out. Every save rewrites the
+layout files and nothing else, so \`npm run dev\` reloads with what you just
+placed, and Mosaic never opens a file you wrote.
+
+A scene's \`create()\` gets its objects from the layout, by name, and says
+how they meet:
+
+\`\`\`${ext}
+create() {
+  const { player, terrain, groups } = createLevel_01(this);
+  this.physics.add.collider(player, terrain);
+}
+\`\`\`
+
+Terrain is a [Tiled](https://www.mapeditor.org) map. Give a tile the custom
+property \`collides\` (bool) and the layout marks it solid.
 `;
 }

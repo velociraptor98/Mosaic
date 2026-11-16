@@ -10,11 +10,17 @@ import {
 } from "../../shared/definitions";
 import { newLid } from "../../shared/prefabs";
 import { bodyForSize, type Size } from "../../shared/size";
+import {
+  MAP_DIR,
+  describeTiledMap,
+  tiledFromGrid,
+  tiledToDataUrl,
+  type GridLayer,
+} from "../../shared/tiled";
 import { placeholderTilesetDataUrl } from "../../shared/tilesetImage";
 import {
   DEFAULT_CONFIG,
   type AssetDef,
-  type CollisionRule,
   type ProjectConfig,
   type PrefabDef,
   type PrefabNode,
@@ -40,20 +46,20 @@ export const SCENE_TEMPLATES = [
   {
     id: "platformer",
     label: "Platformer",
-    blurb: "Tilemap terrain, gravity, jump controller.",
-    includes: ["Level_01", "Terrain layer", "Player.prefab", "arcade gravity 900", "camera follow", "wire_32 tileset"],
+    blurb: "Tiled terrain, gravity, jump controller.",
+    includes: ["Level_01", "Level_01.tmj (Tiled)", "Player.prefab", "arcade gravity 900", "placeholder tileset"],
   },
   {
     id: "topdown",
     label: "Top-down",
     blurb: "8-way movement, wall collision, room bounds.",
-    includes: ["Level_01", "Walls layer", "Player.prefab", "room bounds", "wire_32 tileset"],
+    includes: ["Level_01", "Level_01.tmj (Tiled)", "Player.prefab", "room bounds", "placeholder tileset"],
   },
   {
     id: "runner",
     label: "Endless runner",
     blurb: "Scrolling chunks, spawner, score.",
-    includes: ["Level_01", "Chunk.prefab", "Spawner", "score HUD", "wire_32 tileset"],
+    includes: ["Level_01", "Level_01.tmj (Tiled)", "Player.prefab", "Pickup.prefab", "placeholder tileset"],
   },
 ] as const;
 
@@ -66,72 +72,64 @@ function emptyGrid(cols = COLS, rows = ROWS, fill = -1): number[][] {
   return Array.from({ length: rows }, () => Array<number>(cols).fill(fill));
 }
 
-export function makeTileLayer(
-  name: string,
-  grid?: number[][],
-  dims?: { cols: number; rows: number; tile: number },
-): TileLayer {
-  const cols = dims?.cols ?? COLS;
-  const rows = dims?.rows ?? ROWS;
-  const tile = dims?.tile ?? TILE_SIZE;
+/** One tile layer of a Tiled map, as a row in the scene's layer list. */
+export function makeTileLayer(name: string, map: string, layer = name): TileLayer {
+  return { id: uid("layer"), name, kind: "tile", visible: true, locked: false, map, layer };
+}
+
+export const mapPathFor = (sceneKey: string) => `${MAP_DIR}/${sceneKey}.tmj`;
+
+/**
+ * The terrain a template starts with, as a Tiled map.
+ *
+ * It is an ordinary `.tmj` drawn with the placeholder tileset: open it in
+ * Tiled and it is yours to repaint, re-tile or throw away. The asset carries
+ * the map as a data: URL until the project is saved into a folder, at which
+ * point it becomes the file at `path`.
+ */
+export function makeTemplateMap(
+  sceneKey: string,
+  layers: GridLayer[],
+  dims: { cols: number; rows: number; tile: number },
+): AssetDef {
+  const path = mapPathFor(sceneKey);
+  const tileset = placeholderTilesetAsset();
+  const map = tiledFromGrid({
+    cols: dims.cols,
+    rows: dims.rows,
+    tileWidth: dims.tile,
+    tileHeight: dims.tile,
+    layers,
+    tileset: {
+      name: BUILTIN_TILESET_KEY,
+      // Relative to the map, which is how Tiled writes it.
+      image: "../placeholder-tiles.png",
+      imageWidth: tileset.width,
+      imageHeight: tileset.height,
+      tileWidth: TILE_SIZE,
+      tileHeight: TILE_SIZE,
+      collides: TILE_DEFS.filter((t) => t.collides).map((t) => t.index),
+    },
+  });
   return {
-    id: uid("layer"),
-    name,
-    kind: "tile",
-    visible: true,
-    locked: false,
-    tilesetId: BUILTIN_TILESET_ID,
-    tileWidth: tile,
-    tileHeight: tile,
-    cols,
-    rows,
-    data: grid ?? emptyGrid(cols, rows),
+    id: uid("asset"),
+    key: mapKeyFor(sceneKey),
+    kind: "tilemap",
+    path,
+    url: tiledToDataUrl(map),
+    width: dims.cols * dims.tile,
+    height: dims.rows * dims.tile,
+    tilemap: describeTiledMap(map, path, [tileset]),
   };
 }
 
-/**
- * A plain sprite of one placeholder shape.
- *
- * There is no "type" to choose any more: an object is art plus components, so
- * what you pass is the art. Templates use this to build their starter prefabs;
- * everything a user places comes from an asset or a prefab.
- */
-export function makeObject(
-  shape: string,
-  layerId: string,
-  x: number,
-  y: number,
-  overrides: Partial<SceneObject> = {},
-): SceneObject {
-  const def = shapeDef(shape);
-  const base: SceneObject = {
-    id: uid("obj"),
-    name: def?.label ?? "Sprite",
-    type: "sprite",
-    layerId,
-    parentId: null,
-    x,
-    y,
-    rotation: 0,
-    scaleX: 1,
-    scaleY: 1,
-    originX: 0.5,
-    originY: 0.5,
-    visible: true,
-    texture: shapeTextureKey(shape),
-    data: {},
-  };
-  return { ...base, ...overrides };
+export function mapKeyFor(sceneKey: string): string {
+  return sceneKey.replace(/[^\w]+/g, "_");
 }
 
 export function shapeSize(shape: string): Size {
   const def = shapeDef(shape);
   return { width: def?.width ?? 32, height: def?.height ?? 32 };
-}
-
-/** A body matching a placeholder shape's art. */
-export function defaultBody(shape: string, patch: Partial<SceneObject["body"]> = {}): SceneObject["body"] {
-  return bodyForSize(shapeSize(shape), patch);
 }
 
 /**
@@ -223,6 +221,8 @@ function placePrefab(
 export interface TemplateResult {
   scene: SceneData;
   prefabs: PrefabDef[];
+  /** The Tiled map the scene stands on, when the template has terrain. */
+  assets: AssetDef[];
 }
 
 export function createSceneFromTemplate(
@@ -256,7 +256,11 @@ export function createSceneFromTemplate(
   if (template === "empty") {
     // Nothing at all. Someone porting a game wants an empty folder, not a
     // starter set they have to delete first.
-    return { scene: { key, name, settings, layers: [objectLayer()], objects: [] }, prefabs: [] };
+    return {
+      scene: { key, name, settings, layers: [objectLayer()], objects: [] },
+      prefabs: [],
+      assets: [],
+    };
   }
 
   const gravity = settings.gravityY > 0;
@@ -277,7 +281,8 @@ export function createSceneFromTemplate(
     }
     for (let c = 4; c <= 8; c++) data[rows - 6][c] = 1;
     for (let c = 13; c <= Math.min(18, cols - 2); c++) data[rows - 8][c] = 1;
-    const tiles = makeTileLayer("Terrain", data, dims);
+    const map = makeTemplateMap(key, [{ name: "Terrain", data }], dims);
+    const tiles = makeTileLayer("Terrain", map.key);
     const objects = objectLayer();
     return {
       scene: {
@@ -288,6 +293,7 @@ export function createSceneFromTemplate(
         objects: [placePrefab(player, objects.id, 3 * tile, (rows - 4) * tile)],
       },
       prefabs: [player, pickup],
+      assets: [map],
     };
   }
 
@@ -296,7 +302,8 @@ export function createSceneFromTemplate(
     for (let c = 0; c < cols; c++) data[rows - 1][c] = 4;
     for (let c = 6; c <= 9; c++) data[rows - 5][c] = 1;
     for (let c = 15; c <= 18 && c < cols; c++) data[rows - 7][c] = 1;
-    const tiles = makeTileLayer("Chunks", data, dims);
+    const map = makeTemplateMap(key, [{ name: "Chunks", data }], dims);
+    const tiles = makeTileLayer("Chunks", map.key);
     const objects = objectLayer();
     const coins = [0, 1, 2].map((i) =>
       placePrefab(pickup, objects.id, (16 + i) * tile, (rows - 9) * tile, `Pickup ${i + 1}`),
@@ -310,6 +317,7 @@ export function createSceneFromTemplate(
         objects: [placePrefab(player, objects.id, 2 * tile, (rows - 4) * tile), ...coins],
       },
       prefabs: [player, pickup],
+      assets: [map],
     };
   }
 
@@ -326,7 +334,8 @@ export function createSceneFromTemplate(
     data[r][0] = 4;
     data[r][cols - 1] = 4;
   }
-  const tiles = makeTileLayer("Walls", data, dims);
+  const map = makeTemplateMap(key, [{ name: "Walls", data }], dims);
+  const tiles = makeTileLayer("Walls", map.key);
   const objects = objectLayer();
   return {
     scene: {
@@ -337,23 +346,24 @@ export function createSceneFromTemplate(
       objects: [placePrefab(player, objects.id, 6 * tile, Math.floor(rows / 2) * tile)],
     },
     prefabs: [player, pickup],
+    assets: [map],
   };
 }
 
+/**
+ * The tileset the template maps are drawn with. An ordinary image as far as
+ * the project is concerned: which tiles it holds, and which are solid, is in
+ * the map.
+ */
 export function placeholderTilesetAsset(): AssetDef {
   return {
     id: BUILTIN_TILESET_ID,
     key: BUILTIN_TILESET_KEY,
-    kind: "tileset",
+    kind: "image",
     path: "assets/placeholder-tiles.png",
     url: placeholderTilesetDataUrl(),
     width: TILE_DEFS.length * TILE_SIZE,
     height: TILE_SIZE,
-    frameWidth: TILE_SIZE,
-    frameHeight: TILE_SIZE,
-    margin: 0,
-    spacing: 0,
-    tileCollides: TILE_DEFS.filter((t) => t.collides).map((t) => t.index),
     generated: true,
   };
 }
@@ -372,34 +382,8 @@ export function placeholderObjectAssets(): AssetDef[] {
   }));
 }
 
-/**
- * Starting rules for the starting groups. Exported because the scaffold needs
- * the same table — it had its own copy, which drifted the moment the default
- * groups changed and crashed on a name that no longer existed.
- */
-export function defaultMatrix(groups: string[] = DEFAULT_GROUPS): Record<string, Record<string, CollisionRule>> {
-  const matrix: Record<string, Record<string, CollisionRule>> = {};
-  for (const a of groups) {
-    matrix[a] = {};
-    for (const b of groups) matrix[a][b] = "ignore";
-  }
-  const set = (a: string, b: string, rule: CollisionRule) => {
-    if (!matrix[a] || !matrix[b]) return;
-    matrix[a][b] = rule;
-    matrix[b][a] = rule;
-  };
-  // Sensible starting rules for the starting groups. Both are project data:
-  // rename a group or delete it and the matrix follows.
-  set("player", "solid", "collide");
-  set("player", "pickup", "overlap");
-  set("player", "hazard", "overlap");
-  set("player", "trigger", "overlap");
-  set("solid", "solid", "collide");
-  return matrix;
-}
-
 export function createStarterProject(): ProjectData {
-  const { scene: level, prefabs } = createSceneFromTemplate(
+  const { scene: level, prefabs, assets } = createSceneFromTemplate(
     "Level_01",
     "Level 01",
     "platformer",
@@ -426,9 +410,8 @@ export function createStarterProject(): ProjectData {
     config: structuredClone(DEFAULT_CONFIG),
     scenes: [level],
     prefabs,
-    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets()],
+    assets: [placeholderTilesetAsset(), ...placeholderObjectAssets(), ...assets],
     anims: [],
     groups: [...DEFAULT_GROUPS],
-    collision: defaultMatrix(DEFAULT_GROUPS),
   };
 }

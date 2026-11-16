@@ -157,20 +157,6 @@ export function PrefabDialog({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {check.unresolved.length > 0 && (
-        <div className="banner warn">
-          <strong>{check.unresolved.length} unresolvable link(s).</strong> These point at objects
-          the prefab will not contain, so they will not resolve once it is placed in another scene:
-          <ul className="tight-list">
-            {check.unresolved.map((u, i) => (
-              <li key={i}>
-                <code>{u.property}</code> on {u.object} → <code>{u.target}</code>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       <p className="hint">
         Per-instance <code>data</code> keys start exposed, because those are per-copy by nature.
         Everything else stays locked to the definition until you publish it in the{" "}

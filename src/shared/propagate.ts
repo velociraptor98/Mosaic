@@ -3,7 +3,6 @@ import {
   diffNodes,
   isOverridden,
   resolvePrefab,
-  same,
   variantsOf,
 } from "./prefabs";
 import type { PrefabDef, ProjectData, SceneObject } from "./types";
@@ -74,24 +73,6 @@ function instancesOf(
   return out;
 }
 
-function label(path: string, project: ProjectData, prefabName: string): string {
-  // `scripts.0.props.chaseSpeed` reads as `SlimeAI.chaseSpeed` — the class the
-  // value belongs to is what the author named it by.
-  const script = /^scripts\.(\d+)\.props\.(.+)$/.exec(path);
-  if (script) {
-    const prefab = resolvePrefab(project, prefabName);
-    const cls = prefab?.root.scripts?.[Number(script[1])]?.class;
-    return cls ? `${cls}.${script[2]}` : path;
-  }
-  const enabled = /^scripts\.(\d+)\.enabled$/.exec(path);
-  if (enabled) {
-    const prefab = resolvePrefab(project, prefabName);
-    const cls = prefab?.root.scripts?.[Number(enabled[1])]?.class;
-    return cls ? `${cls} enabled` : path;
-  }
-  return path;
-}
-
 function show(value: unknown): string {
   if (value === undefined) return "—";
   if (typeof value === "string") return value;
@@ -159,10 +140,10 @@ export function planPropagation(
       const moving = mine.filter((e) => !isOverridden(e.obj, change.path));
       const text =
         change.kind === "added"
-          ? `${label(change.path, next, name)} added · ${show(change.after)}`
+          ? `${change.path} added · ${show(change.after)}`
           : change.kind === "removed"
-            ? `${label(change.path, project, name)} removed`
-            : `${label(change.path, next, name)}  ${show(change.before)} → ${show(change.after)}`;
+            ? `${change.path} removed`
+            : `${change.path}  ${show(change.before)} → ${show(change.after)}`;
 
       if (moving.length) {
         rows.push({
@@ -181,7 +162,7 @@ export function planPropagation(
       for (const e of overriding) {
         rows.push({
           kind: "kept",
-          what: `${label(change.path, next, name)} override ${show(e.obj.overrides?.[change.path])}`,
+          what: `${change.path} override ${show(e.obj.overrides?.[change.path])}`,
           where: `${e.sceneName} · ${e.obj.name}${name === prefabName ? "" : ` (${name})`}`,
           path: change.path,
           scenes: [e.scene],
@@ -210,7 +191,7 @@ export function planPropagation(
       if (!holders.length) continue;
       rows.push({
         kind: "dropped",
-        what: `${label(path, project, name)} override (field unexposed)`,
+        what: `${path} override (field unexposed)`,
         where: countLabel(holders.length, name, prefabName),
         path,
         scenes: [...new Set(holders.map((e) => e.scene))],
@@ -297,9 +278,4 @@ export function prefabUsage(
     counts.set(entry.scene, row);
   }
   return [...counts.values()];
-}
-
-/** True when two definitions would resolve to the same thing. */
-export function definitionsMatch(a: PrefabDef, b: PrefabDef): boolean {
-  return same(a, b);
 }

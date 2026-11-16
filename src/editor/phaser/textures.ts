@@ -27,7 +27,8 @@ export function syncTextures(
 
   let queued = 0;
   for (const asset of project.assets) {
-    if (!asset.url || asset.kind === "audio") continue;
+    // A Tiled map is not a texture; the canvas builds it from its own data.
+    if (!asset.url || asset.kind === "audio" || asset.kind === "tilemap") continue;
     const previous = loaded.get(asset.key);
     if (previous !== undefined && previous !== asset.url) {
       invalidateTexture(scene, asset.key);

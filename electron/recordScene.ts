@@ -24,7 +24,7 @@ import type { SceneRecording } from "./contract";
  * - **A deadline.** `create()` is not required to terminate, so the window is
  *   killed on a timer regardless of what the page is doing.
  * - **Consent upstream.** The renderer will not call this without the same
- *   per-folder trust the play-test already asks for. Running somebody's game is
+ *   per-folder trust RUN already asks for. Running somebody's game is
  *   not something to do because they opened a folder.
  *
  * Nothing is written to the project. The bundle and the harness page live in a
@@ -81,17 +81,6 @@ export async function findGameEntries(root: string): Promise<string[]> {
       a.split("/").length - b.split("/").length ||
       a.localeCompare(b),
   );
-}
-
-/**
- * Compiles a project's entry point for evaluation in a renderer.
- *
- * Shared by the recorder and by RUN: both need the project's own game, one to
- * snapshot it once and one to keep it running, and compiling it twice two ways
- * would be two things to keep in step.
- */
-export async function bundleEntry(root: string, entry: string): Promise<string> {
-  return bundle(root, entry);
 }
 
 async function bundle(root: string, entry: string): Promise<string> {

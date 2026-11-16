@@ -8,7 +8,7 @@ export interface TileDef {
   index: number;
   name: string;
   color: number;
-  /** Default collision flag baked into the generated placeholder tileset. */
+  /** Whether the placeholder maps mark this tile solid. */
   collides: boolean;
 }
 
@@ -62,7 +62,7 @@ export const SHAPE_DEFS: ShapeDef[] = [
 ];
 
 /**
- * Collision groups a fresh project starts with. Groups are project data and
+ * Groups a fresh project starts with. Groups are project data and
  * always were — these are a starting point, not a fixed set, and the project
  * panel can add, rename and remove them.
  */
@@ -93,7 +93,3 @@ export const LEGACY_OBJECT_TEXTURES: Record<string, string> = {
   "obj-spawn": shapeTextureKey("diamond"),
   "obj-exit": shapeTextureKey("diamond"),
 };
-
-export function tileDef(index: number): TileDef | undefined {
-  return TILE_DEFS.find((t) => t.index === index);
-}
