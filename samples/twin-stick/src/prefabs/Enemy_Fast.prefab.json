@@ -1,0 +1,12 @@
+{
+  "name": "Enemy_Fast",
+  "exposed": [],
+  "base": "Enemy",
+  "diff": {
+    "scaleX": 0.7,
+    "scaleY": 0.7,
+    "props.speed": 170,
+    "props.hp": 1,
+    "props.points": 25
+  }
+}

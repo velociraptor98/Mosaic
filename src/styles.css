@@ -754,7 +754,7 @@ kbd {
 .row input,
 .palette input,
 .frame-config input,
-.matrix + .row input {
+.group-row input {
   width: 100%;
   min-width: 0;
   padding: 4px var(--space-2);
@@ -909,46 +909,41 @@ kbd {
   color: var(--color-caution-800);
 }
 
-/* ----------------------------------------------------------- tile palette */
+/* ------------------------------------------------------------ tiled maps */
 
-.tile-palette {
+.map-card {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-divider);
+}
+
+.map-card.active {
+  border-color: var(--color-accent);
+}
+
+.map-card .map-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 12px;
+}
+
+/* ---------------------------------------------------------------- groups */
+
+.group-row {
+  display: flex;
+  align-items: center;
   gap: var(--space-1);
 }
 
-.tile-swatch {
-  position: relative;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--color-text) 40%, transparent);
-  outline: 1px solid var(--color-divider);
-  outline-offset: 0;
-  image-rendering: pixelated;
-  background-repeat: no-repeat;
-  width: 32px;
-  height: 32px;
-}
-
-.tile-swatch.active {
-  outline: 2px solid var(--color-accent-900);
-  outline-offset: 1px;
-  border-color: var(--color-accent-900);
-}
-
-.tile-swatch.erase {
+.group-row .count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
   color: var(--text-muted);
-  background: var(--wash-2);
-  font-family: var(--font-body);
-}
-
-.collide-dot {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--color-accent-900);
 }
 
 /* ------------------------------------------------------------- asset dock */
@@ -1462,65 +1457,6 @@ kbd {
   font-family: var(--font-mono);
   font-size: 9px;
   color: var(--color-caution-800);
-}
-
-/* collision matrix */
-
-.matrix {
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.matrix th {
-  text-align: right;
-  font-family: var(--font-heading);
-  font-weight: var(--font-heading-weight);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-  padding: var(--space-1) var(--space-2);
-  white-space: nowrap;
-}
-
-.matrix thead th {
-  text-align: center;
-  border-bottom: 1px solid var(--color-divider);
-}
-
-.cell {
-  width: 34px;
-  height: 28px;
-  padding: 0;
-  color: var(--text-dim);
-  border: 1px solid var(--color-divider);
-}
-
-.cell:hover {
-  background: var(--wash-hover);
-}
-
-.cell.collide {
-  color: var(--color-bg);
-  background: var(--color-accent);
-  border-color: var(--color-accent);
-}
-
-.cell.overlap {
-  color: var(--color-accent-800);
-  background: var(--tint-accent-strong);
-  border-color: var(--color-accent);
-}
-
-.legend {
-  display: flex;
-  gap: var(--space-6);
-  font-size: 11.5px;
-  color: var(--text-muted);
-}
-
-.legend b {
-  color: var(--color-accent-800);
 }
 
 /* export */
@@ -3179,29 +3115,6 @@ button.link {
   margin-left: auto;
   border-color: var(--color-caution);
   color: var(--color-caution-800);
-}
-
-/* The collision matrix's row headers double as the group editor: renaming a
-   group is a text field, removing one is the × beside it. */
-.matrix .group-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-}
-
-.matrix .group-head input {
-  width: 84px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 1px 4px;
-  border: 1px solid transparent;
-  background: transparent;
-}
-
-.matrix .group-head input:hover,
-.matrix .group-head input:focus {
-  border-color: var(--color-divider);
-  background: var(--color-bg);
 }
 
 /* ------------------------------------------------------ scripts in the dock

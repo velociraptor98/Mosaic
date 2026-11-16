@@ -83,7 +83,7 @@ export function migratePaintedTileLayers(project: ProjectData): string[] {
       while (mapPaths.has(path)) path = `${MAP_DIR}/${scene.key}-${++n + 1}.tmj`;
       mapPaths.add(path);
       n += 1;
-      const key = uniqueKey(`${scene.key}_map`, mapKeys);
+      const key = uniqueKey(scene.key, mapKeys);
       mapKeys.push(key);
 
       const names: string[] = [];

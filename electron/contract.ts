@@ -16,6 +16,7 @@ export const IPC = {
   readText: "mosaic:readText",
   readScripts: "mosaic:readScripts",
   openInEditor: "mosaic:openInEditor",
+  openInTiled: "mosaic:openInTiled",
   importAssets: "mosaic:importAssets",
   copyAssets: "mosaic:copyAssets",
   watch: "mosaic:watch",
@@ -230,6 +231,8 @@ export interface MosaicApi {
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFileIpc[]>;
+  /** Opens a map in Tiled, or in whatever the OS has for the file if Tiled is not found. */
+  openInTiled(root: string, rel: string): Promise<{ ok: boolean; via: "tiled" | "system" | "none"; error?: string }>;
   /** Opens a project file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
   /** Files that construct a `Phaser.Game` — the candidate import entries. */

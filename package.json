@@ -18,7 +18,8 @@
     "icon": "vite build --config scripts/icon.vite.config.ts && node node_modules/.icon/make-icon.js",
     "pack": "npm run icon && npm run build:app && electron-builder --dir",
     "dist": "npm run icon && npm run build:app && electron-builder",
-    "breakout": "vite build --config scripts/breakout.vite.config.ts && node node_modules/.breakout/build.js samples"
+    "breakout": "vite build --config scripts/breakout.vite.config.ts && node node_modules/.breakout/build.js samples",
+    "twin-stick": "vite build --config scripts/twin-stick.vite.config.ts && node node_modules/.twin-stick/build.js samples"
   },
   "dependencies": {
     "chokidar": "^5.0.0",

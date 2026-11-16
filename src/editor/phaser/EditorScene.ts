@@ -43,7 +43,6 @@ const INK = {
   body: 0x1d2d3d, // accent-900, dashed
   guide: 0x94bce3, // accent-400
   marquee: 0x5980a6, // accent
-  rect: 0x728fab, // accent-2
   container: 0x728fab, // accent-2
 } as const;
 
@@ -117,15 +116,12 @@ export class EditorScene extends Phaser.Scene {
   private dragBodyOrigin: { width: number; height: number; offsetX: number; offsetY: number } | null = null;
   private handleIndex = -1;
   private marquee = { x: 0, y: 0, w: 0, h: 0 };
-  private rectStart = { col: 0, row: 0 };
-  private rectEnd = { col: 0, row: 0 };
   private guides: { x: number | null; y: number | null } = { x: null, y: null };
   /** Prefab resolution memo, rebuilt only when the store actually changes. */
   private resolvedCache = new Map<string, SceneObject>();
   private resolvedVersion = -1;
   private altDown = false;
   private spaceDown = false;
-  private lastPaintCell = "";
 
   constructor() {
     super("EditorScene");
@@ -248,9 +244,10 @@ export class EditorScene extends Phaser.Scene {
         if (mapView.map.getLayerIndexByName(tile.layer) === null) return;
         const created = mapView.map.createLayer(tile.layer, mapView.tilesets, 0, 0);
         if (!created) return;
-        view = { layer: created, signature };
+        view = { layer: created as Phaser.Tilemaps.TilemapLayer, signature };
         this.tileViews.set(tile.id, view);
       }
+      if (!view) return;
 
       view.layer.setDepth(depth * 100);
       view.layer.setVisible(layer.visible);

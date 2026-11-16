@@ -1,4 +1,4 @@
-import { TILE_DEFS } from "../../shared/definitions";
+import { useState } from "react";
 import {
   getPath,
   isExposed,
@@ -18,11 +18,12 @@ import {
 import { CheckField, JsonField, NumberField, SelectField, TextField } from "./fields";
 import { PrefabPanel } from "./PrefabPanel";
 import { ScriptsTab } from "./ScriptsTab";
+import { platform } from "../platform";
 import { useEditor, useStoreVersion } from "./context";
 
 const TABS: { id: InspectorTab; label: string }[] = [
   { id: "object", label: "Object" },
-  { id: "tile", label: "Tiles" },
+  { id: "tile", label: "Map" },
   { id: "physics", label: "Physics" },
   { id: "scripts", label: "Scripts" },
   { id: "prefab", label: "Prefab" },
@@ -198,7 +199,7 @@ function ObjectTab() {
 
       <div className="section-title">Group</div>
       <SelectField
-        label="Collision group"
+        label="Group"
         value={sharedValue<string>(selection, "group") ?? ""}
         marked={marked("group")}
         locked={lockedBy("group")}
@@ -341,8 +342,8 @@ function SoundFields({
       <>
         <div className="section-title">Sound</div>
         <div className="hint">
-          No audio in this project yet. Import a clip and it can be played on spawn, or when this
-          object overlaps something the collision matrix pairs it with.
+          No audio in this project yet. Import a clip and it can be played when this object
+          spawns.
         </div>
       </>
     );
@@ -362,16 +363,8 @@ function SoundFields({
         options={options}
         onCommit={(v) => onCommit("sounds.spawn", v || undefined, "Set spawn sound")}
       />
-      <SelectField
-        label="On overlap"
-        value={resolved.sounds?.overlap ?? ""}
-        locked={locked("sounds.overlap")}
-        options={options}
-        onCommit={(v) => onCommit("sounds.overlap", v || undefined, "Set overlap sound")}
-      />
       <div className="hint">
-        The overlap cue fires for any pair the collision matrix marks as overlapping. Anything
-        conditional belongs in a script.
+        A sound on contact, or under any other condition, is behaviour: play it from your code.
       </div>
     </>
   );
@@ -427,119 +420,202 @@ function TextureFields({
 }
 
 /**
- * The tileset palette lives where the inspector was. Each tile carries its
- * collision flag, so terrain is authored once rather than twice.
+ * The scene's terrain: which Tiled maps it uses, and what Mosaic can see in
+ * them. Nothing here edits a tile. A map is opened in Tiled, saved there, and
+ * redrawn here the moment it is.
  */
 function TileTab() {
-  const { store } = useEditor();
+  const { store, workspace, openDialog } = useEditor();
   const layer = store.activeLayer;
+  const maps = store.project.assets.filter((a) => a.kind === "tilemap");
+  const active = layer?.kind === "tile" ? (layer as TileLayer) : null;
+  const current = active ? maps.find((m) => m.key === active.map) : undefined;
 
-  if (!layer || layer.kind !== "tile") {
-    return (
-      <div className="empty">
-        Select a tile layer in the LAYERS panel — tiles are painted onto a layer, and the layer
-        binds the tileset.
-      </div>
-    );
-  }
-
-  const tile = layer as TileLayer;
-  const tileset = store.project.assets.find((a) => a.id === tile.tilesetId);
-  const brush = store.ui.brush;
-  const tilesets = store.project.assets.filter((a) => a.kind === "tileset");
+  const open = (asset: AssetDef) => {
+    const root = workspace.location?.root;
+    if (!root) {
+      store.setStatus("Opening a map in Tiled needs the project to be a folder on disk");
+      return;
+    }
+    void platform.openInTiled(root, asset.path).then((result) => {
+      store.setStatus(
+        result.ok
+          ? `Opened ${asset.path} in ${result.via === "tiled" ? "Tiled" : "its default app"}`
+          : `Could not open ${asset.path} — ${result.error ?? "is Tiled installed?"}`,
+      );
+    });
+  };
 
   return (
     <div className="stack">
-      <SelectField
-        label="Tileset"
-        value={tile.tilesetId}
-        options={tilesets.map((t) => ({ value: t.id, label: t.key }))}
-        onCommit={(v) => store.updateLayer(tile.id, { tilesetId: v })}
-      />
-      <div className="grid2">
-        <NumberField label="Tile W" value={tile.tileWidth} onCommit={(v) => store.updateLayer(tile.id, { tileWidth: v })} />
-        <NumberField label="Tile H" value={tile.tileHeight} onCommit={(v) => store.updateLayer(tile.id, { tileHeight: v })} />
-      </div>
-
-      <div className="section-title">Brush</div>
-      <div className="tile-palette">
-        {tileset && <TileSwatches tileset={tileset} activeId={brush?.tileId ?? -1} />}
-        <button
-          className={`tile-swatch erase ${store.ui.tool === "erase" ? "active" : ""}`}
-          onClick={() => store.setUi({ tool: "erase" })}
-          title="Eraser is putTile(-1)"
-        >
-          ⌫
-        </button>
-      </div>
-      <div className="hint">
-        Click a tile to arm the brush. Collision flags come from the tileset definition, not the
-        layer — click the flag chip to toggle.
-      </div>
-      {tileset && (
+      {active && (
         <>
-          <div className="section-title">Collision flags</div>
-          <div className="chips">
-            {TILE_DEFS.map((def) => {
-              const on = (tileset.tileCollides ?? []).includes(def.index);
-              return (
-                <button
-                  key={def.index}
-                  className={`chip toggle ${on ? "on" : ""}`}
-                  onClick={() => store.toggleTileCollision(tileset.id, def.index)}
-                >
-                  {def.index} {def.name}
-                </button>
-              );
-            })}
+          <div className="section-title">Layer</div>
+          <div className="kv">
+            <span>Map</span>
+            <code>{current?.path ?? active.map}</code>
           </div>
+          <div className="kv">
+            <span>Tiled layer</span>
+            <code>{active.layer}</code>
+          </div>
+          {!current?.tilemap && (
+            <div className="banner error">
+              This layer's map is missing or is not a Tiled map any more. Put the file back, or
+              remove the layer.
+            </div>
+          )}
+          {current?.tilemap && !current.tilemap.layers.includes(active.layer) && (
+            <div className="banner error">
+              {current.path} has no tile layer called "{active.layer}". It was renamed or deleted
+              in Tiled.
+            </div>
+          )}
         </>
       )}
+
+      <div className="section-title">
+        Tiled maps <span className="count">{maps.length}</span>
+        <button className="mini add" onClick={() => openDialog("import")}>
+          + Import
+        </button>
+      </div>
+      {!maps.length && (
+        <div className="empty">
+          No Tiled maps in this project. Export one from Tiled as JSON (<code>.tmj</code> or{" "}
+          <code>.json</code>, with its tilesets embedded) into <code>assets/</code>, or import it
+          here, and it can be placed in a scene.
+        </div>
+      )}
+      {maps.map((asset) => {
+        const info = asset.tilemap;
+        const placed = store.scene?.layers.filter((l) => l.kind === "tile" && l.map === asset.key).length ?? 0;
+        return (
+          <div key={asset.id} className={`map-card ${current === asset ? "active" : ""}`}>
+            <div className="map-head">
+              <code title={asset.path}>{asset.path.split("/").pop()}</code>
+              {info && (
+                <span className="muted">
+                  {info.cols}×{info.rows} · {info.tileWidth}px
+                </span>
+              )}
+            </div>
+            {info ? (
+              <>
+                <div className="chips">
+                  {info.layers.map((name) => (
+                    <span key={name} className="chip">
+                      {name}
+                    </span>
+                  ))}
+                </div>
+                <div className="hint">
+                  {info.collides
+                    ? "Tiles with the collides property are marked solid in the layout."
+                    : "No tile has the collides property, so nothing in this map is solid yet."}
+                </div>
+                {(info.issues ?? []).map((issue) => (
+                  <div key={issue} className="banner warn">
+                    {issue}
+                  </div>
+                ))}
+              </>
+            ) : (
+              <div className="banner error">Not readable as a Tiled map.</div>
+            )}
+            <div className="row">
+              <button className="ghost" onClick={() => open(asset)}>
+                Open in Tiled ↗
+              </button>
+              {info && placed < info.layers.length && (
+                <button className="ghost" onClick={() => store.addTilemap(asset.key)}>
+                  {placed ? "Add new layers" : "Add to scene"}
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      <div className="hint">
+        Terrain is drawn in Tiled and saved there; this canvas redraws when the file changes. In a
+        scene, each tile layer is a row in LAYERS, so objects can sit between two of them.
+      </div>
     </div>
   );
 }
 
-function TileSwatches({ tileset, activeId }: { tileset: AssetDef; activeId: number }) {
+/**
+ * The project's groups: names an object can be tagged with. The layout hands
+ * each one back as an arcade group, so a group is how the scene's code says
+ * "every brick" without naming sixty of them.
+ */
+function GroupList() {
   const { store } = useEditor();
-  const tileW = tileset.frameWidth ?? 32;
-  const tileH = tileset.frameHeight ?? 32;
-  const perRow = Math.max(1, Math.floor((tileset.width - (tileset.margin ?? 0)) / (tileW + (tileset.spacing ?? 0))));
-  const rows = Math.max(1, Math.floor((tileset.height - (tileset.margin ?? 0)) / (tileH + (tileset.spacing ?? 0))));
-  const count = perRow * rows;
+  const [draft, setDraft] = useState("");
+  const counts = new Map<string, number>();
+  for (const scene of store.project.scenes) {
+    for (const obj of scene.objects) {
+      const group = resolveObject(store.project, obj).group;
+      if (group) counts.set(group, (counts.get(group) ?? 0) + 1);
+    }
+  }
+  const add = () => {
+    if (!draft.trim()) return;
+    store.addGroup(draft);
+    setDraft("");
+  };
 
   return (
     <>
-      {Array.from({ length: count }, (_, i) => {
-        const col = i % perRow;
-        const row = Math.floor(i / perRow);
-        const x = (tileset.margin ?? 0) + col * (tileW + (tileset.spacing ?? 0));
-        const y = (tileset.margin ?? 0) + row * (tileH + (tileset.spacing ?? 0));
-        return (
-          <button
-            key={i}
-            className={`tile-swatch ${activeId === i ? "active" : ""}`}
-            title={`tile ${i}${(tileset.tileCollides ?? []).includes(i) ? " · collides" : ""}`}
-            onClick={() => store.setBrush(tileset.id, i)}
-            style={{
-              backgroundImage: `url(${tileset.url})`,
-              backgroundPosition: `-${x}px -${y}px`,
-              width: tileW,
-              height: tileH,
+      <div className="section-title">
+        Groups <span className="count">{store.project.groups.length}</span>
+      </div>
+      {store.project.groups.map((group) => (
+        <div key={group} className="group-row">
+          <input
+            defaultValue={group}
+            title="Rename — every object in the group follows"
+            onBlur={(e) => store.renameGroup(group, e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
             }}
-          >
-            {(tileset.tileCollides ?? []).includes(i) && <span className="collide-dot" />}
+          />
+          <span className="count">{counts.get(group) ?? 0}</span>
+          <button className="mini danger" title={`Remove ${group}`} onClick={() => store.removeGroup(group)}>
+            ×
           </button>
-        );
-      })}
+        </div>
+      ))}
+      <div className="group-row">
+        <input
+          value={draft}
+          placeholder="new group"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") add();
+          }}
+        />
+        <button className="mini" onClick={add}>
+          + add
+        </button>
+      </div>
     </>
   );
 }
 
 /** Bodies are a section of the object, not a separate editor. */
 function PhysicsTab() {
-  const { store, openDialog } = useEditor();
+  const { store } = useEditor();
   const selection = store.selection;
-  if (!selection.length) return <div className="empty">Select an object to give it a body.</div>;
+  if (!selection.length) {
+    return (
+      <div className="stack">
+        <div className="empty">Select an object to give it a body.</div>
+        <GroupList />
+      </div>
+    );
+  }
 
   const obj = selection[0];
   const resolved = resolveObject(store.project, obj);
@@ -605,13 +681,12 @@ function PhysicsTab() {
         </>
       )}
 
-      <div className="section-title">Collision matrix</div>
+      <GroupList />
+
       <div className="hint">
-        Pair rules are authored once per project instead of being scattered through create().
+        The layout gives the body its shape and puts the object in its group. What it collides with
+        is a line of your scene's code: <code>this.physics.add.collider(player, groups.solid)</code>.
       </div>
-      <button className="ghost" onClick={() => openDialog("collision")}>
-        Edit collision matrix…
-      </button>
     </div>
   );
 }

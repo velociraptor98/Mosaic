@@ -23,7 +23,6 @@ import { Toolbar } from "./editor/ui/Toolbar";
 import { AtlasDialog } from "./editor/ui/dialogs/AtlasDialog";
 import { AttachScriptDialog } from "./editor/ui/dialogs/AttachScriptDialog";
 import { ScriptTrustDialog } from "./editor/ui/dialogs/ScriptTrustDialog";
-import { CollisionDialog } from "./editor/ui/dialogs/CollisionDialog";
 import { CommandPalette } from "./editor/ui/dialogs/CommandPalette";
 import { ExportDialog } from "./editor/ui/dialogs/ExportDialog";
 import { PackageDialog } from "./editor/ui/dialogs/PackageDialog";
@@ -155,7 +154,6 @@ export default function App() {
         {dialog === "importphaser" && <ImportPhaserDialog onClose={() => setDialog(null)} />}
         {dialog === "atlas" && <AtlasDialog onClose={() => setDialog(null)} />}
         {dialog === "prefab" && <PrefabDialog onClose={() => setDialog(null)} />}
-        {dialog === "collision" && <CollisionDialog onClose={() => setDialog(null)} />}
         {dialog === "attachscript" && <AttachScriptDialog onClose={() => setDialog(null)} />}
         {dialog === "scripttrust" && <ScriptTrustDialog onClose={() => setDialog(null)} />}
         {dialog === "export" && <ExportDialog onClose={() => setDialog(null)} />}
@@ -249,12 +247,6 @@ function useKeyboardShortcuts(ctx: {
           return run("tool.select");
         case "b":
           return run("tool.place");
-        case "p":
-          return run("tool.brush");
-        case "r":
-          return run("tool.rect");
-        case "e":
-          return run("tool.erase");
         case "s":
           return run("view.snap");
         case "g":

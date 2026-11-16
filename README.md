@@ -27,6 +27,7 @@ npm run dev         # the browser demo at the printed URL
 npm run sample      # build the Coin Rush sample by driving the editor
 npm run anim-lab    # build the Anim Lab sample
 npm run breakout    # rebuild Phaser's breakout example as a Mosaic project
+npm run twin-stick  # build the Twin Stick sample, a top-down arena shooter
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
@@ -63,16 +64,25 @@ does not exist and never opened again. They meet through an import:
 export class Level_01 extends Phaser.Scene {
   preload() { preloadLevel_01(this); }
   create() {
-    const { player, terrain, groups } = createLevel_01(this, {
-      playerPickup: (player, pickup) => pickup.destroy(),
-    });
+    const { player, terrain, groups } = createLevel_01(this);
+    this.physics.add.collider(player, terrain);
+    this.physics.add.overlap(player, groups.pickup, (_p, pickup) => pickup.destroy());
   }
 }
 ```
 
-`createLevel_01` returns every object typed and by name, the collision groups
-that have members in the scene, and takes a hook per pair the collision matrix
-wires.
+`createLevel_01` returns every object typed and by name, each tile layer, the
+Tiled maps themselves, and every group the project defines. It
+places things and sizes their bodies. **What collides with what is your code**
+— the two lines above — because that is already how every Phaser game says it.
+
+Two things Mosaic deliberately does not do, because an established tool or
+convention already does:
+
+| | Where it lives instead |
+|---|---|
+| Painting tiles | [Tiled](https://www.mapeditor.org). Mosaic places the map and draws it. |
+| Collision rules | `physics.add.collider` / `overlap` in the scene class. |
 
 ## The eleven workflows, and where they live
 
@@ -81,7 +91,7 @@ The editor opens a *folder*, not a file — `readProject(dir)` parses
 `phaser.editor.json`, and chokidar watches the tree and re-reads on change. The
 Project tab lists every scene, prefab, script, asset and animation, with an
 unsaved marker and **the git status of each**. New scenes come from templates (Empty /
-Platformer / Top-down) that write a runnable scene — camera, tile layer, a
+Platformer / Top-down) that write a runnable scene — camera, a Tiled map, a
 player with a body. Keys are derived and collision-free before write.
 
 Switching scenes keeps each scene's **selection, camera and undo stack** alive:
@@ -114,20 +124,36 @@ Outliner rows drag to reparent. World position is preserved
 their own transform, and clicking a child picks the container until the
 container is selected, at which point the click drills in.
 
-### 3. Tilemap & layers — `LeftDock.tsx` (Layers), `Inspector.tsx` (Tiles)
-Tile layers and object layers share **one** ordered list, because draw order
-must be one ordering and not two. Layer order is render order and becomes the
-Phaser depth on export.
+### 3. Tiled maps & layers — `shared/tiled.ts`, `Inspector.tsx` (Map), `LeftDock.tsx` (Layers)
+Terrain is a [Tiled](https://www.mapeditor.org) map. Mosaic does not edit
+tiles: it finds the maps in `assets/`, places one in a scene, and draws it.
+`Open in Tiled` hands the file over; saving there redraws the canvas here,
+without a reload, so the undo history and the selection survive every save.
 
-Tile layers use Phaser's native `Tilemap` API — a generated tileset *image*,
-`addTilesetImage`, `createLayer`, `putTileAt` — so what the editor paints is
-what Phaser renders. Painting only pushes the cells that actually changed.
+A map is recognised by what is in it rather than by its name — `.tmj` or
+`.json` — and is drawn by **Phaser's own Tiled parser**, in the editor's canvas
+and in the game alike, which is what makes the two agree. Tilesets have to be
+embedded in the map (Phaser cannot load external ones; the Map tab says so when
+one is), and each tileset's image is matched to a project asset by the path the
+map states, then by file name.
 
-A stroke is one transaction, not one per tile. Rect fill and the eraser
-(`putTile(-1)`) use the same shape. Collision flags live on the *tileset*, so
-terrain is authored once. Visibility and lock are scene data, not editor
-preferences: a locked layer ignores every pointer event and hit-testing walks
-visible ∧ unlocked layers top-down.
+Each tile layer of a map is **one row in the scene's layer list**, alongside
+the object layers, because draw order must be one ordering and not two. That
+is how an object layer comes to sit between the ground and the treetops. A
+layer added in Tiled appears above its map's others the next time the file is
+read; one renamed or deleted there is dropped.
+
+A tile with the custom property `collides` (bool) is solid: the layout calls
+`setCollisionByProperty({ collides: true })` on the layer. Nothing collides
+*with* the layer until the scene's code adds a collider for it.
+
+The map is also handed back whole — `layout.maps.Level_01` — so object layers,
+tile lookups and anything else Tiled can express are reachable from code.
+
+Mosaic writes a map in exactly two cases, once each: the starter terrain of a
+template, and the conversion of a tile layer painted in the editor it used to
+have. Both are ordinary `.tmj` files from then on. Visibility and lock are
+scene data, not editor preferences.
 
 ### 4. Asset import & atlases — `assets/slice.ts`, `assets/atlasJson.ts`, `dialogs/ImportDialog`, `dialogs/AtlasDialog`
 Type is inferred per file and shown for correction *before* the copy. Files are
@@ -218,11 +244,9 @@ meant hand-written code in every scene. The follow call is emitted *after* the
 objects, because a target has to exist before it can be followed, and a camera
 pointed at a name the scene does not contain is a validation error.
 
-**Sound** has two cues — `on spawn` and `on overlap` — plus looping scene
-music. The overlap cue fires for any pair the collision matrix marks as
-overlapping, and either participant's cue plays. Audio clips previously loaded
-and were then never referenced by anything in the format; a clip a scene names
-is now pulled into its loader manifest.
+**Sound** has one cue — `on spawn` — plus looping scene music. A clip a scene
+names is pulled into its loader manifest. A sound on contact is behaviour, and
+is played from code.
 
 The line stays where it was: these are the values, not the logic. Anything
 conditional — a sound only when the player is falling — is still a script.
@@ -250,30 +274,44 @@ exercise this: a looping walk, a two-frame idle at 2fps, a one-shot with
 per-frame durations, an animation on a prefab that instances inherit and one
 overrides, and an animation played only from a script.
 
-### 7. Physics & collision — `Inspector.tsx` (Physics), `dialogs/CollisionDialog`
+### 7. Physics bodies & groups — `Inspector.tsx` (Physics)
 Bodies are a *section of the object*, not a separate editor: box or circle,
 size, offset, immovable, gravity, bounce. With BODIES on, the body draws over
 the sprite with its own drag handles on a layer above the transform handles,
 and the numbers stay live in the Inspector during the drag.
 
-Pair rules are authored once per project in the collision matrix
-(`collide | overlap | ignore`, symmetric) instead of being scattered through
-`create()`. Export emits deduplicated `addCollider` / `addOverlap` calls —
-**both with a handler**, and both with a keep region.
+An object can be tagged with a **group**. Groups are project data — add,
+rename and remove them in the Physics tab — and the layout hands each one back
+as an arcade group, so `groups.brick` is how the scene's code says "every
+brick" without naming sixty of them. Every group the project defines is handed
+back, including one this scene places nothing in, because the bullets may all
+be made by code.
 
-A `collide` pair used to be emitted bare, with nowhere to hang behaviour, so
-anything that needed a physical response *and* to know it happened had to
-register a second collider inside a script — two colliders on one pair, the
-second running against bodies the first had already separated. Rebuilding
-Phaser's breakout example is what made that unmissable: its two collisions are
-the entire game, and both of them had to leave the feature built to describe
-them.
+Adding to one of those groups at run time works without extra steps:
 
-The handler tells the **scripts on both objects** that they touched, through
-`onContact(other, rule)`, each side handed the other one. So a brick's
-behaviour lives on the Brick prefab and reaches all sixty instances without the
-scene naming any of them. It is also what finally lets a `sounds.overlap` cue
-fire on a collide, which it never could before.
+```ts
+groups.enemy.add(Enemy.spawn(this, x, y));
+```
+
+An arcade group resets the body settings of anything it takes to the group's
+own defaults: gravity on, immovable off, bounce 0, world-bounds collision off.
+The body's shape survives, but its settings don't. The layout's groups put the
+authored body back with `applyBody()`. An object
+whose depth is still 0 also gets the depth of the layer the group's objects
+were placed on, or the scene's first object layer when none are placed, so it
+doesn't draw under the terrain. A depth your code has already set is kept.
+
+There is no collision matrix. Colliders are written in the scene class:
+
+```ts
+this.physics.add.collider(groups.ball, groups.brick, (a, b) => scripts.contact(a, b, "collide"));
+```
+
+The callback is optional and is where a script component finds out: passing
+the pair to `scripts.contact` calls `onContact(other, rule)` on the scripts of
+both objects, each handed the other one. So a brick's behaviour lives on the
+Brick prefab and reaches all sixty instances, and there is one collider per
+pair — the one doing the physics is the one that reports it.
 
 **World edges** are scene data too. Arcade's bounds are one rectangle with a
 flag per side, and Mosaic used to author only the rectangle — so a game that
@@ -314,8 +352,7 @@ written on a prefab's class actually runs. A prefab's layout is a base class
 (`CoinBase`) holding its texture, body and defaults; your `Coin` extends it. A
 variant extends its parent's class — yours, not the generated one — so
 behaviour reaches variants by ordinary inheritance, and the variant restates
-only what it changed. Tile data stays in the `.scene.json`, which the layout
-imports.
+only what it changed.
 
 A scene made in the editor gets its class written once; adding it to the game's
 scene list is yours to do, because `main.ts` is yours. Deleting a scene or a
@@ -372,11 +409,10 @@ them **statically** — Mosaic never executes your game code to find out what it
 exposes, which is also why the index survives a file that does not compile
 (the fields grey out and the last good metadata stays).
 
-- **Contacts arrive as events.** A script implements `onContact(other, rule)`
-  and hears about anything the project's collision matrix pairs its object
-  with, handed the thing it touched. The matrix owns *whether* two groups
-  interact and what physics does about it; this is how the object finds out.
-  A contact that lands before `create()` has run is dropped rather than
+- **Contacts arrive when your collider says so.** A script implements
+  `onContact(other, rule)`; the scene's collider passes the pair to
+  `scripts.contact(a, b, rule)` and both objects' scripts hear about it. A
+  contact that lands before `create()` has run is dropped rather than
   delivered to a script that has not initialised.
 - **Order is execution order.** Rows run top to bottom, drag or ↑↓ to reorder,
   and the order is written back to the file. The checkbox is *enabled* state,
@@ -471,7 +507,7 @@ editor.
   the right project can be picked without opening it. A folder that has moved
   greys out with a Locate… action; it is never silently dropped.
 - **Templates** are runnable, not stubs: Empty, Platformer, Top-down and
-  Endless runner each produce a real scene with a camera, a tilemap layer and a
+  Endless runner each produce a real scene with a camera, a Tiled map and a
   controllable object already wired.
 - **Details** validates while you type — parent writable, target free, npm-name
   validity, node/npm present — so a bad target is caught before the create
@@ -588,7 +624,7 @@ two is the whole of a theme switch.
   `--color-divider` rules. Panels are separated by 1px lines, not by fills.
 - **Accent** `#7ba3cc` carries every selected state: a 12–16% tint with
   `--color-accent-800` text for selection, solid accent with `--color-bg` text
-  for primary actions and the collision matrix's *collide* cell.
+  for primary actions.
 - **The ramps invert, the steps don't.** On the dark ground both tonal ramps run
   dark→light, so a step keeps its *meaning*: 700–900 is still "readable ink
   against the ground" and 100–300 is still "a quiet fill sitting on it". Every
@@ -671,6 +707,8 @@ src/
                     happens: moved / kept / dropped / skipped, by scene
     transform.ts    Hierarchy maths, cycle rejection, world<->local
     manifest.ts     Derives the Phaser loader manifest from a scene
+    tiled.ts        Reads a Tiled map well enough to describe it, and writes a
+                    small one (template terrain, converted painted layers)
 
   runtime/         ships inside your game — zero editor deps
     scripts.ts      ScriptComponent, the @property decorator and the host that
@@ -706,6 +744,10 @@ scripts/sample-game/
                    builds the samples by driving the editor: Coin Rush (a
                    playable game, and the build guide) and Anim Lab (built to
                    exercise the animation feature rather than to be a game)
+scripts/twin-stick/
+                   builds samples/twin-stick, a top-down twin-stick shooter:
+                   build.ts lays the level out through the editor's API,
+                   code.ts is the game's own hand-written classes
 scripts/breakout/  rebuilds Phaser's own breakout example as a Mosaic project,
                    to answer whether a whole game somebody else already wrote
                    fits the model. build.ts authors it through the editor's
@@ -729,7 +771,7 @@ grid notes above describe:
 
 | Friction | Now |
 |---|---|
-| the matrix could not say "collide, *and* tell me" | `collide` pairs get a handler; scripts get `onContact` |
+| a collision could not also tell the objects involved | the scene's collider calls `scripts.contact`; scripts get `onContact` |
 | world bounds were one rectangle, not four sides | `Scene → World edges` |
 | an existing Phaser atlas could not be imported | picked with its `.json`, frame names kept |
 | sixty placements were sixty clicks | `Fill grid` — the same scene in 50 edits instead of 98 |
@@ -741,7 +783,7 @@ choice — emitted a file that would not compile.
 ### Why undo is slice-based
 
 A transaction records only the slices it changed (`scene:<key>`, `prefabs`,
-`assets`, `anims`, `groups`, `collision`, `meta`) and pushes one entry onto the
+`assets`, `anims`, `groups`, `meta`) and pushes one entry onto the
 **active document's** stack. Undoing an edit in one scene therefore cannot
 rewind a later edit in another. An open
 prefab is a document too: it gets a `doc` slice and a stack of its own, and its
@@ -763,9 +805,13 @@ compared by length + prefix, so a transaction never walks megabytes of base64.
   to `kit.json`. Picking both at once is the normal case and works; importing
   them separately, or into a folder where the name already exists and gets
   suffixed, will not pair them.
-- `sounds.overlap` keeps its name now that it fires on collide pairs too. The
-  field is older than the callback, and renaming it would rewrite every scene
-  that has one for no gain.
+- Tiled maps must be **orthogonal, fixed-size, with embedded tilesets**, exported
+  as JSON. `.tmx`, external `.tsx`/`.tsj` tilesets and infinite maps are
+  reported in the Map tab rather than loaded.
+- A layer **renamed** in Tiled reads as one layer removed and one added, so it
+  loses its place in the scene's draw order and returns above its map's others.
+- Tiled **object layers** are not shown in the editor. They are reachable from
+  code through `layout.maps`.
 - The desktop app packages **unsigned**. `npm run pack` produces a working
   `.app`, but code signing, notarization and auto-update are not set up, so
   macOS quarantines a downloaded build (`xattr -dr com.apple.quarantine` clears
@@ -791,9 +837,14 @@ compared by length + prefix, so a transaction never walks megabytes of base64.
   shape, but `breakout` needs a checkout of the Phaser examples for its art.
 - An arcade group applies its OWN defaults to every child it takes —
   `collideWorldBounds` off, `allowGravity` on, drag, acceleration — so a body
-  has to be configured *after* it joins its group, which is why the layout
-  emits bodies after groups.
-- Collision groups and the starter prefabs are project data with genre-ish
+  has to be configured *after* it joins its group. That is why the layout
+  emits bodies after groups, and why each layout group calls `applyBody()` on
+  anything added to it later. A group your own code creates with
+  `this.physics.add.group()` does none of this.
+- The depth a layout group gives an object it takes is a heuristic: the layer
+  most of its placed members sit on. Depth 0 reads as "not set yet", so an
+  object meant to stay at 0 gets moved too. Set its depth after adding it.
+- Groups and the starter prefabs are project data with genre-ish
   names (`player`, `pickup`, `Player`, `Pickup`). They are a starting point,
   not a fixed set — rename or delete them and nothing in the editor cares.
 - A variant claims structure whole: if it changes its children, it stores the

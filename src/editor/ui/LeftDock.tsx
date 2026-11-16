@@ -373,7 +373,7 @@ function Outliner() {
             {layer.kind === "tile" ? (
               <div className="outliner-row static" style={{ paddingLeft: 22 }}>
                 <span className="glyph">▦</span>
-                {(layer as TileLayer).cols}×{(layer as TileLayer).rows} tiles
+                {(layer as TileLayer).layer} · from Tiled
               </div>
             ) : (
               scene.objects
@@ -416,10 +416,14 @@ function Layers() {
       <div className="tree-heading">
         <span>Layers (top first)</span>
         <span>
-          <button className="mini" onClick={() => store.addLayer("tile")}>
-            + tile
+          <button
+            className="mini"
+            onClick={() => store.setUi({ inspectorTab: "tile" })}
+            title="Place a Tiled map in this scene"
+          >
+            + map
           </button>
-          <button className="mini" onClick={() => store.addLayer("object")}>
+          <button className="mini" onClick={() => store.addLayer()}>
             + object
           </button>
         </span>

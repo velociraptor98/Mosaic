@@ -5,7 +5,7 @@ import { generateProjectFiles } from "../../src/editor/export/generate";
 import { DEFAULT_OPTIONS, planScaffold } from "../../src/editor/project/scaffold";
 import { projectToFiles } from "../../src/editor/project/serialize";
 import { ProjectStore } from "../../src/editor/store/project";
-import { shapeSize } from "../../src/editor/store/templates";
+import { makeTemplateMap, shapeSize } from "../../src/editor/store/templates";
 import { shapeTextureKey } from "../../src/shared/definitions";
 import { bodyForSize } from "../../src/shared/size";
 import { scriptFilePath } from "../../src/shared/scripts";
@@ -61,6 +61,33 @@ const CONFIG: ProjectConfig = {
   physics: "arcade",
   pixelArt: true,
 };
+
+/** The scene's own class: the one place the game says how its objects meet. */
+const LEVEL_SCENE = `import Phaser from "phaser";
+import { createLevel_01, preloadLevel_01, type Level_01Layout } from "./Level_01.layout";
+
+/**
+ * Level 01 — this file is yours. Mosaic wrote the first version and will not
+ * touch it again; what the editor places arrives through ./Level_01.layout.ts.
+ */
+export class Level_01 extends Phaser.Scene {
+  layout!: Level_01Layout;
+
+  constructor() {
+    super("Level_01");
+  }
+
+  preload(): void {
+    preloadLevel_01(this);
+  }
+
+  create(): void {
+    this.layout = createLevel_01(this);
+    const { player, terrain } = this.layout;
+    this.physics.add.collider(player, terrain);
+  }
+}
+`;
 
 /** Tile indices from the built-in placeholder tileset. 1 and 4 collide. */
 const STONE = 1;
@@ -176,33 +203,44 @@ export function buildSampleGame(location: string, name = "Coin Rush"): BuildResu
   });
 
   // -------------------------------------------------------------- 3. terrain
-  store.addLayer("tile", { name: "Terrain" });
-  const terrain = scene.layers.find((l) => l.kind === "tile")!;
-  // Layer order is draw order, and a new layer lands on top. Terrain belongs
-  // under the objects that stand on it.
-  store.moveLayer(terrain.id, -1);
-
+  // Terrain is a Tiled map. The editor does not paint tiles; it places a map
+  // somebody drew. Here the map is written from a grid, the same way a
+  // template's starter terrain is, and is an ordinary .tmj from then on.
+  const cols = Math.round(CONFIG.canvas.width / CONFIG.tile);
+  const rows = Math.round(CONFIG.canvas.height / CONFIG.tile);
+  const grid = Array.from({ length: rows }, () => Array<number>(cols).fill(-1));
   let painted = 0;
-  store.beginStroke("Paint terrain");
   for (const [row, from, to, tile] of PLATFORMS) {
     for (let col = from; col <= to; col++) {
-      if (store.putTile(terrain.id, col, row, tile)) painted += 1;
+      if (row < rows && col < cols) {
+        grid[row][col] = tile;
+        painted += 1;
+      }
     }
   }
-  store.endStroke();
+  const map = makeTemplateMap(scene.key, [{ name: "Terrain", data: grid }], {
+    cols,
+    rows,
+    tile: CONFIG.tile,
+  });
+  store.importAssets([map]);
+  store.hydrateTilemaps();
+  // Its layers go in at the bottom of the list, under the objects that stand
+  // on them — layer order is draw order.
+  store.addTilemap(map.key);
 
   step({
     n: "3",
-    title: "Paint the level",
+    title: "Bring in the terrain",
     body:
-      `One tile layer, ${painted} tiles: a floor across the bottom and four ledges above it. ` +
-      `Collision is not painted here — it belongs to the TILESET, where a stone tile is solid ` +
-      `everywhere it is ever used, in this level and every later one.\n\n` +
-      `The layer is moved below the object layer straight away, because layer order IS draw order ` +
-      `and becomes the Phaser depth on export. A new layer lands on top, and terrain belongs under ` +
-      `the things standing on it.`,
-    editor: "Layers → + tile, rename Terrain, move down · Brush (P) with the stone and wall tiles",
-    api: `store.addLayer("tile", { name: "Terrain" })\nstore.putTile(terrain.id, col, row, ${STONE})`,
+      `The level is a Tiled map: one tile layer, ${painted} tiles, a floor across the bottom and ` +
+      `four ledges above it. Mosaic does not paint tiles — Tiled does, and Phaser already loads ` +
+      `what Tiled saves — so the editor's job is to place the map and show it.\n\n` +
+      `Which tiles are solid is said in Tiled too, as a "collides" property on the tile, so stone ` +
+      `is solid everywhere it is ever used. The map's layer lands at the bottom of the layer list, ` +
+      `under the objects, because layer order IS draw order and becomes the Phaser depth.`,
+    editor: "Inspector → Map → + Import (or drop the .tmj into assets/) → Add to scene",
+    api: `store.addTilemap(${JSON.stringify(map.key)})   // ${map.path}`,
   });
 
   // --------------------------------------------------------- 4. player + spawn
@@ -480,20 +518,21 @@ export function buildSampleGame(location: string, name = "Coin Rush"): BuildResu
   });
 
   // ----------------------------------------------------------- 12. collisions
-  store.setCollisionRule("player", "pickup", "overlap");
-  store.setCollisionRule("player", "hazard", "overlap");
-  store.setCollisionRule("player", "solid", "collide");
+  // Not an edit in the editor at all: what collides with what is the scene's
+  // own code, written against what the layout hands back.
+  write("src/scenes/Level_01.ts", LEVEL_SCENE);
 
   step({
     n: "12",
-    title: "Author the collision matrix once",
+    title: "Say what collides, in the scene's own code",
     body:
-      `Pair rules are project data, authored in one grid, rather than a scatter of add.collider ` +
-      `calls through create(). Player overlaps pickups and enemies; player collides with solids.\n\n` +
-      `Standing on the ground needs no rule at all — everything with a body collides with a solid ` +
-      `tile layer, and which tiles are solid was decided on the tileset back in step 3.`,
-    editor: "Inspector → Physics → Edit collision matrix…",
-    api: `store.setCollisionRule("player", "pickup", "overlap")`,
+      `The layout places the player and the terrain and hands both back by name. Making one stand ` +
+      `on the other is a line of ordinary Phaser in the scene class — a file Mosaic wrote once and ` +
+      `will not open again.\n\n` +
+      `Coins and spikes need no line here: each registers its own overlap with the player from its ` +
+      `script, which is where that behaviour lives.`,
+    editor: "your editor → src/scenes/Level_01.ts",
+    api: `this.physics.add.collider(player, terrain)`,
   });
 
   // ------------------------------------------------------------- 11. scripts

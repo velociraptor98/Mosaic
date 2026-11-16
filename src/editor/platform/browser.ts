@@ -75,6 +75,9 @@ export const browserPlatform: Platform = {
   async readScripts(): Promise<ScriptFile[]> {
     return [];
   },
+  async openInTiled() {
+    return { ok: false, via: "none" as const, error: "The browser build has no local files to open" };
+  },
   async openInEditor(): Promise<EditorOpen> {
     return { ok: false, via: "none", error: "The browser build has no local files to open" };
   },

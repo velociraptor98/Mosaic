@@ -61,7 +61,7 @@ function AssetBrowser() {
   return (
     <div className="asset-browser">
       <div className="asset-toolbar">
-        {(["all", "image", "spritesheet", "tileset", "atlas", "audio"] as const).map((f) => (
+        {(["all", "image", "spritesheet", "atlas", "audio", "tilemap"] as const).map((f) => (
           <button key={f} className={`chip ${filter === f ? "on" : ""}`} onClick={() => setFilter(f)}>
             {f}
           </button>
@@ -120,12 +120,18 @@ function AssetBrowser() {
           <div key={asset.id} className="asset-tile-wrap">
             <button
               className={`asset-tile ${placement?.kind === "asset" && placement.id === asset.id ? "active" : ""}`}
-              onClick={() =>
-                store.setUi({ tool: "place", placement: { kind: "asset", id: asset.id } })
-              }
-              title={asset.path}
+              onClick={() => {
+                // A map is not placed like a sprite: it goes in as layers.
+                if (asset.kind === "tilemap") {
+                  store.addTilemap(asset.key);
+                  store.setUi({ inspectorTab: "tile" });
+                  return;
+                }
+                store.setUi({ tool: "place", placement: { kind: "asset", id: asset.id } });
+              }}
+              title={asset.kind === "tilemap" ? `${asset.path} — click to add to this scene` : asset.path}
             >
-              {asset.url ? (
+              {asset.url && asset.kind !== "tilemap" ? (
                 <span className="thumb" style={{ backgroundImage: `url(${asset.url})` }} />
               ) : (
                 <span className="swatch">▤</span>

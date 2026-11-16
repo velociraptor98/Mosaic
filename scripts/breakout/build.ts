@@ -109,6 +109,37 @@ const GRID_Y = 100;
 const brickX = (col: number) => GRID_X + col * CELL_W;
 const brickY = (row: number) => GRID_Y + row * CELL_H;
 
+/** The scene's own class: the one place the game says how its objects meet. */
+const LEVEL_SCENE = `import Phaser from "phaser";
+import { createLevel_01, preloadLevel_01, type Level_01Layout } from "./Level_01.layout";
+
+/**
+ * Level 01 — this file is yours. Mosaic wrote the first version and will not
+ * touch it again; what the editor places arrives through ./Level_01.layout.ts.
+ */
+export class Level_01 extends Phaser.Scene {
+  layout!: Level_01Layout;
+
+  constructor() {
+    super("Level_01");
+  }
+
+  preload(): void {
+    preloadLevel_01(this);
+  }
+
+  create(): void {
+    this.layout = createLevel_01(this);
+    const { groups, scripts } = this.layout;
+
+    // Breakout's two collisions. Each tells the scripts on both objects that
+    // they touched, which is where the bounce angle and the broken brick live.
+    this.physics.add.collider(groups.ball, groups.paddle, (a, b) => scripts.contact(a, b, "collide"));
+    this.physics.add.collider(groups.ball, groups.brick, (a, b) => scripts.contact(a, b, "collide"));
+  }
+}
+`;
+
 export function buildBreakout(location: string, name = "Breakout"): BuildResult {
   const steps: BuildStep[] = [];
   const step = (s: BuildStep) => steps.push(s);
@@ -488,27 +519,23 @@ export function buildBreakout(location: string, name = "Breakout"): BuildResult 
   });
 
   // ---------------------------------------------------------- 11. collisions
-  store.setCollisionRule("ball", "paddle", "collide");
-  store.setCollisionRule("ball", "brick", "collide");
-  store.setCollisionRule("brick", "brick", "ignore");
-  store.setCollisionRule("paddle", "brick", "ignore");
+  // Not an edit in the editor: the scene's own code says what collides.
+  write("src/scenes/Level_01.ts", LEVEL_SCENE);
 
   step({
     n: "11",
-    title: "Author the collision matrix once",
+    title: "Say what collides, in the scene's own code",
     body:
       `Both of breakout's collisions are the same shape: a bounce, and something that wants to know ` +
       `it happened. The ball has to leave the paddle at an angle that depends on where it hit, and ` +
       `a brick has to know it was the one that was hit.\n\n` +
-      `Two rules cover the whole game — ball collides with paddle, ball collides with brick — and ` +
-      `they are project data, authored in one grid rather than scattered through create(). The ` +
-      `export turns each into a collider AND a handler, and the handler tells the scripts on both ` +
-      `objects that they touched. So a brick's behaviour lives on the Brick PREFAB and reaches all ` +
-      `sixty instances without the scene naming any of them.\n\n` +
-      `Bricks ignore each other, and the paddle ignores bricks; saying so is what keeps sixty ` +
-      `immovable bodies from being tested against each other every step.`,
-    editor: "Inspector → Physics → Edit collision matrix…",
-    api: `store.setCollisionRule("ball", "brick", "collide")`,
+      `The layout sorts the objects into groups — ball, paddle, brick — and hands the groups back. ` +
+      `Two lines in the scene class add the colliders, the way any Phaser game would, and each ` +
+      `passes the contact on to the scripts of the two objects involved. So a brick's behaviour ` +
+      `lives on the Brick PREFAB and reaches all sixty instances without the scene naming any of ` +
+      `them, and there is one collider per pair: the one doing the physics is the one reporting it.`,
+    editor: "your editor → src/scenes/Level_01.ts",
+    api: `this.physics.add.collider(groups.ball, groups.brick, (a, b) => scripts.contact(a, b, "collide"))`,
   });
 
   // ------------------------------------------------------------- 12. scripts

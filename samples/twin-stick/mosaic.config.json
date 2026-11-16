@@ -1,0 +1,17 @@
+{
+  "paths": {
+    "src": "src",
+    "scenes": "src/scenes",
+    "prefabs": "src/prefabs",
+    "assets": "assets"
+  },
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "tile": 32,
+  "scale": "FIT",
+  "physics": "arcade",
+  "pixelArt": true,
+  "language": "ts"
+}

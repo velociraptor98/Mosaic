@@ -30,11 +30,12 @@ export function collectLoaderManifest(project: ProjectData, scene: SceneData): L
     for (const frame of anim.frames) needed.add(frame.textureKey);
   }
 
-  // Prefab definitions used by this scene pull in their own art — resolved,
-  // so a variant that swapped its texture loads the one it actually draws.
-  for (const obj of scene.objects) {
-    if (!obj.prefab) continue;
-    const prefab = resolvePrefab(project, obj.prefab);
+  // Every prefab's art, placed here or not. A prefab is also something the
+  // game's code spawns — a bullet, an enemy from a spawner — and one that is
+  // never placed in the editor still has to arrive with its texture loaded.
+  // Resolved, so a variant that swapped its texture loads the one it draws.
+  for (const def of project.prefabs) {
+    const prefab = resolvePrefab(project, def.name);
     if (!prefab) continue;
     for (const node of walkNodes(prefab.root)) if (node.texture) needed.add(node.texture);
   }

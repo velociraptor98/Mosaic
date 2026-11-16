@@ -86,6 +86,7 @@ export function createElectronPlatform(api: MosaicApi): Platform {
     removeFiles: (root, rels) => api.removeFiles(root, rels),
     readText: (root, rel) => api.readText(root, rel),
     readScripts: (root) => api.readScripts(root),
+    openInTiled: (root, rel) => api.openInTiled(root, rel),
     openInEditor: (root, rel, line) => api.openInEditor(root, rel, line),
 
     async importAssets(root: string): Promise<AssetDef[]> {

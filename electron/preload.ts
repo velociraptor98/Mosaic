@@ -25,6 +25,7 @@ const api: MosaicApi = {
   removeFiles: (root, rels) => ipcRenderer.invoke(IPC.removeFiles, root, rels),
   readText: (root, rel) => ipcRenderer.invoke(IPC.readText, root, rel),
   readScripts: (root) => ipcRenderer.invoke(IPC.readScripts, root),
+  openInTiled: (root, rel) => ipcRenderer.invoke(IPC.openInTiled, root, rel),
   openInEditor: (root, rel, line) => ipcRenderer.invoke(IPC.openInEditor, root, rel, line),
   findGameEntries: (root) => ipcRenderer.invoke(IPC.findGameEntries, root),
   recordScene: (root, entry) => ipcRenderer.invoke(IPC.recordScene, root, entry),

@@ -84,9 +84,9 @@ import { ScriptComponent, property } from "./ScriptComponent";
  * The ball, and with it the shape of a life: docked on the paddle, launched by
  * a click, lost when it falls past the floor.
  *
- * The bounce off the paddle is the collision matrix's — ball × paddle is
- * authored as "collide" once, in the project, rather than as a collider this
- * class registers for itself. What arrives here is \`onContact\`, with the thing
+ * The bounce off the paddle is the scene's — ball × paddle is one collider in
+ * Level_01.ts, rather than one this class registers for itself, and that
+ * collider passes the contact on. What arrives here is \`onContact\`, with the thing
  * that was hit, and the angle the ball leaves at is the whole feel of breakout.
  */
 export class BallController extends ScriptComponent {
@@ -116,8 +116,8 @@ export class BallController extends ScriptComponent {
 
   create(): void {
     // The open floor is SCENE data — Inspector → Scene → World edges — and the
-    // ball/paddle collider is the project's collision matrix. Neither is set
-    // up here any more; this class only says what to do about them.
+    // ball/paddle collider is a line in the scene class. Neither is set up
+    // here; this class only says what to do about them.
     this.paddle = this.scene.children.getByName(this.paddleName) as Phaser.Physics.Arcade.Sprite | null;
 
     this.scene.input.on("pointerup", this.launch, this);
@@ -142,7 +142,7 @@ export class BallController extends ScriptComponent {
     this.scene.events.emit("ball-lost");
   }
 
-  /** ball × paddle, from the collision matrix. */
+  /** ball × paddle, passed on by the scene's collider. */
   onContact(other: Phaser.GameObjects.GameObject): void {
     if (other === this.paddle) this.offPaddle();
   }
@@ -207,9 +207,9 @@ export class Brick extends ScriptComponent {
 
   create(): void {
     this.left = this.hits;
-    // No collider is registered here. ball × brick is authored once in the
-    // project's collision matrix, and every brick hears about its own hit
-    // through onContact below.
+    // No collider is registered here. ball × brick is one collider in the
+    // scene class, and every brick hears about its own hit through onContact
+    // below.
 
     // The director counts the wall rather than being told how big it is, so
     // adding a row in the editor needs no matching edit anywhere in code.
@@ -217,7 +217,7 @@ export class Brick extends ScriptComponent {
     this.scene.events.on("wall-restored", this.restore, this);
   }
 
-  /** ball × brick, from the collision matrix. */
+  /** ball × brick, passed on by the scene's collider. */
   onContact(): void {
     this.hit();
   }

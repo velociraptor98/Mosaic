@@ -422,6 +422,32 @@ export function registerIpc(): void {
     projectPaths(root).then((p) => listScripts(root, p.src)),
   );
 
+  ipcMain.handle(IPC.openInTiled, async (_e, root: string, rel: string) => {
+    let abs: string;
+    try {
+      abs = resolveInside(root, rel);
+    } catch (err) {
+      return { ok: false, via: "none", error: (err as Error).message };
+    }
+    if (!(await exists(abs))) return { ok: false, via: "none", error: `${rel} is not on disk yet — save first` };
+    // Tiled by name first: a `.json` map belongs to no app in particular, and
+    // handing it to the OS would open a text editor.
+    const attempts: { cmd: string; args: string[] }[] =
+      process.platform === "darwin"
+        ? [{ cmd: "open", args: ["-a", "Tiled", abs] }]
+        : [{ cmd: "tiled", args: [abs] }];
+    for (const attempt of attempts) {
+      try {
+        await execFileAsync(attempt.cmd, attempt.args, { timeout: 5000, shell: process.platform === "win32" });
+        return { ok: true, via: "tiled" };
+      } catch {
+        /* not installed, or not on PATH */
+      }
+    }
+    const error = await shell.openPath(abs);
+    return error ? { ok: false, via: "none", error } : { ok: true, via: "system" };
+  });
+
   ipcMain.handle(IPC.openInEditor, async (_e, root: string, rel: string, line?: number) =>
     openInEditor(root, rel, line),
   );

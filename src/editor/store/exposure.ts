@@ -42,7 +42,7 @@ const COMPONENT_FIELDS: { path: string; label: string; type: string }[] = [
   { path: "scaleY", label: "Transform.scaleY", type: "num" },
   { path: "rotation", label: "Transform.rotation", type: "deg" },
   { path: "visible", label: "Object.visible", type: "bool" },
-  { path: "group", label: "Object.group", type: "collision group" },
+  { path: "group", label: "Object.group", type: "group" },
   { path: "playOnSpawn", label: "Animations.playOnSpawn", type: "anim key" },
   { path: "body.width", label: "Body.width", type: "num" },
   { path: "body.height", label: "Body.height", type: "num" },

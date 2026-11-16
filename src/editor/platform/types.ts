@@ -119,6 +119,8 @@ export interface Platform {
   readText(root: string, rel: string): Promise<string | null>;
   /** Every source file under src/, for the script index. */
   readScripts(root: string): Promise<ScriptFile[]>;
+  /** Opens a Tiled map in Tiled. */
+  openInTiled(root: string, rel: string): Promise<{ ok: boolean; via: "tiled" | "system" | "none"; error?: string }>;
   /** Opens a file in the user's own editor, at a line where it can. */
   openInEditor(root: string, rel: string, line?: number): Promise<EditorOpen>;
 

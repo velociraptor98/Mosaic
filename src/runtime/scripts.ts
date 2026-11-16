@@ -133,15 +133,17 @@ export abstract class ScriptComponent<
   /** dt is milliseconds, matching Phaser's own update signature. */
   update?(dt: number, time: number): void;
   /**
-   * Called when this object touches something the project's collision matrix
-   * pairs it with — under either rule, with the thing it touched.
+   * Called when this object touches something, with the thing it touched.
    *
-   * The matrix owns WHETHER two groups interact and what physics does about
-   * it; this is how the object finds out. Before it existed a "collide" pair
-   * was wired with no callback at all, so anything that needed a bounce AND to
-   * know it happened had to register a second collider of its own inside
-   * create() — which is two colliders on one pair, the second one running
-   * against bodies the first has already separated.
+   * Nothing calls this by itself. Colliders are your scene's code, and the
+   * one that should reach its objects' scripts says so:
+   *
+   *   this.physics.add.collider(ball, groups.brick, (a, b) =>
+   *     scripts.contact(a, b, "collide"));
+   *
+   * That keeps one collider per pair — the one doing the physics is the one
+   * that reports it — and lets behaviour written on a prefab's script reach
+   * every instance without the scene naming any of them.
    */
   onContact?(other: Phaser.GameObjects.GameObject, rule: "collide" | "overlap"): void;
   destroy?(): void;
@@ -225,11 +227,9 @@ export class ScriptHost {
   }
 
   /**
-   * Tells both objects in a matrix-wired pair that they touched.
-   *
-   * Called by the generated scene, once per pair, from the handler the
-   * collision matrix produced. Each side is handed the OTHER object, so a
-   * script never has to work out which of the two it was.
+   * Tells both objects in a pair that they touched. Call it from a collider
+   * or overlap callback; each side is handed the OTHER object, so a script
+   * never has to work out which of the two it was.
    */
   contact(a: ContactSide, b: ContactSide, rule: "collide" | "overlap"): void {
     this.deliver(a, b, rule);
@@ -238,9 +238,8 @@ export class ScriptHost {
 
   /**
    * Both sides are cast to GameObject here, once, so a script's `onContact`
-   * gets the type it actually wants. The matrix only ever pairs GROUPS, so a
-   * participant is always a game object — the Tile arm of the union belongs to
-   * the tile-layer colliders, which never come through this.
+   * gets the type it actually wants. A script lives on a game object, so a
+   * participant that is a Tile has nothing to deliver to and is skipped.
    */
   private deliver(
     rawObject: ContactSide,

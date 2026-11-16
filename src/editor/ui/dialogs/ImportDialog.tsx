@@ -2,6 +2,13 @@ import { useState } from "react";
 import { imageSize, inferAssetKind, readFileAsDataUrl } from "../../assets/slice";
 import { platform } from "../../platform";
 import { uid } from "../../store/ids";
+import {
+  MAP_EXT,
+  describeTiledMap,
+  parseTiledMap,
+  tiledFromDataUrl,
+  tiledToDataUrl,
+} from "../../../shared/tiled";
 import type { AssetDef, AssetKind } from "../../../shared/types";
 import { Dialog } from "./Dialog";
 import { useEditor } from "../context";
@@ -65,6 +72,9 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await addCopied(await platform.importAssets(root));
+      // A Tiled map picked alongside the art is already in assets/ — it is a
+      // file, with nothing to confirm about it — so it is read where it lies.
+      await workspace.rescanTilemaps();
     } finally {
       setBusy(false);
     }
@@ -79,6 +89,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     try {
       await addCopied(await platform.copyAssets(root, paths));
+      await workspace.rescanTilemaps();
     } finally {
       setBusy(false);
     }
@@ -87,6 +98,24 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const addFiles = async (files: FileList | File[]) => {
     const next: Row[] = [];
     for (const file of Array.from(files)) {
+      // The browser build has no folder, so a map travels inside the project.
+      if (MAP_EXT.test(file.name)) {
+        const map = parseTiledMap(await file.text());
+        if (!map) continue; // an atlas document, or not JSON at all
+        next.push({
+          file,
+          url: tiledToDataUrl(map),
+          width: map.width * map.tilewidth,
+          height: map.height * map.tileheight,
+          kind: "tilemap",
+          key: file.name.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_"),
+          frameWidth: 0,
+          frameHeight: 0,
+          margin: 0,
+          spacing: 0,
+        });
+        continue;
+      }
       const url = await readFileAsDataUrl(file);
       const { width, height } = await imageSize(url);
       next.push({
@@ -114,17 +143,27 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       url: row.url,
       width: row.width,
       height: row.height,
-      ...(row.kind === "spritesheet" || row.kind === "tileset"
+      ...(row.kind === "spritesheet"
         ? {
             frameWidth: row.frameWidth,
             frameHeight: row.frameHeight,
             margin: row.margin,
             spacing: row.spacing,
-            tileCollides: row.kind === "tileset" ? [] : undefined,
           }
         : {}),
     }));
+    // A map is described against every image the project will have once this
+    // import lands — the art it draws with is often in the same drop.
+    const known = [...store.project.assets, ...assets];
+    for (const asset of assets) {
+      if (asset.kind !== "tilemap") continue;
+      const map = tiledFromDataUrl(asset.url);
+      if (map) asset.tilemap = describeTiledMap(map, asset.path, known);
+    }
     store.importAssets(assets);
+    store.hydrateTilemaps();
+    // On desktop the maps are files, and may have been waiting for this art.
+    void workspace.rescanTilemaps();
     onClose();
   };
 
@@ -181,7 +220,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
           <input
             type="file"
             multiple
-            accept="image/*,audio/*"
+            accept="image/*,audio/*,.json,.tmj"
             onChange={(e) => e.target.files && void addFiles(e.target.files)}
           />
           Drop images or audio here, or click to choose.
@@ -213,13 +252,16 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
               )
             }
           >
-            {(["image", "spritesheet", "tileset", "atlas", "audio"] as AssetKind[]).map((k) => (
+            {(row.kind === "tilemap"
+              ? (["tilemap"] as AssetKind[])
+              : (["image", "spritesheet", "atlas", "audio"] as AssetKind[])
+            ).map((k) => (
               <option key={k} value={k}>
                 {k}
               </option>
             ))}
           </select>
-          {(row.kind === "spritesheet" || row.kind === "tileset") && (
+          {row.kind === "spritesheet" && (
             <span className="frame-config">
               <input
                 type="number"

@@ -308,7 +308,7 @@ npm run build    # a production bundle in dist/</pre>
   <h3>What is on disk</h3>
   <table>
     <tr><th class="mono">Path</th><th>What it is</th></tr>
-    <tr><td class="mono">phaser.editor.json</td><td>The manifest: assets, animations, groups, the collision matrix</td></tr>
+    <tr><td class="mono">phaser.editor.json</td><td>The manifest: assets, animations and groups</td></tr>
     <tr><td class="mono">mosaic.config.json</td><td>Canvas size, tile size, physics — project defaults every scene inherits</td></tr>
     <tr><td class="mono">src/scenes/Level_01.scene.json</td><td>The level. The editor's source of truth</td></tr>
     <tr><td class="mono">src/scenes/Level_01.layout.ts</td><td>Generated from it on every save. Never edited</td></tr>

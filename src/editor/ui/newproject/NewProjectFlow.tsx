@@ -482,7 +482,8 @@ function DefaultsStep({
         </div>
         {config.physics === "matter" && (
           <div className="banner">
-            Matter chosen — the collision matrix becomes body-pair based rather than group based.
+            Matter chosen — Mosaic authors Arcade bodies only, so bodies and collisions in a Matter
+            project are written in your code.
           </div>
         )}
 

@@ -11,7 +11,6 @@ export type DialogName =
   | "importphaser"
   | "atlas"
   | "prefab"
-  | "collision"
   | "attachscript"
   | "scripttrust"
   | "export"
@@ -79,16 +78,12 @@ export function buildCommands(ctx: CommandContext): Command[] {
     { id: "prefab.save", title: "Save prefab (show what it costs)…", category: "Prefabs", run: () => { if (store.prefabDoc) store.planPrefabSave(workspace.writeBlockedReason); else store.setStatus("No prefab document is open"); } },
     { id: "prefab.close", title: "Back to scene (leave prefab edit mode)", category: "Prefabs", run: () => store.closePrefab() },
     { id: "prefab.expose", title: "Show the prefab's exposed fields", category: "Prefabs", run: () => store.setUi({ inspectorTab: "prefab" }) },
-    { id: "physics.matrix", title: "Edit collision matrix…", category: "Physics", run: () => openDialog("collision") },
     { id: "script.attach", title: "Attach script to selection…", category: "Scripts", run: () => openDialog("attachscript") },
     { id: "script.inspect", title: "Show scripts on selection", category: "Scripts", run: () => store.setUi({ inspectorTab: "scripts" }) },
     { id: "script.reindex", title: "Re-index scripts from disk", category: "Scripts", run: () => { const root = workspace.location?.root; if (root) void workspace.scripts.load(root); } },
 
     { id: "tool.select", title: "Tool: Select", category: "Tools", binding: "V", run: () => store.setUi({ tool: "select" }) },
     { id: "tool.place", title: "Tool: Place", category: "Tools", binding: "B", run: () => store.setUi({ tool: "place" }) },
-    { id: "tool.brush", title: "Tool: Paint tiles", category: "Tools", binding: "P", run: () => store.setUi({ tool: "brush", inspectorTab: "tile" }) },
-    { id: "tool.rect", title: "Tool: Rect fill", category: "Tools", binding: "R", run: () => store.setUi({ tool: "rect", inspectorTab: "tile" }) },
-    { id: "tool.erase", title: "Tool: Erase tiles", category: "Tools", binding: "E", run: () => store.setUi({ tool: "erase", inspectorTab: "tile" }) },
 
     { id: "view.snap", title: "Toggle snapping", category: "View", binding: "S", run: () => store.setUi({ snap: !store.ui.snap }) },
     { id: "view.grid", title: "Toggle grid", category: "View", binding: "G", run: () => store.setUi({ showGrid: !store.ui.showGrid }) },
@@ -105,8 +100,8 @@ export function buildCommands(ctx: CommandContext): Command[] {
 
     { id: "object.text", title: "Add text object…", category: "Objects", binding: "T", run: () => store.addText() },
 
-    { id: "layer.tile", title: "Add tile layer", category: "Layers", run: () => store.addLayer("tile") },
-    { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer("object") },
+    { id: "layer.map", title: "Add a Tiled map to the scene…", category: "Layers", run: () => store.setUi({ inspectorTab: "tile" }) },
+    { id: "layer.object", title: "Add object layer", category: "Layers", run: () => store.addLayer() },
 
     { id: "play.run", title: playtest.run ? "Stop the game" : "Run the game", category: "Play", binding: `${mod}⏎`, run: () => (playtest.run ? playtest.stop() : startPlaytest(ctx)) },
     { id: "play.reload", title: "Reload the running game", category: "Play", run: () => playtest.reload() },

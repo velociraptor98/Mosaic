@@ -124,7 +124,7 @@ export function makeTemplateMap(
 }
 
 export function mapKeyFor(sceneKey: string): string {
-  return `${sceneKey.replace(/[^\w]+/g, "_")}_map`;
+  return sceneKey.replace(/[^\w]+/g, "_");
 }
 
 export function shapeSize(shape: string): Size {

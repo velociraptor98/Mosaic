@@ -215,8 +215,16 @@ export function className(key: string): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
+/**
+ * camelCase's first step, with acronyms in mind: "Player" -> "player", but
+ * "HUD" -> "hud" and "HUDText" -> "hudText", not "hUD".
+ */
 function lowerFirst(s: string): string {
-  return s.charAt(0).toLowerCase() + s.slice(1);
+  const run = /^[A-Z]+/.exec(s)?.[0] ?? "";
+  if (run.length <= 1) return s.charAt(0).toLowerCase() + s.slice(1);
+  // The last capital of a run starts the next word when a lowercase follows.
+  const keep = run.length < s.length && /[a-z]/.test(s[run.length]) ? 1 : 0;
+  return s.slice(0, run.length - keep).toLowerCase() + s.slice(run.length - keep);
 }
 
 function q(value: string): string {
@@ -226,7 +234,7 @@ function q(value: string): string {
 /** Names a generated function body may not take for one of its own locals. */
 const RESERVED = new Set([
   // the function's own vocabulary
-  "scene", "scripts", "groups", "maps", "Phaser", "ScriptHost",
+  "scene", "scripts", "groups", "maps", "Phaser", "ScriptHost", "joinGroup",
   // the language's
   "break", "case", "catch", "class", "const", "continue", "debugger", "default", "delete", "do",
   "else", "enum", "export", "extends", "false", "finally", "for", "function", "if", "import", "in",
@@ -305,6 +313,7 @@ export function generateSceneLayout(
   const moduleNames = new Set<string>([
     "Phaser",
     "ScriptHost",
+    "joinGroup",
     `${cls}Layout`,
     `preload${cls}`,
     `create${cls}`,
@@ -389,7 +398,9 @@ export function generateSceneLayout(
         doc: `Tile layer "${tile.layer}" of ${asset.path}.`,
       });
       L.push(`  // layer ${depth}: ${tile.name} (tiles)`);
-      L.push(`  const ${v} = ${mv}.createLayer(${q(tile.layer)}, ${mv}Tiles, 0, 0)${ts ? "!" : ""};`);
+      L.push(
+        `  const ${v} = ${mv}.createLayer(${q(tile.layer)}, ${mv}Tiles, 0, 0)${ts ? " as Phaser.Tilemaps.TilemapLayer" : ""};`,
+      );
       L.push(`  ${v}.setDepth(${depth});`);
       // Named, so a lookup by name finds it in the running game too.
       L.push(`  ${v}.setName(${q(tile.name)});`);
@@ -459,30 +470,42 @@ export function generateSceneLayout(
       if (obj.sounds?.spawn) L.push(`  scene.sound.play(${q(obj.sounds.spawn)});`);
 
       emitScripts(L, v, obj, scriptImports, moduleNames, opts);
-
-      if (obj.group && obj.body && !groupVars.has(obj.group)) {
-        const gv = identifier(`${obj.group.replace(/[^\w]/g, "")}Group`, new Set());
-        groupVars.set(obj.group, gv);
-      }
     }
     L.push(``);
   });
 
+  // Every group the project defines, not only the ones this scene places
+  // something in: a group is how code says "every bullet", and the bullets may
+  // all be made by code. Project order first, then any tag an object still
+  // carries for a group that has since been removed from the project.
+  const groupNames = [...project.groups];
+  for (const raw of scene.objects) {
+    const g = resolveObject(project, raw).group;
+    if (g && !groupNames.includes(g)) groupNames.push(g);
+  }
   // Group locals are named after every object has taken its name, so a group
   // can never push an object off the identifier the author gave it.
-  for (const [group, wanted] of groupVars) groupVars.set(group, identifier(wanted, used));
+  for (const group of groupNames) {
+    groupVars.set(group, identifier(`${group.replace(/[^\w]/g, "")}Group`, used));
+  }
 
   // ---- groups ----
   // Membership only. A group is how the scene's code names "every brick"; what
   // happens when the ball meets one is that code's to say.
   if (groupVars.size) {
-    L.push(`  // groups`);
+    const depthOf = new Map(scene.layers.map((l, i) => [l.id, i] as const));
+    const firstObjectLayer = scene.layers.findIndex((l) => l.kind !== "tile");
+    L.push(`  // groups — an object your code adds later gets its authored body back`);
+    L.push(`  // (a group resets bodies to its own defaults) and, if it has no depth yet,`);
+    L.push(`  // the depth of the layer this group's objects were placed on.`);
     for (const [group, gv] of groupVars) {
-      const members = scene.objects
-        .map((o) => resolveObject(project, o))
-        .filter((o) => o.group === group && o.body && varsById.has(o.id))
-        .map((o) => varsById.get(o.id)!);
-      L.push(`  const ${gv} = scene.physics.add.group([${members.join(", ")}]);`);
+      const placed = scene.objects
+        .map((raw) => ({ raw, obj: resolveObject(project, raw) }))
+        .filter(({ obj }) => obj.group === group && obj.body && varsById.has(obj.id));
+      const members = placed.map(({ obj }) => varsById.get(obj.id)!);
+      const depth = homeDepth(placed.map(({ raw }) => depthOf.get(raw.layerId) ?? -1), firstObjectLayer);
+      L.push(`  const ${gv} = scene.physics.add.group(${members.length ? `[${members.join(", ")}]` : ""});`);
+      L.push(`  ${gv}.createCallback = joinGroup(${depth >= 0 ? depth : ""});`);
     }
     L.push(``);
     if (bodyLines.length) {
@@ -588,7 +611,7 @@ export function generateSceneLayout(
       out.push(`  /** ${field.doc.replace(/\*\//g, "*\\/")} */`);
       out.push(`  ${field.name}: ${field.type};`);
     }
-    out.push(`  /** The project's groups that have members in this scene. */`);
+    out.push(`  /** Every group the project defines, built even when this scene places nothing in it. */`);
     out.push(
       groupEntries.length
         ? `  groups: { ${groupEntries.map((g) => `${g.key}: Phaser.Physics.Arcade.Group`).join("; ")} };`
@@ -622,9 +645,67 @@ export function generateSceneLayout(
   out.push(...L);
   out.push(`}`);
 
+  if (groupVars.size) {
+    out.push(``);
+    out.push(...JOIN_GROUP[lang]);
+  }
+
   out.push(``);
   return out.join("\n");
 }
+
+/**
+ * The depth an object added to a group at run time is drawn at: the object
+ * layer most of the group's placed members sit on (the lower on a tie), or,
+ * when the scene places none, the scene's first object layer. -1 when the
+ * scene has no object layer at all, and depth is then left alone.
+ */
+function homeDepth(memberDepths: number[], firstObjectLayer: number): number {
+  const counts = new Map<number, number>();
+  for (const d of memberDepths) if (d >= 0) counts.set(d, (counts.get(d) ?? 0) + 1);
+  let best = -1;
+  let most = 0;
+  for (const [d, n] of counts) {
+    if (n > most || (n === most && d < best)) [best, most] = [d, n];
+  }
+  return best >= 0 ? best : firstObjectLayer;
+}
+
+/**
+ * Installed as each group's createCallback once the layout's own members are
+ * in, so it runs only for what the game's code adds afterwards. Arcade resets
+ * the body of anything a group takes to the group's defaults — gravity on,
+ * world-bounds collision off, immovable off, bounce 0. The shape survives;
+ * the settings do not — which silently undid the body
+ * the editor authored; `applyBody()` puts it back. A depth is given only to an
+ * object still at 0, the depth nothing has set: one the code placed itself is
+ * left where it was put.
+ */
+const JOIN_GROUP: Record<"ts" | "js", string[]> = {
+  ts: [
+    `/** What a group does with an object added to it after the layout ran. */`,
+    `function joinGroup(depth?: number): Phaser.Types.GameObjects.Group.GroupCallback {`,
+    `  return (child) => {`,
+    `    const made = child as Phaser.GameObjects.GameObject & {`,
+    `      applyBody?: () => unknown;`,
+    `      depth?: number;`,
+    `      setDepth?: (value: number) => unknown;`,
+    `    };`,
+    `    made.applyBody?.();`,
+    `    if (depth !== undefined && made.depth === 0) made.setDepth?.(depth);`,
+    `  };`,
+    `}`,
+  ],
+  js: [
+    `/** What a group does with an object added to it after the layout ran. */`,
+    `function joinGroup(depth) {`,
+    `  return (child) => {`,
+    `    child.applyBody?.();`,
+    `    if (depth !== undefined && child.depth === 0) child.setDepth?.(depth);`,
+    `  };`,
+    `}`,
+  ],
+};
 
 /** A spritesheet frame is a number to Phaser; an atlas frame is a name. */
 function frameLiteral(frame: string): string {
@@ -971,6 +1052,10 @@ export function generatePrefabLayout(
       L.push(`    this.setData(${q(k)}, ${JSON.stringify(v)});`);
     }
     L.push(`  }`);
+    if (JSON.stringify(node.props ?? {}) !== JSON.stringify(pnode.props ?? {})) {
+      L.push(``);
+      emitDefaults(L, node.props ?? {}, ts, true);
+    }
     if (bodyChanged) {
       L.push(``);
       emitApplyBody(L, node.body!, ts, !!pnode.body);
@@ -1009,6 +1094,10 @@ export function generatePrefabLayout(
     L.push(`    // animation is registered. A play() here would run before the key exists.`);
   }
   L.push(`  }`);
+  L.push(``);
+  emitDefaults(L, node.props ?? {}, ts, false);
+  L.push(``);
+  emitSpawn(L, cls, ts);
   if (node.body) {
     L.push(``);
     emitApplyBody(L, node.body, ts, false);
@@ -1018,11 +1107,57 @@ export function generatePrefabLayout(
   return L.join("\n");
 }
 
+/**
+ * The values the editor set on the definition for the class's own @property
+ * fields. Static, because they cannot be applied in this constructor: your
+ * class's field initialisers run after it and would put the code's defaults
+ * straight back. `spawn` applies them afterwards.
+ */
+function emitDefaults(L: string[], props: Record<string, unknown>, ts: boolean, overrides: boolean): void {
+  const entries = Object.entries(props).filter(([k]) => /^[A-Za-z_$][\w$]*$/.test(k));
+  const literal = entries.length
+    ? `{ ${entries.map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(", ")} }`
+    : "{}";
+  L.push(`  /** What the editor set on this prefab's definition, for the class's @property fields. */`);
+  L.push(
+    ts
+      ? `  static ${overrides ? "override " : ""}readonly defaults: Readonly<Record<string, unknown>> = ${literal};`
+      : `  static defaults = ${literal};`,
+  );
+}
+
+/**
+ * Making one from code, the way the layout makes the ones placed in the
+ * editor: constructed, then given the definition's values. Called on your
+ * class — `Bullet.spawn(scene, x, y)` — so it builds your class, and a variant
+ * builds the variant.
+ */
+function emitSpawn(L: string[], cls: string, ts: boolean): void {
+  L.push(`  /**`);
+  L.push(`   * Makes one at run time, with the values the editor set on the definition.`);
+  L.push(`   * Call it on your own class: \`${cls}.spawn(scene, x, y)\`.`);
+  L.push(`   */`);
+  if (ts) {
+    L.push(`  static spawn<T extends Phaser.GameObjects.GameObject>(`);
+    L.push(`    this: (new (scene: Phaser.Scene, x: number, y: number) => T) & { defaults: object },`);
+    L.push(`    scene: Phaser.Scene,`);
+    L.push(`    x: number,`);
+    L.push(`    y: number,`);
+    L.push(`  ): T {`);
+  } else {
+    L.push(`  static spawn(scene, x, y) {`);
+  }
+  L.push(`    const made = new this(scene, x, y);`);
+  L.push(`    Object.assign(made, this.defaults);`);
+  L.push(`    return made;`);
+  L.push(`  }`);
+}
+
 function emitApplyBody(L: string[], b: BodyDef, ts: boolean, overrides: boolean): void {
   L.push(`  /**`);
   L.push(`   * The body authored in the editor. Public and idempotent because joining an`);
-  L.push(`   * arcade group overwrites a body with the GROUP's defaults, so the scene`);
-  L.push(`   * layout calls this again once the groups exist.`);
+  L.push(`   * arcade group overwrites a body with the GROUP's defaults, so the layout's`);
+  L.push(`   * groups call this again for anything added to them.`);
   L.push(`   */`);
   L.push(`  ${overrides && ts ? "override " : ""}applyBody()${ts ? ": this" : ""} {`);
   L.push(`    const body = this.body${ts ? " as Phaser.Physics.Arcade.Body" : ""};`);
@@ -1058,6 +1193,9 @@ export function generatePrefabClass(name: string, lang: Language = "ts"): string
  * (./${cls}.layout.${lang}, regenerated on every save). Behaviour goes here, the
  * way it would on any Phaser sprite — and a field marked @property shows up in
  * the editor's inspector for every ${name} you place.
+ *
+ * To make one from code, use \`${cls}.spawn(scene, x, y)\`: it is \`new\` plus the
+ * values the editor set on the definition.
  */
 export class ${cls} extends ${cls}Base {
   // preUpdate(time${ts ? ": number" : ""}, delta${ts ? ": number" : ""})${ts ? ": void" : ""} {

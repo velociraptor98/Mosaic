@@ -1,0 +1,253 @@
+{
+  "name": "Twin Stick",
+  "scenes": [
+    {
+      "key": "Level_01",
+      "name": "Level 01",
+      "file": "src/scenes/Level_01.scene.json"
+    }
+  ],
+  "assets": [
+    {
+      "id": "tileset-placeholder",
+      "key": "placeholder-tiles",
+      "kind": "image",
+      "path": "assets/placeholder-tiles.png",
+      "width": 256,
+      "height": 32,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-capsule",
+      "key": "shape-capsule",
+      "kind": "image",
+      "path": "assets/shape-capsule.png",
+      "width": 28,
+      "height": 40,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-box",
+      "key": "shape-box",
+      "kind": "image",
+      "path": "assets/shape-box.png",
+      "width": 32,
+      "height": 32,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-circle",
+      "key": "shape-circle",
+      "kind": "image",
+      "path": "assets/shape-circle.png",
+      "width": 32,
+      "height": 32,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-triangle",
+      "key": "shape-triangle",
+      "kind": "image",
+      "path": "assets/shape-triangle.png",
+      "width": 28,
+      "height": 36,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-star",
+      "key": "shape-star",
+      "kind": "image",
+      "path": "assets/shape-star.png",
+      "width": 24,
+      "height": 24,
+      "generated": true
+    },
+    {
+      "id": "asset-shape-diamond",
+      "key": "shape-diamond",
+      "kind": "image",
+      "path": "assets/shape-diamond.png",
+      "width": 24,
+      "height": 24,
+      "generated": true
+    },
+    {
+      "id": "asset-elzza",
+      "key": "Level_01",
+      "kind": "tilemap",
+      "path": "assets/maps/Level_01.tmj",
+      "width": 1280,
+      "height": 768,
+      "tilemap": {
+        "tileWidth": 32,
+        "tileHeight": 32,
+        "cols": 40,
+        "rows": 24,
+        "layers": [
+          "Floor",
+          "Walls"
+        ],
+        "tilesets": [
+          {
+            "name": "placeholder-tiles",
+            "image": "placeholder-tiles",
+            "imagePath": "assets/placeholder-tiles.png"
+          }
+        ],
+        "collides": true
+      }
+    }
+  ],
+  "prefabs": [
+    {
+      "name": "Player",
+      "exposed": [],
+      "root": {
+        "name": "Player",
+        "type": "sprite",
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "originX": 0.5,
+        "originY": 0.5,
+        "visible": true,
+        "texture": "shape-capsule",
+        "group": "player",
+        "body": {
+          "shape": "circle",
+          "width": 28,
+          "height": 40,
+          "radius": 13,
+          "offsetX": 1,
+          "offsetY": 7,
+          "immovable": false,
+          "allowGravity": false,
+          "bounce": 0,
+          "collideWorldBounds": true
+        },
+        "data": {},
+        "props": {
+          "speed": 260,
+          "fireRate": 7
+        },
+        "lid": "nmwiaem003",
+        "children": []
+      },
+      "file": "src/prefabs/Player.prefab.json"
+    },
+    {
+      "name": "Enemy",
+      "exposed": [],
+      "root": {
+        "name": "Enemy",
+        "type": "sprite",
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "originX": 0.5,
+        "originY": 0.5,
+        "visible": true,
+        "texture": "shape-triangle",
+        "group": "enemy",
+        "body": {
+          "shape": "circle",
+          "width": 28,
+          "height": 36,
+          "radius": 13,
+          "offsetX": 1,
+          "offsetY": 5,
+          "immovable": false,
+          "allowGravity": false,
+          "bounce": 0,
+          "collideWorldBounds": false
+        },
+        "data": {},
+        "lid": "nmwiaem054",
+        "children": []
+      },
+      "file": "src/prefabs/Enemy.prefab.json"
+    },
+    {
+      "name": "Enemy_Fast",
+      "exposed": [],
+      "base": "Enemy",
+      "diff": {
+        "scaleX": 0.7,
+        "scaleY": 0.7,
+        "props.speed": 170,
+        "props.hp": 1,
+        "props.points": 25
+      },
+      "file": "src/prefabs/Enemy_Fast.prefab.json"
+    },
+    {
+      "name": "Bullet",
+      "exposed": [],
+      "root": {
+        "name": "Bullet",
+        "type": "sprite",
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scaleX": 0.5,
+        "scaleY": 0.5,
+        "originX": 0.5,
+        "originY": 0.5,
+        "visible": true,
+        "texture": "shape-star",
+        "group": "bullet",
+        "body": {
+          "shape": "circle",
+          "width": 24,
+          "height": 24,
+          "radius": 9,
+          "offsetX": 3,
+          "offsetY": 3,
+          "immovable": false,
+          "allowGravity": false,
+          "bounce": 0,
+          "collideWorldBounds": false
+        },
+        "data": {},
+        "props": {
+          "speed": 620,
+          "lifetime": 800
+        },
+        "lid": "nmwiaem065",
+        "children": []
+      },
+      "file": "src/prefabs/Bullet.prefab.json"
+    },
+    {
+      "name": "Spawner",
+      "exposed": [],
+      "root": {
+        "name": "Spawner",
+        "type": "sprite",
+        "x": 0,
+        "y": 0,
+        "rotation": 0,
+        "scaleX": 1,
+        "scaleY": 1,
+        "originX": 0.5,
+        "originY": 0.5,
+        "visible": true,
+        "texture": "shape-diamond",
+        "data": {},
+        "lid": "nmwiaem076",
+        "children": []
+      },
+      "file": "src/prefabs/Spawner.prefab.json"
+    }
+  ],
+  "anims": [],
+  "groups": [
+    "player",
+    "enemy",
+    "bullet"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "name": "Player",
+  "exposed": [],
+  "root": {
+    "name": "Player",
+    "type": "sprite",
+    "x": 0,
+    "y": 0,
+    "rotation": 0,
+    "scaleX": 1,
+    "scaleY": 1,
+    "originX": 0.5,
+    "originY": 0.5,
+    "visible": true,
+    "texture": "shape-capsule",
+    "group": "player",
+    "body": {
+      "shape": "circle",
+      "width": 28,
+      "height": 40,
+      "radius": 13,
+      "offsetX": 1,
+      "offsetY": 7,
+      "immovable": false,
+      "allowGravity": false,
+      "bounce": 0,
+      "collideWorldBounds": true
+    },
+    "data": {},
+    "props": {
+      "speed": 260,
+      "fireRate": 7
+    },
+    "lid": "nmwiaem003",
+    "children": []
+  }
+}
