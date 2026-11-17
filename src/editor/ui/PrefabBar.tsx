@@ -31,7 +31,7 @@ export function PrefabBar() {
     <div className="prefab-bar">
       <span className="glyph">◆</span>
       <strong>prefab edit mode</strong>
-      <code>{prefabFilePath(doc.name)}</code>
+      <code>{prefabFilePath(doc.name, store.project.config.paths)}</code>
       {doc.base && <span className="tag-outline">variant</span>}
       {dirty && <span className="tag-outline">modified</span>}
 

@@ -76,6 +76,13 @@ export interface AssetDef {
   generated?: boolean;
   /** tilemap: a description of the Tiled map at `path`. */
   tilemap?: TilemapInfo;
+  /**
+   * Where the game loads this from, when that is not a file in the project:
+   * the full URL its loader asked for under `setBaseURL`, e.g. a CDN. The
+   * layout loads it from there, as the game does; `path` holds a copy that
+   * the editor draws.
+   */
+  source?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +445,20 @@ export interface ProjectConfig {
   /** Forces nearest-neighbour filtering and integer camera positions. */
   pixelArt: boolean;
   /**
+   * Whether the editor offers its placeholder shapes. Absent means yes. A
+   * game Mosaic adopted has its own art, and the shapes' PNGs only exist in
+   * projects Mosaic scaffolded, so placing one there loaded a missing file.
+   */
+  placeholders?: boolean;
+  /**
+   * How the game reaches Phaser. Absent means "module": it imports it, and so
+   * do the layouts. "global" is a game that loads Phaser with a script tag and
+   * runs its modules unbundled, as Phaser's own examples do; there a layout's
+   * `import Phaser from "phaser"` is a bare specifier the browser cannot
+   * resolve, and wiring the layout in would break the game.
+   */
+  phaser?: "module" | "global";
+  /**
    * The language Mosaic writes layout files in. Absent means "work it out":
    * TypeScript when the folder has a tsconfig, JavaScript when it has a
    * package.json without one.
@@ -464,6 +485,25 @@ export interface ProjectPaths {
   prefabs: string;
   /** Where art and audio are scanned from. */
   assets: string;
+  /**
+   * The folder the game's dev server serves as `/`, when it is not the project
+   * root. Vite serves `public/`, so art at `public/assets/star.png` is loaded
+   * as `assets/star.png` and a layout has to say the second. Absent means the
+   * root, which is what every project Mosaic scaffolds uses.
+   */
+  publicDir?: string;
+}
+
+/** `dir/file`, or just `file` when the folder is the project root ("." or ""). */
+export function inDir(dir: string, file: string): string {
+  const d = dir.replace(/^\.\/?$/, "").replace(/\/+$/, "");
+  return d ? `${d}/${file}` : file;
+}
+
+/** Whether a project-relative path is inside a folder; the root holds everything. */
+export function isUnder(dir: string, rel: string): boolean {
+  const d = dir.replace(/^\.\/?$/, "").replace(/\/+$/, "");
+  return !d || rel.startsWith(`${d}/`);
 }
 
 export const DEFAULT_PATHS: ProjectPaths = {

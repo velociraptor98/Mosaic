@@ -55,7 +55,7 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       wide
       title={`Push ${plan.prefab} to its instances`}
-      subtitle={`${prefabFilePath(plan.prefab)} — ${t.instances} instance(s) across ${plan.scenes.length} scene(s).`}
+      subtitle={`${prefabFilePath(plan.prefab, store.project.config.paths)} — ${t.instances} instance(s) across ${plan.scenes.length} scene(s).`}
       onClose={close}
       footer={
         <>

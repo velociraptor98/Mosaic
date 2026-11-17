@@ -24,7 +24,8 @@ npm install
 npm run dev:app     # the desktop app (Electron + Vite dev server)
 npm run dev         # the browser demo at the printed URL
 npm run sample      # build the test samples into samples/: Coin Run and Holdout
-npm run check       # rebuild them, then open each as the app does: fails if opening would change a byte
+npm run check       # rebuild them, open each as the app does (fails if opening would change a byte),
+                    # then open the two fixtures of a game Mosaic did not make
 
 npm run build:app   # renderer + main/preload bundles
 npm run lint
@@ -40,6 +41,14 @@ the real Workspace — with a Node stand-in for the desktop bridge that reads th
 way the main process reads (`electron/projectFiles.ts`) and only records
 writes — and fails on any file that opening and saving would create, change or
 delete.
+
+It then opens the two fixtures in `scripts/check/fixtures/`. `phaser2` has the
+shape of every game in the phaser-examples collection, and must be refused with
+nothing written. `phaser3-template` has the shape of Phaser's own Vite template
+(scenes in `src/game/scenes`, art in `public/assets`, the game constructed on
+`DOMContentLoaded`). It must open with no scenes and nothing written. Laying out
+`Game` must write exactly its data and layout beside the class, load art by the
+URL the game serves it at, and reopen without changing a byte.
 
 ## Layout beside code
 
@@ -356,6 +365,17 @@ dev server reloads, and the game shows the change. The server is started once
 and kept between runs; it stops when the project closes or the app exits, by
 any means — it watches a pipe the app holds, so a crash takes it down too.
 
+A game with no dev script — Phaser's own examples are a folder of scripts with
+no `package.json` and no `index.html` — is served as it is, the way the examples
+site serves it (`electron/staticServer.ts`). The folder's own `index.html` if it
+has one; otherwise a page that loads Phaser (the project's installed copy, else
+Mosaic's) as the global or, when the code imports `"phaser"`, through an import
+map, then the file that starts the game — as a module when it uses `import`.
+That page fits a game with no scale mode to the pane. Nothing is written to the
+folder; a file watcher reloads the page on save, as a dev server would. Art
+loaded from a CDN that only allows its own site (the examples' CDN) is let
+through for requests from that page only.
+
 Running a dev server executes the project's code, so a folder that has not been
 trusted asks first. The answer is stored by the editor, per folder. A project
 created through the New Project flow is trusted from the start.
@@ -487,6 +507,98 @@ with `zlib` — stored or deflated per file, whichever is smaller — because a
 packaging dependency in an app whose whole pitch is that your game does not need
 one would be an odd thing to add.
 
+## Opening a game Mosaic didn't make — `project/adopt.ts`, `electron/existingProject.ts`
+
+A folder with source in it, no `phaser.editor.json` and some sign of Phaser is
+read as the game it already is, before anything is shown:
+
+- **Which Phaser.** Taken from `package.json` or `bower.json`, else from the
+  code (`game.state`, a positional `new Phaser.Game(960, …)`). A Phaser 2 game
+  is refused on the launcher with the reason. It has states, not scenes, and
+  nothing Mosaic writes would run in it.
+- **Where it starts.** `index.html`'s module script first, which is what Vite
+  runs, then any file that constructs a game: `new Phaser.Game(`, or
+  `new Game(` where `Game` was imported from `phaser`.
+- **Where its art is, and the URL it loads it by.** `public/assets` is listed
+  as the art folder and `public/` recorded as `paths.publicDir`, so a layout
+  loads `public/assets/star.png` as `assets/star.png`, the way Vite serves it.
+- **Its canvas size, background, physics and pixel-art setting**, from the game
+  config. A game with no `physics` block gets layouts that never touch
+  `scene.physics`.
+- **Its language and how it reaches Phaser.** Layouts are written in the
+  language of the file that starts the game. A game where no file imports
+  `phaser` has it from a script tag and runs its modules unbundled, as Phaser's
+  own examples do. Its layouts leave out `import Phaser from "phaser"`, which
+  the browser could not resolve (`"phaser": "global"` in the config).
+
+The game opens on a screen listing its scene classes, not on a starter scene,
+and nothing is written. There is one action: **Import all scenes**. It runs the
+game once (the recorder, below) and gives every scene class a layout that
+starts from what its `create()` built. A class the recording has nothing for
+gets an empty layout, and so does every class of a game that cannot be run.
+Each layout is two files beside its class (`MainGame.scene.json`,
+`MainGame.layout.js`), named after the class whatever file it is in. The first
+import also writes `phaser.editor.json` and `mosaic.config.json`, and the config
+records the folders found.
+
+**Your classes are edited only if you agree.** Pressing Import shows a warning
+naming every class file and what will change in it, with three answers:
+*Import and update my code*, *Import without changing code*, *Cancel*. Mosaic
+can't undo a code edit, and the warning says so.
+
+Agreeing wires each class to its layout (`project/wireClass.ts`,
+`electron/classShape.ts`). The class imports the layout and calls
+`preloadX(this)` and `createX(this)` first in its `preload()` and `create()`,
+which are added in the file's own brace style if missing. Then every object
+the layout now builds stops being built by the class: the call that made it is
+replaced by the layout's object, so the rest of the line keeps working.
+
+```js
+let sign = this.add.image(512, -400, 'logo');          // before
+let sign = layout.sign;                                 // after
+let cactus2 = layout.cactus2.setFlipX(true);            // chained setters kept
+```
+
+A call whose result is unused is removed. The layout's objects take the names
+the code used (`sign`, `levelImage`), or else their art's. Taking over is only
+sound where one line makes one object, once. The recorder notes the stack that
+put each object on the display list and maps it back through the bundle's
+source map; the class is parsed with rolldown's parser to find the
+`this.add.*(…)` calls straight in `create()`. Anything else stays the code's and
+leaves the layout, so the scene never has two of it: objects made in loops,
+helpers, callbacks or `preload()`, text (whose style a snapshot lacks),
+container contents, instances of the game's own classes, and the animations the
+game registers. A class that is not an ES module, or that cannot be parsed,
+is left alone and listed with the lines to add by hand.
+
+One dialog then lists every class: for an edited class, which objects now come
+from the layout and which stay in code, and why; otherwise the import and two
+calls to add, the objects its own `create()` still builds, and what the import
+could not bring across.
+
+Mosaic's placeholder shapes are not offered in an adopted game
+(`"placeholders": false`). Their PNGs exist only in projects Mosaic scaffolded.
+
+A scene class added to the game later is listed in the Project panel with
+**+ layout** and **import**.
+
+**The recorder** bundles the entry with rolldown and runs it once in a hidden,
+sandboxed window, then snapshots what each scene's `create()` put on the
+display list. The window has a session of its own, and a scheme that serves
+only the harness and the game's web root. Relative loads resolve as they do
+under the game's dev server, and the game's code cannot read anything outside
+those two folders. A load that resolves to a file already in the project is
+referenced where it is. Art loaded from a CDN under `setBaseURL` keeps that
+URL in the layout (`AssetDef.source`), and a copy in `<assets>/imported/` is
+only what the editor draws. Atlases are copied, because the layout loads the
+frame document Mosaic writes beside them. When the import names a file already
+listed under its filename, the asset takes the game's loader key.
+
+The recorder waits for the game's loaders to go quiet rather than for a fixed
+time. Its session lets the page read remote responses: Phaser's examples load
+from a CDN that answers phaser.io and no other origin, `localhost` included.
+The session has no cookies or credentials, so this exposes nothing.
+
 ## The New Project flow
 
 Implements `Mosaic New Project Flow.html` — seven screens from launcher to
@@ -561,6 +673,7 @@ electron/
   ipc.ts         fs, native dialogs, chokidar watcher, git status
   assets.ts      mosaic:// protocol serving files out of the project folder
   devServer.ts   starts and stops the project's own dev server for RUN
+  staticServer.ts  RUN for a folder with no dev script: serves it as it is
 ```
 
 `contextIsolation` is on and `nodeIntegration` is off; the renderer never sees
@@ -784,9 +897,20 @@ compared by length + prefix, so a transaction never walks megabytes of base64.
   `asarUnpack` exists in the build config, and why the bundle is ~400MB.
 - Arcade physics only. Bodies are box or circle; arbitrary polygons are a
   Matter concern and are not modelled.
-- RUN needs a `dev` (or `start`/`serve`) script in `package.json` and installed
-  dependencies. The game pane has no pause, step or live inspector — the loop
+- RUN uses a `dev` (or `start`/`serve`) script when `package.json` has one, and
+  then needs dependencies installed. Without one the folder is served as it is,
+  which runs plain JavaScript only: TypeScript, or imports of npm packages other
+  than Phaser, need the project's own bundler. A game served this way runs on
+  Mosaic's Phaser unless the folder has its own installed — Phaser 4 for a
+  Phaser 3 example. Opened in a browser (↗), CDN art the CDN does not allow
+  for 127.0.0.1 stays missing. The game pane has no pause, step or live inspector — the loop
   belongs to the game. Open it in a browser (↗) for devtools.
+- An import carries position, rotation, scale, origin, texture, frame, text
+  and Arcade bodies. Flip, alpha and tint are not in Mosaic's object model, so
+  a `setFlipX(true)` in `create()` does not come across.
+- A prefab bound to the game's own class (Bank Panic's `Door`) is constructed
+  by the layout, so its children come from the class. The editor cannot run
+  the class, so it shows the instance without them.
 - Starting on the edited scene relies on the game honouring `?scene=`; the
   scaffold's `main.ts` does, and an existing project runs from wherever it
   normally boots until it is taught to.

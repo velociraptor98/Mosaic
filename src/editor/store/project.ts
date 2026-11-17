@@ -29,11 +29,13 @@ import type {
   PrefabDef,
   PrefabNode,
   ProjectData,
+  ProjectPaths,
   ResolvedPrefab,
   SceneData,
   SceneObject,
   TileLayer,
 } from "../../shared/types";
+import { DEFAULT_PATHS, inDir } from "../../shared/types";
 import {
   prefabToScene,
   sceneToPrefabNode,
@@ -545,7 +547,7 @@ export class ProjectStore {
     });
     this.hydrateTilemaps();
     this.activateScene(key);
-    this.setStatus(`Created src/scenes/${key}.scene.json`);
+    this.setStatus(`Created ${inDir(this.project.config.paths.scenes, `${key}.scene.json`)}`);
     return key;
   }
 
@@ -2015,8 +2017,8 @@ export class ProjectStore {
  * classes the exporter writes for them, so the definition and the code it
  * becomes are in one folder.
  */
-export function prefabFilePath(name: string): string {
-  return `src/prefabs/${name}.prefab.json`;
+export function prefabFilePath(name: string, paths: Pick<ProjectPaths, "prefabs"> = DEFAULT_PATHS): string {
+  return inDir(paths.prefabs, `${name}.prefab.json`);
 }
 
 /**

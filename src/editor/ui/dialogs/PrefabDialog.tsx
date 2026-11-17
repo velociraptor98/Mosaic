@@ -105,7 +105,7 @@ export function PrefabDialog({ onClose }: { onClose: () => void }) {
 
       <div className="kv">
         <span>Save to</span>
-        <code>{prefabFilePath(clean || "Untitled")}</code>
+        <code>{prefabFilePath(clean || "Untitled", store.project.config.paths)}</code>
       </div>
 
       {collision && (

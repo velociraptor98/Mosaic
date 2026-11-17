@@ -19,7 +19,7 @@ export function NewSceneDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="New scene"
-      subtitle="Writes src/scenes/<key>.scene.json and registers it in the manifest."
+      subtitle={`Writes ${store.project.config.paths.scenes}/<key>.scene.json and registers it in the manifest.`}
       onClose={onClose}
       footer={
         <>
@@ -43,7 +43,7 @@ export function NewSceneDialog({ onClose }: { onClose: () => void }) {
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <p className="hint">
-        File: <code>src/scenes/{key}.scene.json</code>
+        File: <code>{store.project.config.paths.scenes}/{key}.scene.json</code>
         {collision && " — key collision resolved before write"}
       </p>
 

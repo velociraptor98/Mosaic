@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
 import type { DevServerResult } from "./contract";
+import { serveFolder, stopAllServing, stopServing } from "./staticServer";
 
 /**
  * Runs the project's own dev server, so RUN shows the project's own game.
@@ -47,16 +48,17 @@ export async function startDevServer(root: string): Promise<DevServerResult> {
   try {
     pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
   } catch {
-    return {
-      ok: false,
-      code: "no-package",
-      error: "This folder has no package.json, so there is no dev server to start.",
-      log: "",
-    };
+    // No package.json is not a broken project: a folder of scripts that a
+    // page loads is how Phaser's own examples are written. Serve it as it is.
+    return serveFolder(root);
   }
 
   const script = SCRIPT_NAMES.find((name) => pkg.scripts?.[name]);
   if (!script) {
+    // A package.json that only lists dependencies says nothing about how the
+    // game is served; if the folder runs as it is, run it that way.
+    const asIs = await serveFolder(root);
+    if (asIs.ok) return asIs;
     return {
       ok: false,
       code: "no-script",
@@ -167,6 +169,7 @@ export async function startDevServer(root: string): Promise<DevServerResult> {
 }
 
 export function stopDevServer(root: string): void {
+  stopServing(root);
   const running = servers.get(root);
   if (!running) return;
   servers.delete(root);
@@ -174,6 +177,7 @@ export function stopDevServer(root: string): void {
 }
 
 export function stopAllDevServers(): void {
+  stopAllServing();
   for (const running of servers.values()) kill(running);
   servers.clear();
 }

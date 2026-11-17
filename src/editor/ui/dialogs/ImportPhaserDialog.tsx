@@ -5,12 +5,14 @@ import { isTrusted, trustRoot } from "../../scripts/trust";
 import {
   applyImport,
   findEntries,
+  localArt,
   previewScene,
   surveyProject,
   writeImportedArt,
   type ImportSurvey,
 } from "../../import/importPhaser";
 import type { ImportResult } from "../../import/fromRecording";
+import type { GameScene } from "../../project/adopt";
 
 /**
  * Importing a scene out of a hand-written Phaser project.
@@ -23,7 +25,12 @@ import type { ImportResult } from "../../import/fromRecording";
  */
 type Step = "entry" | "trust" | "scene" | "review";
 
-export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
+/**
+ * With a `target`, the import is for one of the game's own scene classes: the
+ * recording is narrowed to that scene, the result is named after the class,
+ * and it lands beside it as that class's layout.
+ */
+export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; target?: GameScene }) {
   const { store, workspace } = useEditor();
   const root = workspace.location?.root ?? "";
 
@@ -51,7 +58,22 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     try {
-      const result = await surveyProject(root, entry, workspace.scripts);
+      const result = await surveyProject(root, entry, workspace.scripts, localArt(store.project));
+      if (target) {
+        // Narrowed to the one class. Matched by class name first: two scenes
+        // can register the same key, but not be the same class.
+        const mine =
+          result.candidates.find((c) => c.className === target.name) ??
+          result.candidates.find((c) => c.key === (target.key ?? target.name));
+        if (!mine) {
+          setError(
+            `The game ran, but ${target.name} never started, or its create() built nothing. Add an empty layout instead and place things by hand.`,
+          );
+          setStep("entry");
+          return;
+        }
+        result.candidates = [mine];
+      }
       if (!result.candidates.length) {
         setError("The game ran, but none of its scenes had anything on the display list.");
         setStep("entry");
@@ -85,8 +107,15 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
 
   const confirm = async () => {
     if (!preview) return;
+    if (target && store.project.scenes.some((s) => s.key === target.name)) {
+      setError(`${target.name} already has a layout.`);
+      return;
+    }
     setBusy(true);
     let notes: string[] = [];
+    // Decided before the scene goes in: an adopted game's first import is
+    // also what settles where its scene files live.
+    const first = target ? workspace.beginAdopting() : false;
     store.transact("import Phaser scene", () => {
       notes = applyImport(store.project, preview);
     });
@@ -98,7 +127,24 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
     // Mosaic project, so it is saved like any other explicit save — and it has
     // to be: writing the art trips the folder watcher, and a reload would drop
     // an imported scene that only ever existed in memory.
-    await workspace.saveNow();
+    if (target) {
+      // The layout now builds what create() built, so the wiring step lists
+      // what the class has to stop building itself.
+      await workspace.finishAdopting(
+        [target],
+        first,
+        new Map([
+          [
+            target.name,
+            preview.scene.objects.map(
+              (o) => `${o.name}${o.texture ? ` · ${o.texture}` : o.text ? ` · "${o.text.content}"` : ""}`,
+            ),
+          ],
+        ]),
+      );
+    } else {
+      await workspace.saveNow();
+    }
     store.setStatus(
       `Imported ${preview.scene.objects.length} object(s) from ${entry} · ${[...written, ...notes].length} note(s)`,
     );
@@ -110,7 +156,7 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
   if (step === "entry") {
     return (
       <Dialog
-        title="Import a scene from this Phaser project"
+        title={target ? `Start ${target.name}'s layout from what it builds` : "Import a scene from this Phaser project"}
         subtitle="Mosaic runs the game once and imports what its scene actually builds."
         onClose={onClose}
         footer={
@@ -219,6 +265,7 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
       }
     >
       <div className="stack">
+        {error && <div className="banner danger">{error}</div>}
         <div className="section-title">Scene</div>
         <div className="chips">
           {survey?.candidates.map((c) => (
@@ -261,8 +308,9 @@ export function ImportPhaserDialog({ onClose }: { onClose: () => void }) {
             <div className="section-title">
               {preview.scene.objects.length} object(s), {preview.anims.length} animation(s),{" "}
               {preview.assets.length} asset(s)
+              {preview.reused.length > 0 && ` · ${preview.reused.length} already in the project`}
               {preview.files.length > 0 &&
-                ` · ${preview.files.length} art file(s) will be written to assets/imported/`}
+                ` · ${preview.files.length} art file(s) will be written to ${store.project.config.paths.assets}/imported/`}
             </div>
             <div className="file-tree">
               {preview.scene.objects.map((o) => (

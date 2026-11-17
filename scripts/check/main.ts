@@ -7,6 +7,7 @@ import path from "node:path";
 import { Workspace } from "../../src/editor/project/workspace";
 import { ProjectStore } from "../../src/editor/store/project";
 import { platform } from "../../src/editor/platform";
+import { checkAdoption } from "./adopt";
 
 // The one thing on the open path that reaches for the DOM rather than the
 // bridge. There is no document here, on purpose: code that draws placeholder
@@ -82,5 +83,13 @@ for (const folder of folders) {
   console.log(`${problems.length ? "FAIL" : "ok  "}  ${folder}${problems.length ? "" : " — opens without changing a byte"}`);
   for (const problem of problems) console.log(`      ${problem}`);
 }
+// Opening a game Mosaic did not make. The fixtures sit beside this file in
+// the repo; the check runs from the repo root, as npm runs it.
+for (const { name, problems } of await checkAdoption(path.resolve("scripts/check/fixtures"))) {
+  failed ||= problems.length > 0;
+  console.log(`${problems.length ? "FAIL" : "ok  "}  ${name}`);
+  for (const problem of problems) console.log(`      ${problem}`);
+}
+
 // The workspace leaves a debounce or two behind; there is nothing left to wait for.
 process.exit(failed ? 1 : 0);

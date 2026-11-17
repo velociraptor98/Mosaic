@@ -53,7 +53,10 @@ export function buildCommands(ctx: CommandContext): Command[] {
 
   const projectCommands: Command[] = platform.canOpenProjects
     ? [
-        { id: "project.open", title: "Open project folder…", category: "Project", binding: `${mod}O`, run: () => void workspace.pickAndOpen() },
+        { id: "project.open", title: "Open project folder…", category: "Project", binding: `${mod}O`, run: () =>
+            void workspace
+              .pickAndOpen()
+              .catch((err: unknown) => store.setStatus(err instanceof Error ? err.message : String(err))) },
         { id: "project.new", title: "New project folder…", category: "Project", binding: `${mod}⇧N`, run: () => void workspace.createAndOpen() },
         { id: "project.save", title: "Save project to disk", category: "Project", binding: `${mod}S`, run: () => void workspace.saveNow() },
         { id: "project.importPhaser", title: "Import scene from a Phaser project…", category: "Project", run: () => openDialog("importphaser") },

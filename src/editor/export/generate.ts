@@ -6,9 +6,12 @@ import { worldTransform } from "../../shared/transform";
 import {
   animRepeat,
   boundsAreClosed,
+  DEFAULT_PATHS,
+  inDir,
   type AssetDef,
   type BodyDef,
   type ProjectData,
+  type ProjectPaths,
   type SceneData,
   type SceneObject,
   type TileLayer,
@@ -59,16 +62,38 @@ export interface CodegenOptions {
    * break the build over stale editor data.
    */
   declared?: (src: string, className: string) => Set<string> | null;
+  /** Filled with the field each placed object is returned under, by object id. */
+  fieldNames?: Map<string, string>;
 }
 
-export const sceneLayoutPath = (key: string, lang: Language = "ts") =>
-  `src/scenes/${className(key)}.layout.${lang}`;
-export const sceneClassPath = (key: string, lang: Language = "ts") =>
-  `src/scenes/${className(key)}.${lang}`;
-export const prefabLayoutPath = (name: string, lang: Language = "ts") =>
-  `src/prefabs/${className(name)}.layout.${lang}`;
-export const prefabClassPath = (name: string, lang: Language = "ts") =>
-  `src/prefabs/${className(name)}.${lang}`;
+/**
+ * Where a scene's and a prefab's code lives: the project's own folders, which
+ * are Mosaic's defaults unless the project said otherwise. A project Mosaic
+ * adopted keeps its scenes where it always had them, and the layout belongs
+ * beside the class that imports it.
+ */
+type Dirs = Pick<ProjectPaths, "scenes" | "prefabs">;
+
+export const sceneLayoutPath = (key: string, lang: Language = "ts", paths: Dirs = DEFAULT_PATHS) =>
+  inDir(paths.scenes, `${className(key)}.layout.${lang}`);
+export const sceneClassPath = (key: string, lang: Language = "ts", paths: Dirs = DEFAULT_PATHS) =>
+  inDir(paths.scenes, `${className(key)}.${lang}`);
+export const prefabLayoutPath = (name: string, lang: Language = "ts", paths: Dirs = DEFAULT_PATHS) =>
+  inDir(paths.prefabs, `${className(name)}.layout.${lang}`);
+export const prefabClassPath = (name: string, lang: Language = "ts", paths: Dirs = DEFAULT_PATHS) =>
+  inDir(paths.prefabs, `${className(name)}.${lang}`);
+
+/**
+ * The URL a game loads a project file by.
+ *
+ * The same as its path unless the dev server serves a subfolder as `/` — then
+ * that prefix is what the browser never sees. `public/assets/star.png` in a
+ * Vite project is `assets/star.png` to the loader.
+ */
+export function loaderUrl(rel: string, paths: Pick<ProjectPaths, "publicDir"> = DEFAULT_PATHS): string {
+  const dir = paths.publicDir?.replace(/\/+$/, "");
+  return dir && rel.startsWith(`${dir}/`) ? rel.slice(dir.length + 1) : rel;
+}
 
 /** True for a path Mosaic regenerates, so the UI can say so. */
 export function isGeneratedPath(rel: string): boolean {
@@ -87,16 +112,17 @@ export function generateProjectFiles(
   const lang = opts.language ?? "ts";
   const files: GeneratedFile[] = [];
 
+  const paths = project.config.paths;
   for (const scene of project.scenes) {
     files.push({
-      path: sceneLayoutPath(scene.key, lang),
+      path: sceneLayoutPath(scene.key, lang, paths),
       contents: generateSceneLayout(project, scene, opts),
       language: lang,
       owner: "generated",
     });
     files.push({
-      path: sceneClassPath(scene.key, lang),
-      contents: generateSceneClass(scene, lang),
+      path: sceneClassPath(scene.key, lang, paths),
+      contents: generateSceneClass(scene, lang, project.config.phaser),
       language: lang,
       owner: "yours",
     });
@@ -108,13 +134,13 @@ export function generateProjectFiles(
     // thing, and the wrong one would win.
     if (!hasGeneratedClass(project, prefab.name)) continue;
     files.push({
-      path: prefabLayoutPath(prefab.name, lang),
+      path: prefabLayoutPath(prefab.name, lang, paths),
       contents: generatePrefabLayout(project, prefab.name, lang, opts.declared),
       language: lang,
       owner: "generated",
     });
     files.push({
-      path: prefabClassPath(prefab.name, lang),
+      path: prefabClassPath(prefab.name, lang, paths),
       contents: generatePrefabClass(prefab.name, lang),
       language: lang,
       owner: "yours",
@@ -144,10 +170,14 @@ export function generateSceneFiles(
   opts: CodegenOptions = {},
 ): GeneratedFile[] {
   const lang = opts.language ?? "ts";
-  const wanted = new Set<string>([sceneLayoutPath(scene.key, lang), sceneClassPath(scene.key, lang)]);
+  const paths = project.config.paths;
+  const wanted = new Set<string>([
+    sceneLayoutPath(scene.key, lang, paths),
+    sceneClassPath(scene.key, lang, paths),
+  ]);
   for (const name of usedPrefabs(project, scene)) {
-    wanted.add(prefabLayoutPath(name, lang));
-    wanted.add(prefabClassPath(name, lang));
+    wanted.add(prefabLayoutPath(name, lang, paths));
+    wanted.add(prefabClassPath(name, lang, paths));
   }
   const atlases = new Set(
     collectLoaderManifest(project, scene)
@@ -312,7 +342,9 @@ export function generateSceneLayout(
   if (!manifest.length) P.push(`  // No assets referenced by this scene.`);
   for (const entry of manifest) {
     const asset = project.assets.find((a) => a.key === entry.key);
-    const path = asset?.path ?? `assets/${entry.key}.png`;
+    // Art the game loads from elsewhere — a CDN, under setBaseURL — is loaded
+    // from there here too; the copy at `path` is only what the editor draws.
+    const path = asset?.source ?? loaderUrl(asset?.path ?? `assets/${entry.key}.png`, project.config.paths);
     if (entry.type === "spritesheet") {
       const fc = entry.frameConfig!;
       P.push(
@@ -335,15 +367,20 @@ export function generateSceneLayout(
   if (scene.settings.backgroundColor) {
     L.push(`  scene.cameras.main.setBackgroundColor(${q(scene.settings.backgroundColor)});`);
   }
-  L.push(`  scene.physics.world.setBounds(0, 0, ${scene.settings.width}, ${scene.settings.height});`);
-  // Only when a side is actually open: every closed rectangle is Arcade's own
-  // default, and emitting it would be a line that says nothing.
-  if (!boundsAreClosed(scene.settings.bounds)) {
-    const b = scene.settings.bounds!;
-    L.push(`  scene.physics.world.setBoundsCollision(${b.left}, ${b.right}, ${b.top}, ${b.bottom});`);
-  }
-  if (scene.settings.gravityY) {
-    L.push(`  scene.physics.world.gravity.y = ${scene.settings.gravityY};`);
+  // A game that never turned Arcade on has no `scene.physics`, and a layout
+  // that reaches for it throws on its first line. Phaser's own template is
+  // such a game. Mosaic's projects are Arcade unless they said otherwise.
+  if (project.config.physics === "arcade") {
+    L.push(`  scene.physics.world.setBounds(0, 0, ${scene.settings.width}, ${scene.settings.height});`);
+    // Only when a side is actually open: every closed rectangle is Arcade's own
+    // default, and emitting it would be a line that says nothing.
+    if (!boundsAreClosed(scene.settings.bounds)) {
+      const b = scene.settings.bounds!;
+      L.push(`  scene.physics.world.setBoundsCollision(${b.left}, ${b.right}, ${b.top}, ${b.bottom});`);
+    }
+    if (scene.settings.gravityY) {
+      L.push(`  scene.physics.world.gravity.y = ${scene.settings.gravityY};`);
+    }
   }
   L.push(``);
 
@@ -555,12 +592,12 @@ export function generateSceneLayout(
 
   // ---- assemble ----
   const out: string[] = [];
-  out.push(`// GENERATED by Mosaic from src/scenes/${scene.key}.scene.json — do not edit.`);
+  out.push(`// GENERATED by Mosaic from ${inDir(project.config.paths.scenes, `${scene.key}.scene.json`)} — do not edit.`);
   out.push(`//`);
   out.push(`// Every save in the editor rewrites this file. Your code lives in`);
   out.push(`// ./${cls}.${lang}, which Mosaic wrote once and will not touch again.`);
-  out.push(`import Phaser from "phaser";`);
-  const layoutFile = sceneLayoutPath(scene.key, lang);
+  if (project.config.phaser !== "global") out.push(`import Phaser from "phaser";`);
+  const layoutFile = sceneLayoutPath(scene.key, lang, project.config.paths);
   for (const name of [...usedPrefabClasses].sort()) {
     const source = resolvePrefab(project, name)?.source;
     if (source) {
@@ -574,7 +611,8 @@ export function generateSceneLayout(
       );
       continue;
     }
-    out.push(`import { ${className(name)} } from "../prefabs/${className(name)}${ts ? "" : ".js"}";`);
+    const spec = relativeModule(layoutFile, prefabClassPath(name, lang, project.config.paths));
+    out.push(`import { ${className(name)} } from "${spec}";`);
   }
   out.push(``);
 
@@ -616,6 +654,8 @@ export function generateSceneLayout(
   out.push(`}`);
 
   out.push(``);
+  // Which field each object is under, for a caller that edits code to use it.
+  if (opts.fieldNames) for (const [id, v] of varsById) opts.fieldNames.set(id, v);
   return out.join("\n");
 }
 
@@ -712,7 +752,7 @@ function emitClassProps(
 ): void {
   const where = prefab.source
     ? { src: prefab.source.module, cls: prefab.source.export === "default" ? prefab.name : prefab.source.export }
-    : { src: prefabClassPath(prefab.name, opts.language ?? "ts"), cls: className(prefab.name) };
+    : { src: prefabClassPath(prefab.name, opts.language ?? "ts", project.config.paths), cls: className(prefab.name) };
   const declared = opts.declared?.(where.src, where.cls) ?? null;
   let props = obj.props ?? {};
   if (!prefab.source) {
@@ -953,14 +993,17 @@ function bodyCalls(target: string, b: BodyDef, bb: BodyDef | null, indent: strin
  * Written once. It is deliberately small: a scene that only shows what the
  * editor placed needs three lines, and everything after that is the game.
  */
-export function generateSceneClass(scene: SceneData, lang: Language = "ts"): string {
+export function generateSceneClass(
+  scene: SceneData,
+  lang: Language = "ts",
+  phaser: "module" | "global" = "module",
+): string {
   const ts = lang === "ts";
   const cls = className(scene.key);
   const imports = ts
     ? `import { create${cls}, preload${cls}, type ${cls}Layout } from "./${cls}.layout";`
     : `import { create${cls}, preload${cls} } from "./${cls}.layout.js";`;
-  return `import Phaser from "phaser";
-${imports}
+  return `${phaser === "global" ? "" : `import Phaser from "phaser";\n`}${imports}
 
 /**
  * ${scene.name || scene.key} — this file is yours.
@@ -1018,11 +1061,11 @@ export function generatePrefabLayout(
   const physical = !!node.body;
 
   const L: string[] = [];
-  L.push(`// GENERATED by Mosaic from src/prefabs/${name}.prefab.json — do not edit.`);
+  L.push(`// GENERATED by Mosaic from ${inDir(project.config.paths.prefabs, `${name}.prefab.json`)} — do not edit.`);
   L.push(`//`);
   L.push(`// Every save in the editor rewrites this file. Your code lives in`);
   L.push(`// ./${cls}.${lang}, which extends the class below.`);
-  L.push(`import Phaser from "phaser";`);
+  if (project.config.phaser !== "global") L.push(`import Phaser from "phaser";`);
 
   if (parent && parentName && !parent.source) {
     const pcls = className(parentName);
@@ -1054,7 +1097,7 @@ export function generatePrefabLayout(
       L.push(node.playOnSpawn ? `    this.play(${q(node.playOnSpawn)});` : `    this.stop();`);
     }
     L.push(`  }`);
-    emitVariantFields(L, pcls, node.props ?? {}, pnode.props ?? {}, ts, declared?.(prefabClassPath(parentName, lang), pcls) ?? null);
+    emitVariantFields(L, pcls, node.props ?? {}, pnode.props ?? {}, ts, declared?.(prefabClassPath(parentName, lang, project.config.paths), pcls) ?? null);
     if (bodyChanged) {
       L.push(``);
       emitApplyBody(L, node.body!, ts, !!pnode.body);

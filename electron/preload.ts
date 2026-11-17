@@ -29,6 +29,7 @@ const api: MosaicApi = {
   openInEditor: (root, rel, line) => ipcRenderer.invoke(IPC.openInEditor, root, rel, line),
   findGameEntries: (root) => ipcRenderer.invoke(IPC.findGameEntries, root),
   recordScene: (root, entry) => ipcRenderer.invoke(IPC.recordScene, root, entry),
+  analyzeClass: (root, rel, cls) => ipcRenderer.invoke(IPC.analyzeClass, root, rel, cls),
   devServerStart: (root) => ipcRenderer.invoke(IPC.devServerStart, root),
   devServerStop: (root) => ipcRenderer.invoke(IPC.devServerStop, root),
   packageGame: (request) => ipcRenderer.invoke(IPC.packageGame, request),

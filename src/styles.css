@@ -624,6 +624,13 @@ kbd {
   border-left: 2px solid transparent;
 }
 
+/* A class in the game with no layout: listed, not openable. */
+.tree-row.static {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
 .tree-row:hover {
   background: var(--wash-3);
 }
@@ -1899,6 +1906,76 @@ button.block {
   font-size: 10.5px;
 }
 
+/* Adopting a game: the launcher's frame, with the game's scene classes where
+   the recents would be. A card is not itself a button here — it holds two. */
+.recent-open.static:hover {
+  background: none;
+}
+
+.recent-card.adopt-scene:first-of-type {
+  border-color: var(--color-divider);
+}
+
+.adopt-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.kv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 420px;
+}
+
+.kv-list .kv {
+  justify-content: flex-start;
+}
+
+.kv-list .kv > span:first-child {
+  width: 64px;
+  flex: none;
+}
+
+.launcher-window.adopt .code-preview {
+  max-width: 420px;
+  margin: 0;
+}
+
+.wire-snippet {
+  max-height: none;
+  margin: 0;
+}
+
+/* One block per scene class when a whole game was imported at once. */
+.wire-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-divider);
+}
+
+.wire-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.wire-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-1);
+}
+
+.wire-dupes summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+
 /* ------------------------------------------------------------- the wizard */
 
 .wizard-window {
@@ -3160,4 +3237,27 @@ button.link {
 /* With the game beside it, the canvas keeps the other half. */
 .canvas-frame:has(.game-pane:not(.wide)) .phaser-host {
   width: 50%;
+}
+
+/* The warning before Mosaic edits a game's own scene classes. */
+.code-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.code-warning .warning-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wire-applied {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* The adopt column scrolls rather than squashing what it shows. */
+.adopt .launcher-main > * {
+  flex-shrink: 0;
 }

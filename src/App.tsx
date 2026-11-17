@@ -7,6 +7,7 @@ import { platform } from "./editor/platform";
 import { Workspace } from "./editor/project/workspace";
 import { ProjectStore } from "./editor/store/project";
 import { isTrusted, revokeRoot, trustRoot } from "./editor/scripts/trust";
+import { AdoptScreen } from "./editor/ui/AdoptScreen";
 import { BottomDock } from "./editor/ui/BottomDock";
 import { EditorContext, useStoreVersion, useWorkspace } from "./editor/ui/context";
 import { FirstRunChecklist } from "./editor/ui/FirstRunChecklist";
@@ -29,6 +30,7 @@ import { GridDialog } from "./editor/ui/dialogs/GridDialog";
 import { ImportDialog } from "./editor/ui/dialogs/ImportDialog";
 import { ImportPhaserDialog } from "./editor/ui/dialogs/ImportPhaserDialog";
 import { NewSceneDialog } from "./editor/ui/dialogs/NewSceneDialog";
+import { WireUpDialog } from "./editor/ui/dialogs/WireUpDialog";
 import { PrefabDialog } from "./editor/ui/dialogs/PrefabDialog";
 import { PropagateDialog } from "./editor/ui/dialogs/PropagateDialog";
 
@@ -108,6 +110,17 @@ export default function App() {
     );
   }
 
+  // A Phaser game opened as itself has no scene until one of its own is
+  // picked. There is nothing for the canvas to show, so it is not shown.
+  if (workspace.isOpen && store.project.scenes.length === 0) {
+    return (
+      <EditorContext.Provider value={ctx}>
+        <DragStrip />
+        <AdoptScreen />
+      </EditorContext.Provider>
+    );
+  }
+
   return (
     <EditorContext.Provider value={ctx}>
       <div className="app">
@@ -158,6 +171,7 @@ export default function App() {
         {dialog === "package" && <PackageDialog onClose={() => setDialog(null)} />}
         {dialog === "grid" && <GridDialog onClose={() => setDialog(null)} />}
         {store.ui.prefabPlan && <PropagateDialog onClose={() => setDialog(null)} />}
+        {workspace.wiring && <WireUpDialog />}
       </div>
     </EditorContext.Provider>
   );

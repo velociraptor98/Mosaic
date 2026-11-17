@@ -7,6 +7,8 @@ import { prefabUsage } from "../../shared/propagate";
 import { MANIFEST_PATH, prefabPath, scenePath } from "../project/serialize";
 import { sourceFiles } from "../scripts/parse";
 import { useEditor, useScripts, useStoreVersion, useWorkspace } from "./context";
+import type { GameScene } from "../project/adopt";
+import { ImportPhaserDialog } from "./dialogs/ImportPhaserDialog";
 
 const TABS: { id: LeftTab; label: string }[] = [
   { id: "project", label: "Project" },
@@ -62,6 +64,8 @@ function ProjectTree() {
   useScripts(workspace.scripts);
   const git = workspace.git;
   const codeFiles = sourceFiles(workspace.scripts.index);
+  const unlaid = workspace.isOpen ? workspace.unlaidScenes : [];
+  const [importing, setImporting] = useState<GameScene | null>(null);
 
   return (
     <div className="tree">
@@ -103,7 +107,9 @@ function ProjectTree() {
         </button>
       )}
 
-      <div className="tree-group">src/scenes</div>
+      <div className="tree-group">
+        {store.project.config.paths.scenes === "." ? "scenes" : store.project.config.paths.scenes}
+      </div>
       {store.project.scenes.map((scene) => (
         <div key={scene.key} className="tree-row-wrap">
           <button
@@ -114,7 +120,7 @@ function ProjectTree() {
             <span className="glyph">◇</span>
             {scene.key}.scene.json
             {store.isDirty(scene.key) && <span className="dot" title="unsaved" />}
-            <GitBadge code={git[scenePath(scene.key)]} />
+            <GitBadge code={git[scenePath(scene.key, store.project.config.paths)]} />
           </button>
           {store.project.scenes.length > 1 && (
             <button
@@ -128,13 +134,47 @@ function ProjectTree() {
         </div>
       ))}
 
+      {/* The game's own scenes that have no layout: the same choice the
+          adopt screen offered, still on offer after the first one. */}
+      {workspace.isOpen && unlaid.length > 0 && (
+        <>
+          <div className="tree-group">In your code, no layout yet</div>
+          {unlaid.map((scene) => (
+            <div key={`${scene.src}::${scene.name}`} className="tree-row-wrap">
+              <span className="tree-row static" title={`${scene.src}:${scene.line}`}>
+                <span className="glyph">◌</span>
+                {scene.name}
+                <span className="meta">{scene.src.split("/").pop()}</span>
+              </span>
+              <button
+                className="mini"
+                title="Write an empty layout beside this class"
+                onClick={() => void workspace.layOut(scene)}
+              >
+                + layout
+              </button>
+              {platform.canImportPhaser && (
+                <button
+                  className="mini"
+                  title="Run the game once and start the layout from what create() builds"
+                  onClick={() => setImporting(scene)}
+                >
+                  import
+                </button>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+      {importing && <ImportPhaserDialog target={importing} onClose={() => setImporting(null)} />}
+
       {platform.canGit && (
         <div className="tree-group">
           manifest <GitBadge code={git[MANIFEST_PATH]} />
         </div>
       )}
 
-      <div className="tree-group">src/prefabs</div>
+      <div className="tree-group">{store.project.config.paths.prefabs}</div>
       {store.project.prefabs.length === 0 && <div className="empty">No prefabs yet.</div>}
       {/* Bases first, each with the variants that resolve from it indented
           underneath: the file list is also the inheritance. */}
@@ -160,7 +200,7 @@ function ProjectTree() {
               >
                 <span className="glyph">{prefab.base ? "◈" : "◆"}</span>
                 {prefab.name}.prefab.json
-                <GitBadge code={git[prefabPath(prefab.name)]} />
+                <GitBadge code={git[prefabPath(prefab.name, store.project.config.paths)]} />
                 <span className="meta">
                   {prefab.base ? `→ ${prefab.base}` : `${prefab.exposed.length} exposed`}
                   {count > 0 ? ` · ${count}×` : ""}

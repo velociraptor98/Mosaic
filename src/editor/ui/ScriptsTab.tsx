@@ -94,7 +94,7 @@ function ClassProps({ obj }: { obj: SceneObject }) {
         src: prefab.source.module,
         cls: prefab.source.export === "default" ? prefab.name : prefab.source.export,
       }
-    : { src: prefabClassPath(prefab.name, workspace.language), cls: className(prefab.name) };
+    : { src: prefabClassPath(prefab.name, workspace.language, store.project.config.paths), cls: className(prefab.name) };
   const cls =
     registry.index.byKey.get(`${where.src}::${where.cls}`) ??
     registry.index.classes.find((c) => c.name === where.cls && !isGeneratedPath(c.src));

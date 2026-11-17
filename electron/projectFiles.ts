@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type { AssetFileInfo, ProjectFiles, ScriptFileIpc } from "./contract";
+import type { AssetFileInfo, ExistingProject, ProjectFiles, ScriptFileIpc } from "./contract";
+import { inspectExisting } from "./existingProject";
 
 /**
  * Reading a project folder off disk: the half of the main process that needs
@@ -23,6 +24,8 @@ export interface Paths {
   scenes: string;
   prefabs: string;
   assets: string;
+  /** The folder the game's server serves as its root; "" for the project root. */
+  publicDir?: string;
 }
 
 /**
@@ -50,6 +53,7 @@ export async function projectPaths(root: string): Promise<Paths> {
     scenes: clean(parsed.paths?.scenes, DEFAULT_SCENE_DIR),
     prefabs: clean(parsed.paths?.prefabs, DEFAULT_PREFAB_DIR),
     assets: clean(parsed.paths?.assets, ASSET_DIR),
+    ...(parsed.paths?.publicDir ? { publicDir: clean(parsed.paths.publicDir, "") } : {}),
   };
 }
 
@@ -149,15 +153,29 @@ export async function readProjectFiles(root: string): Promise<ProjectFiles | nul
   } catch {
     return null;
   }
-  const paths = await projectPaths(root);
+  let paths = await projectPaths(root);
+  const manifest = await readIfExists(path.join(root, MANIFEST));
+  const config = await readIfExists(path.join(root, CONFIG));
+  const occupied = await isOccupied(root, paths);
+
+  // A folder Mosaic has never written to is read where IT keeps things, not
+  // where Mosaic would have: otherwise a Vite project's public/assets is
+  // invisible and the asset dock opens empty over a game full of art.
+  let existing: ExistingProject | null = null;
+  if (!manifest && !config && occupied) {
+    existing = await inspectExisting(root);
+    if (existing) paths = { ...paths, ...existing.paths };
+  }
+
   return {
     root,
-    manifest: await readIfExists(path.join(root, MANIFEST)),
-    config: await readIfExists(path.join(root, CONFIG)),
+    manifest,
+    config,
     scenes: await readDirFiles(root, paths.scenes, /\.scene\.json$/),
     prefabs: await readDirFiles(root, paths.prefabs, /\.prefab\.json$/),
     assets: await listAssets(root, paths.assets),
-    occupied: await isOccupied(root, paths),
+    occupied,
+    ...(existing ? { existing } : {}),
   };
 }
 

@@ -47,7 +47,7 @@ function DefinitionView() {
       <h3 className="panel-title">{doc.name}</h3>
       <div className="kv">
         <span>File</span>
-        <code>{prefabFilePath(doc.name)}</code>
+        <code>{prefabFilePath(doc.name, store.project.config.paths)}</code>
       </div>
       <div className="kv">
         <span>Instances</span>
@@ -418,7 +418,7 @@ function InstanceView() {
       <h3 className="panel-title">{obj.name}</h3>
       <div className="kv">
         <span>Definition</span>
-        <code>{prefabFilePath(prefab.name)}</code>
+        <code>{prefabFilePath(prefab.name, store.project.config.paths)}</code>
       </div>
       {prefab.chain.length > 1 && (
         <div className="kv">

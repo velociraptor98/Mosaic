@@ -5,7 +5,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 import chokidar, { type FSWatcher } from "chokidar";
 import { packageGame } from "./packageGame";
-import { findGameEntries, recordScene } from "./recordScene";
+import { findGameEntries } from "./existingProject";
+import { recordScene } from "./recordScene";
+import { analyzeClass } from "./classShape";
 import { startDevServer, stopAllDevServers, stopDevServer } from "./devServer";
 import { spawn } from "node:child_process";
 import os from "node:os";
@@ -28,6 +30,7 @@ import {
   type WriteRequest,
   type WriteResultIpc,
   type SceneRecording,
+  type ClassShape,
   type PackageRequest,
   type PackageResult,
   type DevServerResult,
@@ -301,6 +304,14 @@ export function registerIpc(): void {
       // other one before anything is compiled or run.
       resolveInside(root, entry);
       return recordScene(root, entry);
+    },
+  );
+
+  ipcMain.handle(
+    IPC.analyzeClass,
+    async (_e, root: string, rel: string, cls: string): Promise<ClassShape> => {
+      resolveInside(root, rel);
+      return analyzeClass(path.resolve(root), rel, cls);
     },
   );
 
