@@ -49,14 +49,6 @@ export function PrefabDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Create prefab from selection"
-      subtitle={
-        check.ok
-          ? `${check.root!.name} becomes the definition, and stays in this scene as its first instance.` +
-            (check.siblings.length
-              ? ` ${check.siblings.length} other selected object(s) are relinked as instances of it.`
-              : "")
-          : undefined
-      }
       onClose={onClose}
       footer={
         <>
@@ -156,13 +148,6 @@ export function PrefabDialog({ onClose }: { onClose: () => void }) {
           nothing is silently flattened to {check.root!.name}'s values.
         </div>
       )}
-
-      <p className="hint">
-        Per-instance <code>data</code> keys start exposed, because those are per-copy by nature.
-        Everything else stays locked to the definition until you publish it in the{" "}
-        <strong>Expose</strong> list in prefab edit mode — that list is the contract, and it is
-        what keeps fifty of these from drifting into fifty different objects.
-      </p>
     </Dialog>
   );
 }

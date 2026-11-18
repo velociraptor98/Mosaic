@@ -198,7 +198,6 @@ function TemplateStep({
     <div className="wizard-pane">
       <header>
         <h2>Start from a template</h2>
-        <p>Every template is a real, runnable scene — not an empty stub with TODOs.</p>
       </header>
 
       <div className="tpl-grid">
@@ -293,7 +292,6 @@ function DetailsStep({
       <div className="wizard-pane">
         <header>
           <h2>Project details</h2>
-          <p>The folder is created on confirm, not now — you can still back out.</p>
         </header>
 
         <label className="field">
@@ -382,11 +380,6 @@ function DetailsStep({
             <span>{c.label}</span>
           </div>
         ))}
-        <div className="wizard-spacer" />
-        <p className="hint">
-          A name that isn’t a valid npm package name is accepted for the project but slugged for{" "}
-          <code>package.json</code>.
-        </p>
       </aside>
     </div>
   );
@@ -413,7 +406,6 @@ function DefaultsStep({
       <div className="wizard-pane">
         <header>
           <h2>Scene defaults</h2>
-          <p>Written into the project config; every new scene inherits them.</p>
         </header>
 
         <div className="grid3">
@@ -482,8 +474,7 @@ function DefaultsStep({
         </div>
         {config.physics === "matter" && (
           <div className="banner">
-            Matter chosen — Mosaic authors Arcade bodies only, so bodies and collisions in a Matter
-            project are written in your code.
+            Mosaic edits Arcade bodies only.
           </div>
         )}
 
@@ -552,7 +543,6 @@ function ReviewStep({
       <div className="wizard-pane">
         <header>
           <h2>Review what gets written</h2>
-          <p>Nothing is created until you confirm. This is the whole diff.</p>
         </header>
 
         <div className="file-tree">
@@ -583,10 +573,6 @@ function ReviewStep({
       <aside className="wizard-rail">
         <div className="section-title">Generated scene — Level_01</div>
         <pre className="code-preview">{scenePreview.split("\n").slice(0, 34).join("\n")}</pre>
-        <p className="hint">
-          Regions between <code>{"// <keep>"}</code> markers are never touched by a later
-          re-export, so hand-written logic is safe from the generator.
-        </p>
       </aside>
     </div>
   );
@@ -616,10 +602,6 @@ function CreatingStep({
           </div>
         ))}
       </div>
-      <p className="hint">
-        Dependency install runs in the background — the editor opens as soon as the scene file
-        exists.
-      </p>
     </div>
   );
 }

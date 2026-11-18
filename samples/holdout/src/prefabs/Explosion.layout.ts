@@ -6,9 +6,8 @@ import Phaser from "phaser";
 
 export class ExplosionBase extends Phaser.GameObjects.Sprite {
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "tanks", "smokeYellow0.png");
+    super(scene, x, y, "effects", "blast_0");
     scene.add.existing(this);
-    this.setScale(1.6, 1.6);
     this.play("explode");
     const sound = this.spawnSound();
     if (sound) scene.sound.play(sound);

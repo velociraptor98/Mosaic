@@ -6,7 +6,7 @@
   "tile": 64,
   "scale": "FIT",
   "physics": "arcade",
-  "pixelArt": false,
+  "pixelArt": true,
   "language": "ts",
   "paths": {
     "src": "src",

@@ -63,11 +63,8 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
 
   if (!platform.canPackage) {
     return (
-      <Dialog title="Export game" subtitle="Not available in the browser build." onClose={onClose}>
-        <p className="muted">
-          Packaging writes a folder to disk and compiles the project's own source, so it needs the
-          desktop app.
-        </p>
+      <Dialog title="Export game" onClose={onClose}>
+        <p className="muted">Only available in the desktop app.</p>
       </Dialog>
     );
   }
@@ -75,7 +72,6 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Export game"
-      subtitle="One folder that runs on its own — no install, no bundler, no terminal."
       onClose={onClose}
       wide
       footer={
@@ -145,8 +141,7 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
             {unsaved && (
               <div className="check-row warn">
                 <span className="mark">!</span>
-                This scene has edits that are not on disk yet. The build compiles the FILES, so save
-                first (⌘S) or the build will be one edit behind.
+                Unsaved edits won't be in the build. Save first (⌘S).
               </div>
             )}
             {issues.map((issue, i) => (
@@ -160,22 +155,10 @@ export function PackageDialog({ onClose }: { onClose: () => void }) {
 
         {!result && (
           <>
-            <div className="section-title">What gets written</div>
-            <p className="muted">
-              <code>index.html</code>, one <code>game.js</code> with Phaser linked into it, and a
-              copy of <code>{assetsDir}/</code>. The page loads a plain script rather than a module,
-              so the folder opens from a file path as readily as from a web host.
-            </p>
-            <p className="muted">
-              Mosaic uses the project's own Phaser when it has one, and its own copy when the
-              project has never had <code>npm install</code> run in it — which is what lets this
-              work on a folder that has only ever been opened in the editor.
-            </p>
             <div className="check-row warn">
               <span className="mark">!</span>
               <span>
-                <code>{outDir}</code> is rebuilt from scratch each time. Mosaic refuses to clear a
-                folder it did not write, so point this somewhere of its own.
+                <code>{outDir}</code> is replaced on each export.
               </span>
             </div>
           </>

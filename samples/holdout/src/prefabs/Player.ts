@@ -6,15 +6,15 @@ export type Weapon = "pistol" | "machinegun" | "silencer";
 
 /** Each gun: the frame that holds it, ms between shots, clip size, spread in radians, how loud. */
 const GUNS: Record<Weapon, { frame: string; rate: number; clip: number; spread: number; volume: number }> = {
-  pistol: { frame: "survivor1_gun.png", rate: 280, clip: 12, spread: 0.03, volume: 0.6 },
-  machinegun: { frame: "survivor1_machine.png", rate: 95, clip: 40, spread: 0.1, volume: 0.45 },
-  silencer: { frame: "survivor1_silencer.png", rate: 190, clip: 20, spread: 0.015, volume: 0.12 },
+  pistol: { frame: "survivor_pistol", rate: 280, clip: 12, spread: 0.03, volume: 0.6 },
+  machinegun: { frame: "survivor_machinegun", rate: 95, clip: 40, spread: 0.1, volume: 0.45 },
+  silencer: { frame: "survivor_silencer", rate: 190, clip: 20, spread: 0.015, volume: 0.12 },
 };
 
 type Keys = Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
 /** Where the barrel ends, from the sprite's origin, facing right: forward and to the side. */
-const MUZZLE = { forward: 36, side: 9 };
+const MUZZLE = { forward: 38, side: 8 };
 
 /**
  * Player — this file is yours.

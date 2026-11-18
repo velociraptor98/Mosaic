@@ -70,7 +70,7 @@ function ProjectTree() {
   return (
     <div className="tree">
       <div className="tree-heading">
-        <span>{store.project.name}</span>
+        <span title={workspace.location?.root}>{store.project.name}</span>
         <span>
           {workspace.isOpen && (
             <button className="mini" title="Reveal in file manager" onClick={() => workspace.reveal()}>
@@ -83,11 +83,6 @@ function ProjectTree() {
         </span>
       </div>
 
-      {workspace.isOpen && (
-        <div className="project-root" title={workspace.location!.root}>
-          {workspace.location!.root}
-        </div>
-      )}
 
       {workspace.issues.length > 0 && (
         <div className="banner warn">
@@ -227,7 +222,7 @@ function ProjectTree() {
           <div className="tree-group">code</div>
           {workspace.scripts.loading && <div className="empty">Indexing src/…</div>}
           {!workspace.scripts.loading && codeFiles.length === 0 && (
-            <div className="empty">No source files under src/ yet.</div>
+            <div className="empty">No source files.</div>
           )}
           {codeFiles.map((file) => {
             const first = file.classes[0];
@@ -388,11 +383,6 @@ function Outliner() {
             )}
           </div>
         ))}
-      <div className="hint">
-        {doc
-          ? "◆ prefab root · ⬡ nested instance (sealed) · everything here is part of the definition"
-          : "◆ instance · ◈ variant instance · drag a row onto another to reparent — world position is preserved, cycles are rejected."}
-      </div>
     </div>
   );
 }
@@ -501,10 +491,6 @@ function Layers() {
             </div>
           );
         })}
-      <div className="hint">
-        Layer order is render order, and becomes the Phaser depth on export. Visibility and lock
-        are scene data, not editor preferences.
-      </div>
     </div>
   );
 }

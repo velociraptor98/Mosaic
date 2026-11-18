@@ -9,26 +9,26 @@
     "rotation": 0,
     "scaleX": 1,
     "scaleY": 1,
-    "originX": 0.3333333333333333,
+    "originX": 0.325,
     "originY": 0.5,
     "visible": true,
     "texture": "characters",
-    "frame": "survivor1_gun.png",
+    "frame": "survivor_pistol",
     "group": "player",
     "body": {
       "shape": "circle",
       "width": 32,
       "height": 32,
-      "radius": 15,
-      "offsetX": 2,
-      "offsetY": 6.5,
+      "radius": 16,
+      "offsetX": 10,
+      "offsetY": 12,
       "immovable": false,
       "allowGravity": false,
       "bounce": 0,
       "collideWorldBounds": true
     },
     "data": {},
-    "lid": "nmwjcrwoo9",
+    "lid": "nmwkujbf39",
     "children": []
   }
 }

@@ -8,10 +8,9 @@ export class BarrelBase extends Phaser.Physics.Arcade.Sprite {
   declare body: Phaser.Physics.Arcade.Body;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "tiles", "315");
+    super(scene, x, y, "tiles", "18");
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.setScale(0.75, 0.75);
     this.applyBody();
   }
 

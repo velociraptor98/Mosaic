@@ -88,7 +88,6 @@ function DefinitionView() {
  */
 function ContentsSection() {
   const { store } = useEditor();
-  const doc = store.prefabDoc!;
   const resolved = store.prefabDocResolved();
   const stage = store.prefabStage();
   if (!resolved) return null;
@@ -131,17 +130,9 @@ function ContentsSection() {
               </span>
             )}
           </div>
-          <div className="hint">
-            Origin and body are drawn on the stage because they are the two things an instance
-            cannot fix later. They are never overridable per instance.
-          </div>
         </>
       )}
 
-      <div className="hint">
-        Drop an asset on the stage to add a part — on the isolated stage everything you place
-        belongs to {doc.name}, so nothing can land in a level by accident.
-      </div>
     </>
   );
 }
@@ -227,18 +218,6 @@ function ExposeSection({ catalog }: { catalog: ExposureEntry[] }) {
           </div>
         </div>
       )}
-
-      {catalog.some((e) => e.orphaned) && (
-        <div className="hint">
-          A greyed row is exposed but no longer exists in the definition. It keeps its place until
-          you resolve it, rather than shrinking the contract behind your back.
-        </div>
-      )}
-
-      <div className="hint">
-        Exposed fields become the WHOLE instance inspector. Keep the list short, and named for the
-        people who will place these in levels.
-      </div>
     </>
   );
 }
@@ -262,10 +241,7 @@ function VariantsSection() {
         <>
           <div className="section-title">What {doc.name} claims for itself</div>
           {Object.entries(def?.diff ?? {}).length === 0 ? (
-            <div className="hint">
-              Nothing yet — {doc.name} is {doc.base} exactly. Change a field on the stage and it
-              becomes the one thing this variant says.
-            </div>
+            <div className="hint">No overrides.</div>
           ) : (
             Object.entries(def?.diff ?? {}).map(([path, value]) => (
               <div key={path} className="override-row">
@@ -284,10 +260,6 @@ function VariantsSection() {
               </div>
             ))
           )}
-          <div className="hint">
-            Everything not listed is inherited. Fixing the walk animation on {doc.base} fixes it
-            here too.
-          </div>
         </>
       )}
 
@@ -348,9 +320,7 @@ function InstanceView() {
   if (!selection.length) {
     return (
       <div className="stack">
-        <div className="empty">
-          Select an object, then promote it. A prefab starts as something already on screen.
-        </div>
+        <div className="empty">Nothing selected.</div>
         <div className="section-title">Prefabs in this project</div>
         {store.project.prefabs.length === 0 && <div className="hint">None yet.</div>}
         {store.project.prefabs.map((prefab) => (
@@ -397,10 +367,7 @@ function InstanceView() {
   if (!prefab) {
     return (
       <div className="stack">
-        <div className="empty">
-          {selection.length} plain object(s) selected. Promoting one writes a definition and
-          rewrites the object in place as its first instance.
-        </div>
+        <div className="empty">{selection.length} plain object(s) selected.</div>
         <button className="primary" onClick={() => openDialog("prefab")}>
           Create prefab from selection…
         </button>
@@ -436,10 +403,6 @@ function InstanceView() {
       <button className="ghost" onClick={() => store.openPrefab(prefab.name)}>
         ◆ Edit prefab definition…
       </button>
-      <div className="hint">
-        Editing the definition opens it alone on an empty stage. Every instance in the project is
-        downstream of it — the save panel says exactly which, before anything is written.
-      </div>
 
       <div className="section-title">
         Exposed fields
@@ -447,9 +410,7 @@ function InstanceView() {
       </div>
       <div className="chips">
         {prefab.exposed.length === 0 && (
-          <span className="empty">
-            Nothing is overridable. Everything about this object comes from {prefab.name}.
-          </span>
+          <span className="empty">Nothing is overridable.</span>
         )}
         {prefab.exposed.map((path) => (
           <span key={path} className={`chip ${isOverridden(obj, path) ? "on" : ""}`}>
@@ -459,12 +420,7 @@ function InstanceView() {
       </div>
 
       <div className="section-title">Overrides on {obj.name}</div>
-      {overrides.length === 0 && (
-        <div className="hint">
-          Every field is linked to the definition. Editing an exposed field here records an
-          override; untouched fields keep updating with the prefab.
-        </div>
-      )}
+      {overrides.length === 0 && <div className="hint">No overrides.</div>}
       {overrides.map(([path, value]) => (
         <div key={path} className="override-row">
           <code>{path}</code>
@@ -487,10 +443,6 @@ function InstanceView() {
         <button className="ghost" onClick={() => store.unpackInstance(obj.id)}>
           Unpack instance
         </button>
-      </div>
-      <div className="hint">
-        Applying pushes this instance's overrides into the definition; every other instance picks
-        them up except where it overrides the same field.
       </div>
     </div>
   );

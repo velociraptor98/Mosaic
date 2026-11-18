@@ -306,7 +306,7 @@ export class Workspace {
     platform.setWindowTitle(`${project.name} — Mosaic`);
     this.store.setStatus(
       adopt
-        ? `Opened ${location.name} — nothing written; pick a scene to lay out`
+        ? `Opened ${location.name}`
         : issues.length
           ? `Opened ${location.name} with ${issues.length} issue(s)`
           : `Opened ${location.name}`,
@@ -472,11 +472,9 @@ export class Workspace {
     const wirings = await this.finishAdopting(scenes, first, duplicates, wire ? edits : undefined);
     const changed = wirings?.filter((w) => w.applied).length ?? 0;
     this.store.setStatus(
-      `Imported ${scenes.length - empty} scene(s) from what they build` +
+      `Imported ${scenes.length - empty} scene(s)` +
         (empty ? `, ${empty} empty` : "") +
-        (wire
-          ? ` — updated ${changed} of ${scenes.length} scene class(es) to use their layouts`
-          : " — your classes were not touched"),
+        (wire ? ` · updated ${changed} of ${scenes.length} class(es)` : ""),
     );
     return { imported: scenes.length - empty, empty, notes };
   }
@@ -811,10 +809,10 @@ export class Workspace {
       const cls = scene?.split("/").pop()!.replace(/\.(ts|js)$/, "");
       this.store.setStatus(
         scene && this.lastSavedAt
-          ? `Wrote ${scene} — yours from here on. Add ${cls} to your game's scene list to run it.`
+          ? `Wrote ${scene}. Add ${cls} to your game's scene list to run it.`
           : created.length === 1
-            ? `Wrote ${created[0]} — yours from here on`
-            : `Wrote ${created.length} starter files — yours from here on`,
+            ? `Wrote ${created[0]}`
+            : `Wrote ${created.length} starter files`,
       );
     }
     return out;
@@ -1041,7 +1039,7 @@ export class Workspace {
         if (change.rel.endsWith(".scene.json")) this.conflicts.add(change.rel);
       }
       this.store.setStatus(
-        `${external[0].rel} changed on disk — save or undo your edits, then reopen the project to pick it up`,
+        `${external[0].rel} changed on disk — save or undo your edits, then reopen`,
       );
       this.emit();
       return;

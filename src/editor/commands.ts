@@ -213,7 +213,7 @@ export function searchPalette(query: string, ctx: CommandContext): PaletteEntry[
       entries.push({
         id: `prefab:edit:${prefab.name}`,
         title: `Edit ${prefab.name} definition`,
-        subtitle: "Opens the prefab alone on an isolated stage",
+        subtitle: "Prefab",
         kind: "prefab",
         run: () => store.openPrefab(prefab.name),
       });

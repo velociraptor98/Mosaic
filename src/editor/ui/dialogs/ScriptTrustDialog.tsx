@@ -25,7 +25,6 @@ export function ScriptTrustDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Run this project's game?"
-      subtitle="RUN starts the project's own dev server and shows the game beside the canvas."
       onClose={onClose}
       footer={
         <>
@@ -44,16 +43,9 @@ export function ScriptTrustDialog({ onClose }: { onClose: () => void }) {
           <code>{root}</code>
         </div>
 
-        <div className="section-title">What happens</div>
-        <p className="muted">
-          Mosaic runs the <code>dev</code> script from this folder's <code>package.json</code>, the
-          same as typing <code>npm run dev</code> in a terminal, and shows the page it serves. From
-          then on each save reloads it.
-        </p>
-
         <div className="banner warn">
-          This is the project's own code, run from the folder above with your user's permissions.
-          Say yes only for projects you trust. The answer is remembered per folder, by the editor.
+          This runs the project's own code with your user's permissions. Only run projects you
+          trust.
         </div>
       </div>
     </Dialog>

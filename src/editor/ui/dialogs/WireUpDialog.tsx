@@ -36,13 +36,6 @@ export function WireUpDialog() {
               : `Wire ${one.cls} to its layout`
             : `Wire ${wirings.length} scenes to their layouts`
       }
-      subtitle={
-        asked
-          ? "Mosaic wrote a layout beside each scene class and changed the classes below to use them."
-          : one
-            ? `Mosaic wrote ${one.layout}. ${one.src} is yours and was not touched.`
-            : `Mosaic wrote a layout beside each scene class. None of your classes were touched.`
-      }
       onClose={close}
       footer={
         <button className="primary" onClick={close}>
@@ -51,13 +44,7 @@ export function WireUpDialog() {
       }
     >
       <div className="stack">
-        <p className="muted">
-          {pending.length
-            ? asked
-              ? "The classes that could not be changed are listed with the lines to add by hand. Until they have them, what you lay out for them here is saved but not used."
-              : "Add these lines to each class. Until you do, the game runs exactly as it did, and what you lay out here is saved but not used."
-            : "Every class imports its layout now, so every save in the editor reaches the game."}
-        </p>
+        {pending.length > 0 && !asked && <p className="muted">Add these lines to each class.</p>}
         {wirings.map((w) => (
           <WiringBlock key={w.layout} wiring={w} />
         ))}
@@ -71,13 +58,6 @@ export function WireUpDialog() {
               </div>
             ))}
           </details>
-        )}
-        {pending.length > 0 && (
-          <p className="hint">
-            If a class already has <code>preload()</code> or <code>create()</code>, add the line to the one
-            it has. A layout's preload only queues what it places, and a key your Preloader already loaded
-            is skipped by Phaser rather than loaded twice.
-          </p>
         )}
       </div>
     </Dialog>
@@ -133,15 +113,11 @@ function WiringBlock({ wiring }: { wiring: Wiring }) {
         </span>
       </div>
       {wiring.failed && !wiring.wired && (
-        <div className="muted">Not changed — it {wiring.failed}. Add these lines by hand:</div>
+        <div className="muted">Not changed — it {wiring.failed}.</div>
       )}
       {!wiring.wired && <pre className="code-preview wire-snippet">{snippet}</pre>}
       {wiring.applied && (
         <div className="wire-applied">
-          <div className="muted">
-            Imports <code>{wiring.layout.split("/").pop()}</code> and calls <code>preload{wiring.cls}(this)</code>{" "}
-            and <code>create{wiring.cls}(this)</code>.
-          </div>
           {wiring.applied.taken.length > 0 && (
             <details className="wire-dupes">
               <summary>
@@ -161,7 +137,7 @@ function WiringBlock({ wiring }: { wiring: Wiring }) {
             <details className="wire-dupes">
               <summary>
                 {wiring.applied.left.length} object{wiring.applied.left.length === 1 ? "" : "s"} stay in your
-                code, not the layout
+                code
               </summary>
               <div className="file-tree">
                 {wiring.applied.left.map((d, i) => (
@@ -178,9 +154,8 @@ function WiringBlock({ wiring }: { wiring: Wiring }) {
       {wiring.duplicates && wiring.duplicates.length > 0 && (
         <details className="wire-dupes">
           <summary>
-            Its create() still builds {wiring.duplicates.length} object
-            {wiring.duplicates.length === 1 ? "" : "s"} the layout now builds too — remove that code
-            once you call <code>create{wiring.cls}</code>
+            {wiring.duplicates.length} object{wiring.duplicates.length === 1 ? "" : "s"} also built
+            by <code>create()</code>
           </summary>
           <div className="file-tree">
             {wiring.duplicates.map((d) => (

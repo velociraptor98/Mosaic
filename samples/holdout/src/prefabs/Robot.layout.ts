@@ -9,8 +9,7 @@ import { Zombie } from "./Zombie";
 export class RobotBase extends Zombie {
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y);
-    this.setTexture("characters", "robot1_hold.png");
-    this.setScale(1.2, 1.2);
+    this.setTexture("characters", "robot_0");
     this.play("robot_walk");
   }
 

@@ -98,7 +98,7 @@ export function FirstRunChecklist({ root, installing }: { root: string; installi
         ))}
       </div>
       {installing && (
-        <div className="hint mono">npm install · running — Run stays disabled until it finishes</div>
+        <div className="hint mono">npm install · running</div>
       )}
       <button
         className="mini"

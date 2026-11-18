@@ -35,13 +35,6 @@ export function BottomDock() {
           Scripts
         </button>
         <div className="tabs-spacer" />
-        <span className="hint inline">
-          {store.ui.dockTab === "anim"
-            ? "The timeline takes over the dock so the canvas stays full size."
-            : store.ui.dockTab === "scripts"
-              ? "Every source file in the project, and what the editor can do with each."
-              : "Selecting an asset arms the place tool."}
-        </span>
       </div>
       <div className="panel-body">
         {store.ui.dockTab === "assets" && <AssetBrowser />}
@@ -264,7 +257,7 @@ function AnimEditor() {
             + new
           </button>
         </div>
-        {anims.length === 0 && <div className="empty">Nothing yet. Animations live in one anims.json, keyed globally.</div>}
+        {anims.length === 0 && <div className="empty">No animations yet.</div>}
         {anims.map((anim) => (
           <button
             key={anim.key}
@@ -437,9 +430,7 @@ function AnimEditor() {
                   </button>
                 ))}
               {!source && (
-                <div className="empty">
-                  No spritesheet or atlas yet — import one, or slice a sheet into an atlas.
-                </div>
+                <div className="empty">No spritesheet or atlas yet.</div>
               )}
             </div>
           </div>
@@ -471,9 +462,7 @@ function ScriptBrowser() {
   if (!files.length) {
     return (
       <div className="empty">
-        No source files found. Mosaic reads them from the folder named by{" "}
-        <code>paths.src</code> in <code>mosaic.config.json</code> — a project that keeps its code
-        somewhere else needs that pointed at it.
+        No source files in <code>{store.project.config.paths.src}/</code>.
       </div>
     );
   }

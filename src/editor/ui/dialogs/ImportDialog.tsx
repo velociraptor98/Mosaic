@@ -186,7 +186,6 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Import assets"
-      subtitle="Type is inferred per file and shown for correction before the copy."
       onClose={onClose}
       wide
       footer={
@@ -214,7 +213,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
             void dropNative(e.dataTransfer.files);
           }}
         >
-          <p>Drop images or audio here — they are copied into {root}/assets.</p>
+          <p>Drop images or audio here</p>
           <button className="ghost" disabled={busy} onClick={() => void chooseNative()}>
             {busy ? "Copying…" : "Choose files…"}
           </button>

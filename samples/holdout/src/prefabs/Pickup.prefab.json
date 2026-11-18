@@ -9,8 +9,8 @@
     "x": 0,
     "y": 0,
     "rotation": 0,
-    "scaleX": 1.8,
-    "scaleY": 1.8,
+    "scaleX": 1,
+    "scaleY": 1,
     "originX": 0.5,
     "originY": 0.5,
     "visible": true,
@@ -18,18 +18,18 @@
     "group": "pickup",
     "body": {
       "shape": "box",
-      "width": 33,
-      "height": 10,
+      "width": 64,
+      "height": 20,
       "radius": 16,
-      "offsetX": 0,
-      "offsetY": 0,
+      "offsetX": 4,
+      "offsetY": 4,
       "immovable": false,
       "allowGravity": false,
       "bounce": 0,
       "collideWorldBounds": false
     },
     "data": {},
-    "lid": "nmwjcrwp5f",
+    "lid": "nmwkujbfdf",
     "children": []
   }
 }

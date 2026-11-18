@@ -3,9 +3,7 @@
   "exposed": [],
   "base": "Zombie",
   "diff": {
-    "scaleX": 1.2,
-    "scaleY": 1.2,
-    "frame": "robot1_hold.png",
+    "frame": "robot_0",
     "playOnSpawn": "robot_walk",
     "props.speed": 52,
     "props.health": 8,

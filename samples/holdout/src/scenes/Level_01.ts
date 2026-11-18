@@ -143,7 +143,7 @@ export class Level_01 extends Phaser.Scene {
     const blast = new Explosion(this, x, y);
     blast.setDepth(this.layout.player.depth + 1);
     // A scorch mark from the same sheet as the tiles, between the ground and the walls.
-    this.add.image(x, y, "tiles", 319).setDepth(this.layout.details.depth + 0.5).setAlpha(0.8);
+    this.add.image(x, y, "tiles", 20).setDepth(this.layout.details.depth + 0.5).setAlpha(0.8);
     this.cameras.main.shake(220, 0.01);
 
     const near = (o: Phaser.GameObjects.Components.Transform) =>

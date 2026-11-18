@@ -1114,6 +1114,12 @@ kbd {
   overflow: auto;
 }
 
+/* A short dock scrolls the timeline; squeezing the strips would spill their
+   frames over the heading below them. */
+.anim-timeline > * {
+  flex-shrink: 0;
+}
+
 .strip-header {
   display: flex;
   gap: var(--space-2);

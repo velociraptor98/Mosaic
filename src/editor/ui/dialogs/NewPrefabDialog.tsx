@@ -44,7 +44,6 @@ export function NewPrefabDialog({ asset, onClose }: { asset: AssetDef; onClose: 
   return (
     <Dialog
       title="New prefab from art"
-      subtitle="Nothing is placed. The definition opens on its own stage, and your code makes one with new."
       onClose={onClose}
       footer={
         <>

@@ -23,9 +23,7 @@ export function PrefabBar() {
     ? `inherits ${doc.base} · ${Object.keys(store.prefabDocDef()?.diff ?? {}).length} field(s) differ`
     : variants.length
       ? `${variants.length} variant(s) resolve from this base`
-      : dirty
-        ? "scene documents are unaffected until save"
-        : "no unsaved changes";
+      : "";
 
   return (
     <div className="prefab-bar">
@@ -85,7 +83,7 @@ export function ReviewBar() {
         scene {review.index + 1} of {review.scenes.length} · {review.scenes[review.index]}
       </code>
       <span className="prefab-bar-note">
-        the instances this push touched are selected — nothing else has been changed
+        changed instances are selected
       </span>
       <button className="ghost" onClick={() => store.showReviewStep(review.index - 1)} disabled={review.index === 0}>
         ← Previous

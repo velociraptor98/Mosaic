@@ -7,13 +7,13 @@
     "x": 0,
     "y": 0,
     "rotation": 0,
-    "scaleX": 0.75,
-    "scaleY": 0.75,
+    "scaleX": 1,
+    "scaleY": 1,
     "originX": 0.5,
     "originY": 0.5,
     "visible": true,
     "texture": "tiles",
-    "frame": "315",
+    "frame": "18",
     "group": "barrel",
     "body": {
       "shape": "circle",
@@ -28,7 +28,7 @@
       "collideWorldBounds": false
     },
     "data": {},
-    "lid": "nmwjcrwovd",
+    "lid": "nmwkujbf6d",
     "children": []
   }
 }

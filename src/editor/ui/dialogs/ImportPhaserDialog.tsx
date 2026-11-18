@@ -157,7 +157,6 @@ export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; t
     return (
       <Dialog
         title={target ? `Start ${target.name}'s layout from what it builds` : "Import a scene from this Phaser project"}
-        subtitle="Mosaic runs the game once and imports what its scene actually builds."
         onClose={onClose}
         footer={
           <>
@@ -176,8 +175,7 @@ export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; t
           {entries === null && <p className="muted">Looking for a file that starts a game…</p>}
           {entries?.length === 0 && (
             <p className="muted">
-              Nothing here constructs a <code>Phaser.Game</code>. Mosaic needs the file that starts
-              the game to know where to begin.
+              Nothing here constructs a <code>Phaser.Game</code>.
             </p>
           )}
           {entries?.map((rel) => (
@@ -191,11 +189,6 @@ export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; t
               <code>{rel}</code>
             </label>
           ))}
-          <p className="muted">
-            Only objects the scene builds in <code>create()</code> can be imported. Anything spawned
-            later — on a timer, on input, in <code>update()</code> — does not exist yet when the
-            import is taken.
-          </p>
         </div>
       </Dialog>
     );
@@ -206,7 +199,6 @@ export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; t
     return (
       <Dialog
         title="Run this project to import it?"
-        subtitle="There is no way to read a hand-written create() without running it."
         onClose={onClose}
         footer={
           <>
@@ -234,12 +226,9 @@ export function ImportPhaserDialog({ onClose, target }: { onClose: () => void; t
             <span>Entry</span>
             <code>{entry}</code>
           </div>
-          <p className="muted">
-            The game is compiled and run once, in a separate hidden window that is closed
-            afterwards, and is stopped if it takes too long. Recording writes nothing — only
-            pressing Import does, and it says what first. The answer is remembered by the editor for
-            this folder, the same trust RUN asks for.
-          </p>
+          <div className="banner warn">
+            This runs the project's own code. Only run projects you trust.
+          </div>
         </div>
       </Dialog>
     );

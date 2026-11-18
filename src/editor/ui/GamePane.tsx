@@ -88,10 +88,7 @@ export function GamePane() {
 
       {game.status === "starting" && (
         <div className="game-message">
-          <p>
-            Running the project's dev script, or serving the folder as it is when it has none. The
-            first start takes a few seconds; after that the server stays up and RUN is immediate.
-          </p>
+          <p>Starting the game…</p>
         </div>
       )}
 
