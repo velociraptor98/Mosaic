@@ -43,7 +43,7 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
         }
       >
         <div className="empty">
-          The definition resolves to exactly what is already on disk — no scene would change.
+          No scene would change.
         </div>
       </Dialog>
     );
@@ -55,13 +55,10 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
     <Dialog
       wide
       title={`Push ${plan.prefab} to its instances`}
-      subtitle={`${prefabFilePath(plan.prefab)} — ${t.instances} instance(s) across ${plan.scenes.length} scene(s).`}
+      subtitle={`${prefabFilePath(plan.prefab, store.project.config.paths)} — ${t.instances} instance(s) across ${plan.scenes.length} scene(s).`}
       onClose={close}
       footer={
         <>
-          <span className="dialog-foot-note">
-            nothing is written until Push · Review each walks the scenes one at a time
-          </span>
           <button className="ghost" onClick={close}>
             Cancel
           </button>
@@ -97,8 +94,7 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
 
       {plan.variants.length > 0 && (
         <div className="banner">
-          {plan.variants.length} variant(s) resolve from this definition and move with it:{" "}
-          <code>{plan.variants.join(", ")}</code>. Each keeps whatever it states for itself.
+          Variants that follow: <code>{plan.variants.join(", ")}</code>
         </div>
       )}
 
@@ -113,7 +109,7 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
         ))}
         {!plan.rows.length && (
           <div className="empty">
-            The definition changed, but no scene holds an instance of it yet — nothing to push.
+            No instances to push to.
           </div>
         )}
       </div>
@@ -136,10 +132,7 @@ export function PropagateDialog({ onClose }: { onClose: () => void }) {
       </div>
 
       {plan.scenes.some((s) => s.skipped) && (
-        <p className="hint">
-          A skipped scene is left exactly as it is, overrides and all. Reload the project to pick
-          up what changed on disk, then push again.
-        </p>
+        <p className="hint">Skipped scenes are left as they are.</p>
       )}
     </Dialog>
   );

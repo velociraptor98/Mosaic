@@ -8,10 +8,10 @@ export class ZombieBase extends Phaser.Physics.Arcade.Sprite {
   declare body: Phaser.Physics.Arcade.Body;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "characters", "zoimbie1_hold.png");
+    super(scene, x, y, "characters", "zombie_0");
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.setOrigin(0.4, 0.5);
+    this.setOrigin(0.3611111111111111, 0.5);
     this.applyBody();
     this.play("zombie_walk");
   }
@@ -23,7 +23,7 @@ export class ZombieBase extends Phaser.Physics.Arcade.Sprite {
    */
   applyBody(): this {
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(14, 0, 7.5);
+    body.setCircle(16, 10, 12);
     body.setImmovable(false);
     body.setAllowGravity(false);
     body.setBounce(0, 0);

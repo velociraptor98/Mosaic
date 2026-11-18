@@ -81,1276 +81,196 @@
       "key": "characters",
       "kind": "atlas",
       "path": "assets/characters.png",
-      "width": 512,
-      "height": 256,
+      "width": 384,
+      "height": 184,
       "frames": [
         {
-          "name": "hitman1_gun.png",
+          "name": "survivor_pistol",
+          "x": 4,
+          "y": 4,
+          "w": 80,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "survivor_machinegun",
+          "x": 88,
+          "y": 4,
+          "w": 80,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "survivor_silencer",
+          "x": 172,
+          "y": 4,
+          "w": 80,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "survivor_hold",
+          "x": 256,
+          "y": 4,
+          "w": 80,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "survivor_reload",
+          "x": 4,
+          "y": 64,
+          "w": 80,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "zombie_0",
+          "x": 88,
+          "y": 64,
+          "w": 72,
+          "h": 56,
+          "pivotX": 0.5,
+          "pivotY": 0.5
+        },
+        {
+          "name": "zombie_1",
           "x": 164,
-          "y": 88,
-          "w": 49,
-          "h": 43,
+          "y": 64,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "hitman1_hold.png",
-          "x": 386,
-          "y": 88,
-          "w": 35,
-          "h": 43,
+          "name": "zombie_2",
+          "x": 240,
+          "y": 64,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "hitman1_machine.png",
-          "x": 214,
-          "y": 44,
-          "w": 49,
-          "h": 43,
+          "name": "zombie_3",
+          "x": 4,
+          "y": 124,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "hitman1_reload.png",
-          "x": 313,
-          "y": 132,
-          "w": 39,
-          "h": 43,
+          "name": "robot_0",
+          "x": 80,
+          "y": 124,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "hitman1_silencer.png",
-          "x": 0,
-          "y": 132,
-          "w": 54,
-          "h": 43,
+          "name": "robot_1",
+          "x": 156,
+          "y": 124,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "hitman1_stand.png",
-          "x": 426,
-          "y": 176,
-          "w": 33,
-          "h": 43,
+          "name": "robot_2",
+          "x": 232,
+          "y": 124,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "manBlue_gun.png",
-          "x": 263,
-          "y": 132,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBlue_hold.png",
-          "x": 390,
-          "y": 132,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBlue_machine.png",
-          "x": 212,
-          "y": 176,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBlue_reload.png",
-          "x": 309,
-          "y": 0,
-          "w": 39,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBlue_silencer.png",
-          "x": 58,
-          "y": 0,
-          "w": 54,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBlue_stand.png",
-          "x": 426,
-          "y": 132,
-          "w": 33,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_gun.png",
-          "x": 262,
-          "y": 176,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_hold.png",
-          "x": 388,
-          "y": 0,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_machine.png",
-          "x": 214,
-          "y": 88,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_reload.png",
-          "x": 312,
-          "y": 176,
-          "w": 39,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_silencer.png",
-          "x": 0,
-          "y": 176,
-          "w": 54,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manBrown_stand.png",
-          "x": 459,
-          "y": 44,
-          "w": 33,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_gun.png",
-          "x": 216,
-          "y": 0,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_hold.png",
-          "x": 422,
-          "y": 88,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_machine.png",
-          "x": 213,
-          "y": 132,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_reload.png",
-          "x": 307,
-          "y": 44,
-          "w": 39,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_silencer.png",
-          "x": 55,
-          "y": 132,
-          "w": 54,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "manOld_stand.png",
-          "x": 460,
-          "y": 132,
-          "w": 33,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_gun.png",
-          "x": 164,
-          "y": 44,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_hold.png",
-          "x": 423,
-          "y": 44,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_machine.png",
-          "x": 166,
-          "y": 0,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_reload.png",
-          "x": 306,
-          "y": 88,
-          "w": 39,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_silencer.png",
-          "x": 55,
-          "y": 176,
-          "w": 54,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "robot1_stand.png",
-          "x": 458,
-          "y": 88,
-          "w": 33,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_gun.png",
-          "x": 113,
-          "y": 0,
-          "w": 52,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_hold.png",
-          "x": 349,
-          "y": 0,
-          "w": 38,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_machine.png",
-          "x": 110,
-          "y": 132,
-          "w": 52,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_reload.png",
-          "x": 264,
-          "y": 44,
-          "w": 42,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_silencer.png",
-          "x": 0,
-          "y": 0,
-          "w": 57,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "soldier1_stand.png",
-          "x": 353,
-          "y": 132,
-          "w": 36,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_gun.png",
-          "x": 112,
-          "y": 88,
-          "w": 51,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_hold.png",
-          "x": 352,
-          "y": 176,
-          "w": 37,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_machine.png",
-          "x": 110,
-          "y": 176,
-          "w": 51,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_reload.png",
-          "x": 264,
-          "y": 88,
-          "w": 41,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_silencer.png",
-          "x": 0,
-          "y": 88,
-          "w": 56,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "survivor1_stand.png",
-          "x": 390,
-          "y": 176,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_gun.png",
-          "x": 58,
-          "y": 44,
-          "w": 52,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_hold.png",
-          "x": 347,
-          "y": 44,
-          "w": 38,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_machine.png",
-          "x": 111,
-          "y": 44,
-          "w": 52,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_reload.png",
-          "x": 266,
-          "y": 0,
-          "w": 42,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_silencer.png",
-          "x": 0,
-          "y": 44,
-          "w": 57,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "womanGreen_stand.png",
-          "x": 386,
-          "y": 44,
-          "w": 36,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_gun.png",
-          "x": 163,
-          "y": 132,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_hold.png",
-          "x": 424,
-          "y": 0,
-          "w": 35,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_machine.png",
-          "x": 162,
-          "y": 176,
-          "w": 49,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_reload.png",
-          "x": 346,
-          "y": 88,
-          "w": 39,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_silencer.png",
-          "x": 57,
-          "y": 88,
-          "w": 54,
-          "h": 43,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "zoimbie1_stand.png",
-          "x": 460,
-          "y": 0,
-          "w": 33,
-          "h": 43,
+          "name": "robot_3",
+          "x": 308,
+          "y": 124,
+          "w": 72,
+          "h": 56,
           "pivotX": 0.5,
           "pivotY": 0.5
         }
       ]
     },
     {
-      "id": "asset-tanks_png",
-      "key": "tanks",
+      "id": "asset-effects_png",
+      "key": "effects",
       "kind": "atlas",
-      "path": "assets/tanks.png",
-      "width": 1024,
-      "height": 512,
+      "path": "assets/effects.png",
+      "width": 400,
+      "height": 400,
       "frames": [
         {
-          "name": "barrelBeige.png",
-          "x": 842,
-          "y": 108,
-          "w": 16,
-          "h": 50,
+          "name": "bullet",
+          "x": 4,
+          "y": 4,
+          "w": 8,
+          "h": 16,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "barrelBeige_outline.png",
-          "x": 840,
-          "y": 368,
-          "w": 24,
-          "h": 58,
+          "name": "blast_0",
+          "x": 16,
+          "y": 4,
+          "w": 128,
+          "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "barrelBlack.png",
-          "x": 840,
-          "y": 426,
-          "w": 16,
-          "h": 50,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelBlack_outline.png",
-          "x": 818,
-          "y": 168,
-          "w": 24,
-          "h": 58,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelBlue.png",
-          "x": 850,
-          "y": 58,
-          "w": 16,
-          "h": 50,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelBlue_outline.png",
-          "x": 827,
-          "y": 226,
-          "w": 24,
-          "h": 58,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGreen.png",
-          "x": 834,
-          "y": 58,
-          "w": 16,
-          "h": 50,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGreen_outline.png",
-          "x": 818,
-          "y": 110,
-          "w": 24,
-          "h": 58,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGreen_side.png",
-          "x": 746,
-          "y": 48,
-          "w": 44,
-          "h": 62,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGreen_side_damaged.png",
-          "x": 790,
-          "y": 48,
-          "w": 44,
-          "h": 62,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGreen_up.png",
-          "x": 746,
-          "y": 0,
-          "w": 48,
-          "h": 48,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGrey_sde_rust.png",
-          "x": 783,
-          "y": 244,
-          "w": 44,
-          "h": 62,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGrey_side.png",
-          "x": 796,
-          "y": 410,
-          "w": 44,
-          "h": 62,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelGrey_up.png",
-          "x": 735,
-          "y": 252,
-          "w": 48,
-          "h": 48,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelRed.png",
-          "x": 842,
-          "y": 158,
-          "w": 16,
-          "h": 50,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelRed_outline.png",
-          "x": 834,
-          "y": 0,
-          "w": 24,
-          "h": 58,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelRed_side.png",
-          "x": 805,
-          "y": 306,
-          "w": 44,
-          "h": 62,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "barrelRed_up.png",
-          "x": 730,
-          "y": 454,
-          "w": 48,
-          "h": 48,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBeige.png",
-          "x": 48,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBeigeSilver.png",
-          "x": 188,
-          "y": 345,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBeigeSilver_outline.png",
-          "x": 671,
-          "y": 140,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBeige_outline.png",
-          "x": 128,
-          "y": 345,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBlue.png",
-          "x": 0,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBlueSilver.png",
-          "x": 12,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBlueSilver_outline.png",
+          "name": "blast_1",
           "x": 148,
-          "y": 345,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletBlue_outline.png",
-          "x": 755,
-          "y": 300,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletGreen.png",
-          "x": 24,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletGreenSilver.png",
-          "x": 36,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletGreenSilver_outline.png",
-          "x": 691,
-          "y": 140,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletGreen_outline.png",
-          "x": 168,
-          "y": 345,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletRed.png",
-          "x": 120,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletRedSilver.png",
-          "x": 60,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletRedSilver_outline.png",
-          "x": 711,
-          "y": 140,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletRed_outline.png",
-          "x": 735,
-          "y": 300,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletSilver.png",
-          "x": 72,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletSilverSilver.png",
-          "x": 84,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletSilverSilver_outline.png",
-          "x": 778,
-          "y": 472,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletSilver_outline.png",
-          "x": 775,
-          "y": 306,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletYellow.png",
-          "x": 96,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletYellowSilver.png",
-          "x": 108,
-          "y": 481,
-          "w": 12,
-          "h": 26,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletYellowSilver_outline.png",
-          "x": 794,
-          "y": 0,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "bulletYellow_outline.png",
-          "x": 814,
-          "y": 0,
-          "w": 20,
-          "h": 34,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "dirt.png",
-          "x": 0,
-          "y": 0,
+          "y": 4,
           "w": 128,
           "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "grass.png",
-          "x": 0,
-          "y": 128,
+          "name": "blast_2",
+          "x": 4,
+          "y": 136,
           "w": 128,
           "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "oil.png",
-          "x": 200,
-          "y": 408,
-          "w": 96,
-          "h": 96,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "sand.png",
-          "x": 0,
-          "y": 256,
+          "name": "blast_3",
+          "x": 136,
+          "y": 136,
           "w": 128,
           "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "sandbagBeige.png",
-          "x": 128,
-          "y": 301,
-          "w": 66,
-          "h": 44,
+          "name": "blast_4",
+          "x": 268,
+          "y": 136,
+          "w": 128,
+          "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         },
         {
-          "name": "sandbagBrown.png",
-          "x": 730,
-          "y": 410,
-          "w": 66,
-          "h": 44,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey0.png",
-          "x": 416,
-          "y": 188,
-          "w": 87,
-          "h": 87,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey1.png",
-          "x": 296,
-          "y": 408,
-          "w": 92,
-          "h": 89,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey2.png",
-          "x": 478,
-          "y": 384,
-          "w": 90,
-          "h": 99,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey3.png",
-          "x": 651,
-          "y": 353,
-          "w": 79,
-          "h": 79,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey4.png",
-          "x": 128,
-          "y": 97,
-          "w": 100,
-          "h": 97,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeGrey5.png",
-          "x": 128,
-          "y": 194,
-          "w": 98,
-          "h": 107,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange0.png",
-          "x": 486,
-          "y": 275,
-          "w": 87,
-          "h": 87,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange1.png",
-          "x": 324,
-          "y": 196,
-          "w": 92,
-          "h": 89,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange2.png",
-          "x": 388,
-          "y": 408,
-          "w": 90,
-          "h": 99,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange3.png",
-          "x": 656,
-          "y": 261,
-          "w": 79,
-          "h": 79,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange4.png",
-          "x": 0,
-          "y": 384,
-          "w": 100,
-          "h": 97,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeOrange5.png",
-          "x": 228,
-          "y": 0,
-          "w": 98,
-          "h": 107,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite0.png",
-          "x": 324,
-          "y": 107,
-          "w": 92,
-          "h": 89,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite1.png",
-          "x": 396,
-          "y": 285,
-          "w": 90,
-          "h": 99,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite2.png",
-          "x": 590,
-          "y": 182,
-          "w": 79,
-          "h": 79,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite3.png",
-          "x": 128,
-          "y": 0,
-          "w": 100,
-          "h": 97,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite4.png",
-          "x": 226,
-          "y": 194,
-          "w": 98,
-          "h": 107,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeWhite5.png",
-          "x": 418,
-          "y": 0,
-          "w": 87,
-          "h": 87,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow0.png",
-          "x": 228,
-          "y": 107,
-          "w": 87,
-          "h": 87,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow1.png",
-          "x": 326,
-          "y": 0,
-          "w": 92,
-          "h": 89,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow2.png",
-          "x": 416,
-          "y": 89,
-          "w": 90,
-          "h": 99,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow3.png",
-          "x": 651,
-          "y": 432,
-          "w": 79,
-          "h": 79,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow4.png",
-          "x": 100,
-          "y": 384,
-          "w": 100,
-          "h": 97,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "smokeYellow5.png",
-          "x": 298,
-          "y": 301,
-          "w": 98,
-          "h": 107,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBeige.png",
-          "x": 730,
-          "y": 340,
-          "w": 75,
-          "h": 70,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBeige_outline.png",
-          "x": 505,
-          "y": 0,
-          "w": 83,
-          "h": 78,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBlack.png",
-          "x": 671,
-          "y": 0,
-          "w": 75,
-          "h": 70,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBlack_outline.png",
-          "x": 568,
-          "y": 362,
-          "w": 83,
-          "h": 78,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBlue.png",
-          "x": 671,
-          "y": 70,
-          "w": 75,
-          "h": 70,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankBlue_outline.png",
-          "x": 506,
-          "y": 78,
-          "w": 83,
-          "h": 78,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankGreen.png",
-          "x": 669,
-          "y": 182,
-          "w": 75,
-          "h": 70,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankGreen_outline.png",
-          "x": 573,
-          "y": 275,
-          "w": 83,
-          "h": 78,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankRed.png",
-          "x": 568,
-          "y": 440,
-          "w": 75,
-          "h": 70,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tankRed_outline.png",
-          "x": 588,
-          "y": 0,
-          "w": 83,
-          "h": 78,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tracksLarge.png",
-          "x": 589,
-          "y": 78,
-          "w": 82,
-          "h": 104,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "tracksSmall.png",
-          "x": 744,
-          "y": 140,
-          "w": 74,
-          "h": 104,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "treeLarge.png",
-          "x": 200,
-          "y": 301,
-          "w": 98,
-          "h": 107,
-          "pivotX": 0.5,
-          "pivotY": 0.5
-        },
-        {
-          "name": "treeSmall.png",
-          "x": 503,
-          "y": 188,
-          "w": 87,
-          "h": 87,
+          "name": "blast_5",
+          "x": 4,
+          "y": 268,
+          "w": 128,
+          "h": 128,
           "pivotX": 0.5,
           "pivotY": 0.5
         }
@@ -1361,8 +281,8 @@
       "key": "tiles",
       "kind": "spritesheet",
       "path": "assets/tiles.png",
-      "width": 1728,
-      "height": 1280,
+      "width": 512,
+      "height": 384,
       "frameWidth": 64,
       "frameHeight": 64,
       "margin": 0,
@@ -1373,16 +293,16 @@
       "key": "weapon_machine",
       "kind": "image",
       "path": "assets/weapon_machine.png",
-      "width": 33,
-      "height": 10
+      "width": 72,
+      "height": 28
     },
     {
       "id": "asset-weapon_silencer_png",
       "key": "weapon_silencer",
       "kind": "image",
       "path": "assets/weapon_silencer.png",
-      "width": 25,
-      "height": 10
+      "width": 72,
+      "height": 24
     },
     {
       "id": "asset-audio-shot",
@@ -1479,13 +399,13 @@
         "x": 0,
         "y": 0,
         "rotation": 0,
-        "scaleX": 0.75,
-        "scaleY": 0.75,
+        "scaleX": 1,
+        "scaleY": 1,
         "originX": 0.5,
         "originY": 0.5,
         "visible": true,
         "texture": "tiles",
-        "frame": "315",
+        "frame": "18",
         "group": "barrel",
         "body": {
           "shape": "circle",
@@ -1500,7 +420,7 @@
           "collideWorldBounds": false
         },
         "data": {},
-        "lid": "nmwjcrwovd",
+        "lid": "nmwkujbf6d",
         "children": []
       },
       "file": "src/prefabs/Barrel.prefab.json"
@@ -1514,28 +434,28 @@
         "x": 0,
         "y": 0,
         "rotation": 0,
-        "scaleX": 0.5,
-        "scaleY": 0.5,
+        "scaleX": 1,
+        "scaleY": 1,
         "originX": 0.5,
         "originY": 0.5,
         "visible": true,
-        "texture": "tanks",
-        "frame": "bulletYellowSilver_outline.png",
+        "texture": "effects",
+        "frame": "bullet",
         "group": "bullet",
         "body": {
           "shape": "circle",
           "width": 32,
           "height": 32,
-          "radius": 8,
-          "offsetX": 2,
-          "offsetY": 9,
+          "radius": 4,
+          "offsetX": 0,
+          "offsetY": 4,
           "immovable": false,
           "allowGravity": false,
           "bounce": 0,
           "collideWorldBounds": false
         },
         "data": {},
-        "lid": "nmwjcrwotb",
+        "lid": "nmwkujbf5b",
         "children": []
       },
       "file": "src/prefabs/Bullet.prefab.json"
@@ -1549,19 +469,19 @@
         "x": 0,
         "y": 0,
         "rotation": 0,
-        "scaleX": 1.6,
-        "scaleY": 1.6,
+        "scaleX": 1,
+        "scaleY": 1,
         "originX": 0.5,
         "originY": 0.5,
         "visible": true,
-        "texture": "tanks",
-        "frame": "smokeYellow0.png",
+        "texture": "effects",
+        "frame": "blast_0",
         "playOnSpawn": "explode",
         "sounds": {
           "spawn": "audio_explosion"
         },
         "data": {},
-        "lid": "nmwjcrwouc",
+        "lid": "nmwkujbf6c",
         "children": []
       },
       "file": "src/prefabs/Explosion.prefab.json"
@@ -1577,8 +497,8 @@
         "x": 0,
         "y": 0,
         "rotation": 0,
-        "scaleX": 1.8,
-        "scaleY": 1.8,
+        "scaleX": 1,
+        "scaleY": 1,
         "originX": 0.5,
         "originY": 0.5,
         "visible": true,
@@ -1586,18 +506,18 @@
         "group": "pickup",
         "body": {
           "shape": "box",
-          "width": 33,
-          "height": 10,
+          "width": 64,
+          "height": 20,
           "radius": 16,
-          "offsetX": 0,
-          "offsetY": 0,
+          "offsetX": 4,
+          "offsetY": 4,
           "immovable": false,
           "allowGravity": false,
           "bounce": 0,
           "collideWorldBounds": false
         },
         "data": {},
-        "lid": "nmwjcrwp5f",
+        "lid": "nmwkujbfdf",
         "children": []
       },
       "file": "src/prefabs/Pickup.prefab.json"
@@ -1613,26 +533,26 @@
         "rotation": 0,
         "scaleX": 1,
         "scaleY": 1,
-        "originX": 0.3333333333333333,
+        "originX": 0.325,
         "originY": 0.5,
         "visible": true,
         "texture": "characters",
-        "frame": "survivor1_gun.png",
+        "frame": "survivor_pistol",
         "group": "player",
         "body": {
           "shape": "circle",
           "width": 32,
           "height": 32,
-          "radius": 15,
-          "offsetX": 2,
-          "offsetY": 6.5,
+          "radius": 16,
+          "offsetX": 10,
+          "offsetY": 12,
           "immovable": false,
           "allowGravity": false,
           "bounce": 0,
           "collideWorldBounds": true
         },
         "data": {},
-        "lid": "nmwjcrwoo9",
+        "lid": "nmwkujbf39",
         "children": []
       },
       "file": "src/prefabs/Player.prefab.json"
@@ -1642,9 +562,7 @@
       "exposed": [],
       "base": "Zombie",
       "diff": {
-        "scaleX": 1.2,
-        "scaleY": 1.2,
-        "frame": "robot1_hold.png",
+        "frame": "robot_0",
         "playOnSpawn": "robot_walk",
         "props.speed": 52,
         "props.health": 8,
@@ -1668,9 +586,9 @@
         "originY": 0.5,
         "visible": true,
         "texture": "tiles",
-        "frame": "368",
+        "frame": "15",
         "data": {},
-        "lid": "nmwjcrwoze",
+        "lid": "nmwkujbf9e",
         "children": []
       },
       "file": "src/prefabs/Spawner.prefab.json"
@@ -1686,19 +604,19 @@
         "rotation": 0,
         "scaleX": 1,
         "scaleY": 1,
-        "originX": 0.4,
+        "originX": 0.3611111111111111,
         "originY": 0.5,
         "visible": true,
         "texture": "characters",
-        "frame": "zoimbie1_hold.png",
+        "frame": "zombie_0",
         "group": "enemy",
         "body": {
           "shape": "circle",
           "width": 32,
           "height": 32,
-          "radius": 14,
-          "offsetX": 0,
-          "offsetY": 7.5,
+          "radius": 16,
+          "offsetX": 10,
+          "offsetY": 12,
           "immovable": false,
           "allowGravity": false,
           "bounce": 0,
@@ -1706,7 +624,7 @@
         },
         "playOnSpawn": "zombie_walk",
         "data": {},
-        "lid": "nmwjcrwopa",
+        "lid": "nmwkujbf3a",
         "children": []
       },
       "file": "src/prefabs/Zombie.prefab.json"
@@ -1718,17 +636,17 @@
       "frames": [
         {
           "textureKey": "characters",
-          "frame": "survivor1_hold.png",
+          "frame": "survivor_hold",
           "duration": 90
         },
         {
           "textureKey": "characters",
-          "frame": "survivor1_reload.png",
+          "frame": "survivor_reload",
           "duration": 650
         },
         {
           "textureKey": "characters",
-          "frame": "survivor1_hold.png",
+          "frame": "survivor_hold",
           "duration": 90
         }
       ],
@@ -1740,14 +658,22 @@
       "frames": [
         {
           "textureKey": "characters",
-          "frame": "zoimbie1_hold.png"
+          "frame": "zombie_0"
         },
         {
           "textureKey": "characters",
-          "frame": "zoimbie1_stand.png"
+          "frame": "zombie_1"
+        },
+        {
+          "textureKey": "characters",
+          "frame": "zombie_2"
+        },
+        {
+          "textureKey": "characters",
+          "frame": "zombie_3"
         }
       ],
-      "fps": 3,
+      "fps": 5,
       "repeat": -1
     },
     {
@@ -1755,42 +681,50 @@
       "frames": [
         {
           "textureKey": "characters",
-          "frame": "robot1_hold.png"
+          "frame": "robot_0"
         },
         {
           "textureKey": "characters",
-          "frame": "robot1_stand.png"
+          "frame": "robot_1"
+        },
+        {
+          "textureKey": "characters",
+          "frame": "robot_2"
+        },
+        {
+          "textureKey": "characters",
+          "frame": "robot_3"
         }
       ],
-      "fps": 2,
+      "fps": 4,
       "repeat": -1
     },
     {
       "key": "explode",
       "frames": [
         {
-          "textureKey": "tanks",
-          "frame": "smokeYellow0.png"
+          "textureKey": "effects",
+          "frame": "blast_0"
         },
         {
-          "textureKey": "tanks",
-          "frame": "smokeYellow2.png"
+          "textureKey": "effects",
+          "frame": "blast_1"
         },
         {
-          "textureKey": "tanks",
-          "frame": "smokeOrange1.png"
+          "textureKey": "effects",
+          "frame": "blast_2"
         },
         {
-          "textureKey": "tanks",
-          "frame": "smokeOrange3.png"
+          "textureKey": "effects",
+          "frame": "blast_3"
         },
         {
-          "textureKey": "tanks",
-          "frame": "smokeGrey4.png"
+          "textureKey": "effects",
+          "frame": "blast_4"
         },
         {
-          "textureKey": "tanks",
-          "frame": "smokeGrey5.png"
+          "textureKey": "effects",
+          "frame": "blast_5"
         }
       ],
       "fps": 14,

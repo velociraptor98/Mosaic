@@ -3,7 +3,6 @@ import type { RecentEntry } from "../platform/types";
 import type { Workspace } from "../project/workspace";
 import { MosaicMark } from "./Logo";
 
-const VERSION = "0.3.1";
 
 /**
  * Screen 1 of the flow: the only window with no project loaded.
@@ -56,7 +55,6 @@ export function Launcher({
               <div className="wordmark" style={{ fontSize: 40 }}>
                 MOSAIC
               </div>
-              <div className="descriptor">SCENE EDITOR FOR PHASER · {VERSION}</div>
             </div>
           </div>
 
@@ -76,10 +74,6 @@ export function Launcher({
           {error && <div className="banner error">{error}</div>}
 
           <div className="launcher-spacer" />
-          <p className="hint">
-            Mosaic edits a folder on disk. There is no proprietary project file — scenes, prefabs
-            and atlases are plain JSON your repo already understands.
-          </p>
         </div>
 
         <div className="launcher-recents">
@@ -128,7 +122,6 @@ export function Launcher({
             </div>
             ))}
           </div>
-          <div className="hint mono">missing folders are greyed, never silently dropped</div>
         </div>
       </div>
     </div>
@@ -147,4 +140,3 @@ function relativeTime(at: number): string {
   return `${Math.round(days / 7)} weeks`;
 }
 
-export { VERSION };

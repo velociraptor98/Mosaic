@@ -36,6 +36,7 @@ export const IPC = {
   install: "mosaic:install",
   findGameEntries: "mosaic:findGameEntries",
   recordScene: "mosaic:recordScene",
+  analyzeClass: "mosaic:analyzeClass",
   devServerStart: "mosaic:devServerStart",
   devServerStop: "mosaic:devServerStop",
   packageGame: "mosaic:packageGame",
@@ -84,6 +85,43 @@ export interface ProjectFiles {
    * — a Phaser project Mosaic cannot read looks exactly like an empty one.
    */
   occupied: boolean;
+  /**
+   * What the folder already is, when Mosaic has never written to it and it
+   * holds a Phaser game. Absent for a Mosaic project and for a folder with no
+   * sign of Phaser in it.
+   */
+  existing?: ExistingProject | null;
+}
+
+/** A Phaser game Mosaic did not make, as read off disk before anything is written. */
+export interface ExistingProject {
+  /** The version range declared, e.g. "^3.90.0"; null when nothing declares one. */
+  phaser: string | null;
+  phaserFrom: "package.json" | "bower.json" | null;
+  /** 2, 3, 4… from the declaration, else from what the code looks like. */
+  major: number | null;
+  /** Files that start the game, best first. */
+  entries: string[];
+  /** Where this project keeps things, where that differs from Mosaic's defaults. */
+  paths: {
+    src?: string;
+    scenes?: string;
+    prefabs?: string;
+    assets?: string;
+    publicDir?: string;
+  };
+  /** The game config's canvas size, when it states one in plain numbers. */
+  canvas: { width: number; height: number } | null;
+  /** The physics the game config turns on. A game that names none has none. */
+  physics: "arcade" | "matter" | "none";
+  /** Whether the game config asks for pixel-art rendering. */
+  pixelArt: boolean;
+  /** The game config's background colour, as #rrggbb, when it states one. */
+  backgroundColor: string | null;
+  /** What the game is written in, from the file that starts it. */
+  language: "ts" | "js";
+  /** "global" when no file imports Phaser: it comes from a script tag. */
+  phaserAccess: "module" | "global";
 }
 
 /** One source file of the project, as read for the script index. */
@@ -211,6 +249,67 @@ export interface PackageResult {
   totalBytes: number;
 }
 
+/** A method of a scene class, by offset into the source it was parsed from. */
+export interface MethodShape {
+  /** Where the method begins, decorators and modifiers included. */
+  start: number;
+  /** Where its name begins. */
+  keyStart: number;
+  /** Just inside the opening brace of its body. */
+  bodyStart: number;
+  /** The closing brace of its body. */
+  bodyEnd: number;
+  firstStatement: number | null;
+  async: boolean;
+}
+
+/**
+ * A `this.add.<factory>(…)` call that runs exactly once per create(), so the
+ * one object it makes can come from the layout instead.
+ */
+export interface AddCall {
+  start: number;
+  end: number;
+  /** 1-based. */
+  line: number;
+  factory: string;
+  /** Set when the call is a statement of its own, its result unused. */
+  statement: { start: number; end: number } | null;
+  /** The name the result is kept under: `let sign = …` → "sign", `this.levelImage = …` → "levelImage". */
+  binding: string | null;
+}
+
+/** What wiring a layout into a scene class needs to know about it. */
+export interface ClassShape {
+  ok: boolean;
+  /** Why it cannot be edited, when it cannot. */
+  reason?: string;
+  rel: string;
+  /** The exact text the offsets are into. */
+  source: string;
+  /** Whether it is an ES module, which an `import` needs. */
+  module: boolean;
+  /** End of the last import declaration, or null when it has none. */
+  importEnd: number | null;
+  classBodyStart: number;
+  classBodyEnd: number;
+  create: MethodShape | null;
+  preload: MethodShape | null;
+  calls: AddCall[];
+  /** Names declared inside create(), which a new local must not shadow. */
+  names: string[];
+}
+
+/** Where a game object was made, mapped back to the project's own source. */
+export interface SourceSite {
+  /** Project-relative POSIX path. */
+  src: string;
+  /** 1-based. */
+  line: number;
+  /** 0-based. */
+  col: number;
+}
+
 /** Porcelain-ish status codes, keyed by project-relative path. */
 export type GitStatus = Record<string, string>;
 
@@ -239,6 +338,8 @@ export interface MosaicApi {
   findGameEntries(root: string): Promise<string[]>;
   /** Runs one of them and reports what its scenes built. */
   recordScene(root: string, entry: string): Promise<SceneRecording>;
+  /** Reads one scene class and describes the parts wiring a layout into it edits. */
+  analyzeClass(root: string, rel: string, cls: string): Promise<ClassShape>;
   /** Starts the project's own dev server, or returns the one already running. */
   devServerStart(root: string): Promise<DevServerResult>;
   devServerStop(root: string): Promise<void>;

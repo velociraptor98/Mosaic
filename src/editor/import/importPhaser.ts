@@ -4,6 +4,7 @@ import {
   sceneFromRecording,
   type ImportResult,
   type KnownClass,
+  type LocalArt,
   type Recording,
 } from "./fromRecording";
 import type { ProjectData } from "../../shared/types";
@@ -34,11 +35,12 @@ export async function writeImportedArt(
   // asset pointing at a file that is not there.
   const written = new Set(outcome.written);
   for (const asset of project.assets) {
-    if (!asset.path.startsWith("assets/imported/")) continue;
     if (written.has(asset.path)) asset.url = platform.assetUrl(root, asset.path);
   }
 
-  const notes = [`Wrote ${outcome.written.length} art file(s) into assets/imported/.`];
+  const notes = [
+    `Wrote ${outcome.written.length} art file(s) into ${project.config.paths.assets}/imported/.`,
+  ];
   if (outcome.failed.length) {
     notes.push(`${outcome.failed.length} could not be written: ${outcome.failed[0].error}`);
   }
@@ -57,6 +59,8 @@ export async function writeImportedArt(
 export interface ImportCandidate {
   /** Phaser scene key. */
   key: string;
+  /** The scene's class, when the recorder could name it. */
+  className: string | null;
   /** Objects that survived the filter — what the user would actually get. */
   objects: number;
   anims: number;
@@ -71,6 +75,17 @@ export interface ImportSurvey {
   recordings: Record<string, Recording>;
   /** The project's own classes, so a scene switch re-maps without re-running. */
   known: KnownClass[];
+  /** The art already in the project, which a load is pointed at before it is copied. */
+  local: LocalArt;
+}
+
+/** What an import needs to know about the project it lands in. */
+export function localArt(project: ProjectData): LocalArt {
+  return {
+    assetsDir: project.config.paths.assets,
+    publicDir: project.config.paths.publicDir ?? "",
+    files: new Set(project.assets.filter((a) => !a.generated && a.url).map((a) => a.path)),
+  };
 }
 
 /** Files that construct a game. The user picks one; most projects have one. */
@@ -89,6 +104,7 @@ export async function surveyProject(
   root: string,
   entry: string,
   scripts: { index: { classes: KnownClass[] } },
+  local: LocalArt,
 ): Promise<ImportSurvey> {
   if (!isTrusted(root)) {
     throw new Error("This project has not been trusted to run its own code yet.");
@@ -113,9 +129,10 @@ export async function surveyProject(
     const rec = raw as Recording;
     if (!rec || !Array.isArray(rec.objects)) continue;
     recordings[key] = rec;
-    const mapped = sceneFromRecording(rec, known);
+    const mapped = sceneFromRecording(rec, known, local);
     candidates.push({
       key,
+      className: rec.className ?? null,
       objects: mapped.scene.objects.length,
       anims: mapped.anims.length,
       createError: rec.objects.length ? ((rec as { createError?: string }).createError ?? null) : null,
@@ -126,12 +143,12 @@ export async function surveyProject(
   // the user actually wants, and the last of those is the only one with a
   // scene in it. Sorting by size puts it at the top without guessing at names.
   candidates.sort((a, b) => b.objects - a.objects);
-  return { entry, candidates, recordings, known };
+  return { entry, candidates, recordings, known, local };
 }
 
 /** What an import would add, without adding it. */
 export function previewScene(survey: ImportSurvey, sceneKey: string): ImportResult {
   const rec = survey.recordings[sceneKey];
   if (!rec) throw new Error(`No recording for scene "${sceneKey}"`);
-  return sceneFromRecording(rec, survey.known);
+  return sceneFromRecording(rec, survey.known, survey.local);
 }

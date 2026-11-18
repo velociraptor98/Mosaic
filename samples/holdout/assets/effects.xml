@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TextureAtlas imagePath="effects.png">
+  <SubTexture name="bullet" x="4" y="4" width="8" height="16"/>
+  <SubTexture name="blast_0" x="16" y="4" width="128" height="128"/>
+  <SubTexture name="blast_1" x="148" y="4" width="128" height="128"/>
+  <SubTexture name="blast_2" x="4" y="136" width="128" height="128"/>
+  <SubTexture name="blast_3" x="136" y="136" width="128" height="128"/>
+  <SubTexture name="blast_4" x="268" y="136" width="128" height="128"/>
+  <SubTexture name="blast_5" x="4" y="268" width="128" height="128"/>
+</TextureAtlas>

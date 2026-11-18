@@ -64,15 +64,7 @@ export function MosaicMark({
  * The primary lockup: mark left, wordmark right, baselines aligned to the
  * mark's bottom tile row. Barlow Condensed 700 at 0.2em tracking.
  */
-export function MosaicLockup({
-  size = 24,
-  tone = "accent",
-  descriptor = false,
-}: {
-  size?: number;
-  tone?: MarkTone;
-  descriptor?: boolean;
-}) {
+export function MosaicLockup({ size = 24, tone = "accent" }: { size?: number; tone?: MarkTone }) {
   return (
     <div className="lockup">
       <MosaicMark size={size} tone={tone} title="Mosaic" />
@@ -80,7 +72,6 @@ export function MosaicLockup({
         <span className="wordmark" style={{ fontSize: size * 0.79 }}>
           MOSAIC
         </span>
-        {descriptor && <span className="descriptor">SCENE EDITOR FOR PHASER</span>}
       </div>
     </div>
   );

@@ -44,7 +44,6 @@ export function NewPrefabDialog({ asset, onClose }: { asset: AssetDef; onClose: 
   return (
     <Dialog
       title="New prefab from art"
-      subtitle="Nothing is placed. The definition opens on its own stage, and your code makes one with new."
       onClose={onClose}
       footer={
         <>
@@ -95,7 +94,7 @@ export function NewPrefabDialog({ asset, onClose }: { asset: AssetDef; onClose: 
         </label>
         <div className="kv">
           <span>Writes</span>
-          <code>{prefabFilePath(clean || "Prefab")}</code>
+          <code>{prefabFilePath(clean || "Prefab", store.project.config.paths)}</code>
         </div>
       </div>
     </Dialog>

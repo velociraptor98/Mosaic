@@ -83,7 +83,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Generated code"
-      subtitle="*.layout files are Mosaic's and rewritten on every save. Everything else is yours."
       onClose={onClose}
       wide
       footer={
@@ -182,11 +181,6 @@ export function ExportDialog({ onClose }: { onClose: () => void }) {
           )}
         </div>
       )}
-
-      <p className="hint">
-        Your scene's <code>create()</code> calls the layout and gets the objects back by name. A
-        layout file is never merged with anything, so there is nothing in it to protect.
-      </p>
     </Dialog>
   );
 }

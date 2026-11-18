@@ -40,6 +40,9 @@ export const browserPlatform: Platform = {
   async recordScene() {
     return { ok: false, error: "Importing a Phaser project needs the desktop app." };
   },
+  async analyzeClass() {
+    return null;
+  },
 
   // No folder means no dev server: the browser build previews a scene from
   // its data instead, in the editor's own canvas.

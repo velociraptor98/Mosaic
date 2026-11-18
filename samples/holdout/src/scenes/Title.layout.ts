@@ -39,7 +39,7 @@ export interface TitleLayout {
 /** Queues everything this scene's objects load. Call from preload(). */
 export function preloadTitle(scene: Phaser.Scene): void {
   scene.load.atlas("characters", "assets/characters.png", "assets/characters.atlas.json");
-  scene.load.atlas("tanks", "assets/tanks.png", "assets/tanks.atlas.json");
+  scene.load.atlas("effects", "assets/effects.png", "assets/effects.atlas.json");
   scene.load.spritesheet("tiles", "assets/tiles.png", { frameWidth: 64, frameHeight: 64, margin: 0, spacing: 0 });
   scene.load.image("weapon_machine", "assets/weapon_machine.png");
   scene.load.audio("audio_shot", "assets/audio/shot.mp3");
@@ -61,7 +61,7 @@ export function createTitle(scene: Phaser.Scene): TitleLayout {
   if (!scene.anims.exists("survivor_reload")) {
     scene.anims.create({
       key: "survivor_reload",
-      frames: [{ key: "characters", frame: "survivor1_hold.png", duration: 90 }, { key: "characters", frame: "survivor1_reload.png", duration: 650 }, { key: "characters", frame: "survivor1_hold.png", duration: 90 }],
+      frames: [{ key: "characters", frame: "survivor_hold", duration: 90 }, { key: "characters", frame: "survivor_reload", duration: 650 }, { key: "characters", frame: "survivor_hold", duration: 90 }],
       frameRate: 10,
       repeat: 0,
     });
@@ -69,23 +69,23 @@ export function createTitle(scene: Phaser.Scene): TitleLayout {
   if (!scene.anims.exists("zombie_walk")) {
     scene.anims.create({
       key: "zombie_walk",
-      frames: [{ key: "characters", frame: "zoimbie1_hold.png" }, { key: "characters", frame: "zoimbie1_stand.png" }],
-      frameRate: 3,
+      frames: [{ key: "characters", frame: "zombie_0" }, { key: "characters", frame: "zombie_1" }, { key: "characters", frame: "zombie_2" }, { key: "characters", frame: "zombie_3" }],
+      frameRate: 5,
       repeat: -1,
     });
   }
   if (!scene.anims.exists("robot_walk")) {
     scene.anims.create({
       key: "robot_walk",
-      frames: [{ key: "characters", frame: "robot1_hold.png" }, { key: "characters", frame: "robot1_stand.png" }],
-      frameRate: 2,
+      frames: [{ key: "characters", frame: "robot_0" }, { key: "characters", frame: "robot_1" }, { key: "characters", frame: "robot_2" }, { key: "characters", frame: "robot_3" }],
+      frameRate: 4,
       repeat: -1,
     });
   }
   if (!scene.anims.exists("explode")) {
     scene.anims.create({
       key: "explode",
-      frames: [{ key: "tanks", frame: "smokeYellow0.png" }, { key: "tanks", frame: "smokeYellow2.png" }, { key: "tanks", frame: "smokeOrange1.png" }, { key: "tanks", frame: "smokeOrange3.png" }, { key: "tanks", frame: "smokeGrey4.png" }, { key: "tanks", frame: "smokeGrey5.png" }],
+      frames: [{ key: "effects", frame: "blast_0" }, { key: "effects", frame: "blast_1" }, { key: "effects", frame: "blast_2" }, { key: "effects", frame: "blast_3" }, { key: "effects", frame: "blast_4" }, { key: "effects", frame: "blast_5" }],
       frameRate: 14,
       repeat: 0,
     });
@@ -109,26 +109,27 @@ export function createTitle(scene: Phaser.Scene): TitleLayout {
   walls.setCollisionByProperty({ collides: true });
 
   // layer 2: Objects (objects)
-  const survivor = scene.add.sprite(300, 360, "characters", "survivor1_machine.png");
+  const survivor = scene.add.sprite(300, 360, "characters", "survivor_machinegun");
   survivor.setName("Survivor").setDepth(2);
   survivor.setAngle(-15);
-  survivor.setOrigin(0.3333333333333333, 0.5);
-  const walker = scene.add.sprite(700, 330, "characters", "zoimbie1_hold.png");
+  survivor.setOrigin(0.325, 0.5);
+  const walker = scene.add.sprite(700, 330, "characters", "zombie_0");
   walker.setName("Walker").setDepth(2);
   walker.setAngle(190);
+  walker.setOrigin(0.3611111111111111, 0.5);
   walker.play("zombie_walk");
-  const walker_2 = scene.add.sprite(790, 400, "characters", "zoimbie1_hold.png");
+  const walker_2 = scene.add.sprite(790, 400, "characters", "zombie_2");
   walker_2.setName("Walker 2").setDepth(2);
   walker_2.setAngle(175);
+  walker_2.setOrigin(0.3611111111111111, 0.5);
   walker_2.play("zombie_walk");
-  const robot = scene.add.sprite(860, 290, "characters", "robot1_hold.png");
+  const robot = scene.add.sprite(860, 290, "characters", "robot_0");
   robot.setName("Robot").setDepth(2);
   robot.setAngle(200);
-  robot.setScale(1.2, 1.2);
+  robot.setOrigin(0.3611111111111111, 0.5);
   robot.play("robot_walk");
-  const barrel = scene.add.sprite(220, 430, "tiles", "315");
+  const barrel = scene.add.sprite(220, 430, "tiles", "18");
   barrel.setName("Barrel").setDepth(2);
-  barrel.setScale(0.75, 0.75);
 
   // layer 3: Canopy (tiles)
   const canopy = level_01Map.createLayer("Canopy", level_01MapTiles, 0, 0) as Phaser.Tilemaps.TilemapLayer;
@@ -149,7 +150,7 @@ export function createTitle(scene: Phaser.Scene): TitleLayout {
   prompt.setName("Prompt").setDepth(4);
   prompt.setStroke("#14171a", 6);
   prompt.setOrigin(0.5, 0.5);
-  const credits = scene.add.text(512, 556, "Art and sound: Kenney (CC0) · Music: \"Zombies March\" by yd (CC0) · Gunshot: Kurt (CC0)", { fontFamily: "monospace", fontSize: "13px", color: "#dfe7ee", align: "center" });
+  const credits = scene.add.text(512, 556, "Sound: Kenney (CC0) · Music: \"Zombies March\" by yd (CC0) · Gunshot: Kurt (CC0)", { fontFamily: "monospace", fontSize: "13px", color: "#dfe7ee", align: "center" });
   credits.setName("Credits").setDepth(4);
   credits.setStroke("#14171a", 3);
   credits.setOrigin(0.5, 0.5);

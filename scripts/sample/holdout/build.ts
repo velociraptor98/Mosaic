@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { parsePhaserAtlas } from "../../../src/editor/assets/atlasJson";
@@ -26,11 +26,12 @@ import {
   TITLE,
   ZOMBIE,
 } from "./code";
+import { GROUND, PX, SURVIVOR, TILE_INDEX as T, WALKER, drawArt } from "./art";
 
 /**
  * Builds Holdout: a top-down survival shooter for testing the editor with real
- * art — two packed atlases, a tilesheet that is both a Tiled tileset and a
- * spritesheet, plain images, sound effects and music.
+ * art — 16-bit style pixel art in two packed atlases, a tilesheet that is both
+ * a Tiled tileset and a spritesheet, plain images, sound effects and music.
  *
  * Every layout step below is a real, undoable transaction on a ProjectStore,
  * the same calls the canvas and the inspector make, and the result is saved
@@ -39,9 +40,10 @@ import {
  */
 
 /**
- * The art as it arrived: Kenney's packs, a gunshot and a music loop. See
+ * The sound as it arrived: Kenney's effects, a gunshot and a music loop. See
  * ./art/CREDITS.md. From the repo root, which is where `npm run sample` runs:
- * this file is bundled into node_modules/.sample before it runs.
+ * this file is bundled into node_modules/.sample before it runs. The pictures
+ * are drawn by ./art.ts.
  */
 const ART = resolve("scripts/sample/holdout/art");
 
@@ -51,8 +53,8 @@ const CONFIG: ProjectConfig = {
   tile: 64,
   scale: "FIT",
   physics: "arcade",
-  // Kenney's art is drawn smooth, not as pixel art.
-  pixelArt: false,
+  // Pixel art: Phaser keeps it crisp when it is scaled or turned.
+  pixelArt: true,
 };
 
 const TILE = 64;
@@ -63,43 +65,9 @@ const ROWS = 30;
 const at = (c: number) => c * TILE + TILE / 2;
 
 // --------------------------------------------------------------------- tiles
-// Indices into tiles.png (27 × 20 tiles of 64px), the same numbers Tiled shows.
+// Indices into tiles.png (8 × 6 tiles of 64px), the same numbers Tiled shows.
 
-const GRASS = [0, 1, 2, 3];
-const DIRT = [4, 5];
-const CONCRETE = [6, 7];
-const WOOD = 41;
-const LEAVES = 212;
-const DEBRIS = [241, 291, 292, 265];
-/** Big tree, 2 × 2. */
-const TREE = [
-  [180, 181],
-  [207, 208],
-];
-const BUSH = 182;
-
-/**
- * The orange walls, chosen by which neighbours are wall too — what Tiled's
- * terrain brush does. Bits: 1 north, 2 east, 4 south, 8 west.
- */
-const WALL: Record<number, number> = {
-  0: 195, // pillar
-  1: 114, // end, open to the south
-  2: 141, // end, open to the west
-  4: 140, // end, open to the north
-  8: 113, // end, open to the east
-  5: 137, // vertical
-  10: 110, // horizontal
-  6: 108, // corner, top left
-  12: 109, // corner, top right
-  3: 135, // corner, bottom left
-  9: 136, // corner, bottom right
-  14: 111, // T, down
-  11: 112, // T, up
-  7: 138, // T, right
-  13: 139, // T, left
-  15: 169, // cross
-};
+const { GRASS, DIRT, CONCRETE, WOOD, LEAVES, DEBRIS, TREE, BUSH } = T;
 
 /** Same seed, same level: the map is rebuilt byte for byte. */
 function rng(seed: number) {
@@ -143,7 +111,7 @@ function paintLevel() {
       if (isWall(c, r)) {
         const mask =
           (isWall(c, r - 1) ? 1 : 0) | (isWall(c + 1, r) ? 2 : 0) | (isWall(c, r + 1) ? 4 : 0) | (isWall(c - 1, r) ? 8 : 0);
-        walls[r][c] = WALL[mask];
+        walls[r][c] = T.WALL(mask);
         continue;
       }
       if (onPath(c, r) || inHouse(c, r)) continue;
@@ -165,7 +133,7 @@ function paintLevel() {
     canopy[r][c] = BUSH;
   }
 
-  const solidTiles = [...new Set(Object.values(WALL))];
+  const solidTiles = Array.from({ length: 16 }, (_, mask) => T.WALL(mask));
   return {
     layers: [
       { name: "Ground", data: ground },
@@ -180,8 +148,7 @@ function paintLevel() {
 // -------------------------------------------------------------------- assets
 
 /** Width and height from a PNG's header. */
-function pngSize(file: string): { width: number; height: number } {
-  const bytes = readFileSync(file);
+function pngSize(bytes: Buffer): { width: number; height: number } {
   return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
 }
 
@@ -225,15 +192,16 @@ export function buildHoldout(location: string, name = "Holdout") {
     if (!files.includes(rel)) files.push(rel);
   };
   for (const file of plan.writes) write(file.rel, file.contents, file.encoding);
-  log.push(`New project… → Empty template, TypeScript, Vite, 1024 × 576, 64px grid, pixel art off`);
+  log.push(`New project… → Empty template, TypeScript, Vite, 1024 × 576, 64px grid, pixel art on`);
 
   const store = new ProjectStore();
   store.loadProject(structuredClone(plan.project));
 
   // ---------------------------------------------------------------- 2. import
   // Import assets… with the art picked as it came: each sheet beside the XML
-  // its packer wrote, which is what makes it an atlas with Kenney's frame
-  // names. Keys are what the import dialog derives from the file name.
+  // its packer wrote, which is what makes it an atlas with named frames. Keys
+  // are what the import dialog derives from the file name.
+  const art = drawArt();
   const imported: AssetDef[] = [];
   const copy = (from: string, rel: string) => {
     mkdirSync(dirname(join(plan.root, rel)), { recursive: true });
@@ -242,23 +210,24 @@ export function buildHoldout(location: string, name = "Holdout") {
   };
   const image = (file: string, patch: Partial<AssetDef> = {}): AssetDef => {
     const rel = `assets/${file}`;
-    copy(file, rel);
+    const bytes = art[file] as Buffer;
+    write(rel, bytes);
     const def: AssetDef = {
       id: `asset-${file.replace(/\W+/g, "_")}`,
       key: file.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_"),
       kind: "image",
       path: rel,
       url: rel,
-      ...pngSize(join(ART, file)),
+      ...pngSize(bytes),
       ...patch,
     };
     imported.push(def);
     return def;
   };
-  for (const sheet of ["characters", "tanks"]) {
+  for (const sheet of ["characters", "effects"]) {
     const xml = `${sheet}.xml`;
-    copy(xml, `assets/${xml}`);
-    const frames = parsePhaserAtlas(readFileSync(join(ART, xml), "utf8"));
+    write(`assets/${xml}`, art[xml] as string);
+    const frames = parsePhaserAtlas(art[xml] as string);
     if (!frames?.length) throw new Error(`${xml} did not read as an atlas`);
     image(`${sheet}.png`, { kind: "atlas", frames });
   }
@@ -276,9 +245,9 @@ export function buildHoldout(location: string, name = "Holdout") {
   copy("CREDITS.md", "assets/CREDITS.md");
   store.importAssets(imported);
   const characters = imported.find((a) => a.key === "characters")!;
-  const tanks = imported.find((a) => a.key === "tanks")!;
+  const effects = imported.find((a) => a.key === "effects")!;
   log.push(
-    `Import assets… → characters.png + .xml (${characters.frames!.length} frames), tanks.png + .xml (${tanks.frames!.length} frames), ` +
+    `Import assets… → characters.png + .xml (${characters.frames!.length} frames), effects.png + .xml (${effects.frames!.length} frames), ` +
       `tiles.png as a 64px spritesheet, two weapon images, seven sounds`,
   );
 
@@ -326,7 +295,7 @@ export function buildHoldout(location: string, name = "Holdout") {
     scene.settings.height = ROWS * TILE;
     scene.settings.gravityY = 0;
     scene.settings.gridSize = TILE;
-    scene.settings.backgroundColor = "#3f8f4a";
+    scene.settings.backgroundColor = GROUND;
     scene.settings.camera = {
       ...DEFAULT_CAMERA,
       follow: "Player",
@@ -384,53 +353,58 @@ export function buildHoldout(location: string, name = "Holdout") {
     names.map((frame, i) => ({ textureKey: key, frame, ...(durations[i] ? { duration: durations[i] } : {}) }));
   store.upsertAnim({
     key: "survivor_reload",
-    frames: frames("characters", ["survivor1_hold.png", "survivor1_reload.png", "survivor1_hold.png"], [90, 650, 90]),
+    frames: frames("characters", ["survivor_hold", "survivor_reload", "survivor_hold"], [90, 650, 90]),
     fps: 10,
     repeat: 0,
   });
-  store.upsertAnim({ key: "zombie_walk", frames: frames("characters", ["zoimbie1_hold.png", "zoimbie1_stand.png"]), fps: 3, repeat: -1 });
-  store.upsertAnim({ key: "robot_walk", frames: frames("characters", ["robot1_hold.png", "robot1_stand.png"]), fps: 2, repeat: -1 });
+  const walk = (who: string) => [0, 1, 2, 3].map((i) => `${who}_${i}`);
+  store.upsertAnim({ key: "zombie_walk", frames: frames("characters", walk("zombie")), fps: 5, repeat: -1 });
+  store.upsertAnim({ key: "robot_walk", frames: frames("characters", walk("robot")), fps: 4, repeat: -1 });
   store.upsertAnim({
     key: "explode",
-    frames: frames("tanks", ["smokeYellow0.png", "smokeYellow2.png", "smokeOrange1.png", "smokeOrange3.png", "smokeGrey4.png", "smokeGrey5.png"]),
+    frames: frames("effects", [0, 1, 2, 3, 4, 5].map((i) => `blast_${i}`)),
     fps: 14,
     repeat: 0,
   });
   log.push(`Animation timeline → survivor_reload (holds 650ms on the middle frame), zombie_walk, robot_walk, explode`);
 
   // ---------------------------------------------------------------- 7. player
-  // The atlas frames are 51 × 43 with the gun sticking out to the right, so
-  // the origin goes on the head — that is what it turns about — and the body
-  // is a circle around it.
-  const playerId = sprite("characters", "survivor1_gun.png", 20 * TILE, 15 * TILE, {
+  // The frames have the gun sticking out to the right, so the origin goes on
+  // the head — that is what it turns about — and the body is a circle around it.
+  const headAt = (who: { width: number; height: number; headX: number }, radius: number) => ({
+    originX: who.headX / who.width,
+    originY: 0.5,
+    body: body({
+      shape: "circle",
+      radius,
+      offsetX: who.headX * PX - radius,
+      offsetY: (who.height / 2) * PX - radius,
+    }),
+  });
+  const playerId = sprite("characters", "survivor_pistol", 20 * TILE, 15 * TILE, {
     name: "Player",
     group: "player",
-    originX: 17 / 51,
-    originY: 0.5,
-    body: body({ shape: "circle", radius: 15, offsetX: 2, offsetY: 6.5 }),
+    ...headAt(SURVIVOR, 16),
   });
   store.createPrefab({ name: "Player", objectId: playerId, exposed: [], keepAsInstance: true });
-  log.push(`Place characters › survivor1_gun → origin on the head, circle body → Prefab "Player"`);
+  log.push(`Place characters › survivor_pistol → origin on the head, circle body → Prefab "Player"`);
 
   // --------------------------------------------------------------- 8. enemies
-  const seedZombie = sprite("characters", "zoimbie1_hold.png", at(4), at(4), {
+  const seedZombie = sprite("characters", "zombie_0", at(4), at(4), {
     name: "Zombie",
     group: "enemy",
-    originX: 0.4,
-    originY: 0.5,
     playOnSpawn: "zombie_walk",
-    body: body({ shape: "circle", radius: 14, offsetX: 0, offsetY: 7.5 }),
+    ...headAt(WALKER, 16),
   });
   store.createPrefab({ name: "Zombie", objectId: seedZombie, exposed: [], keepAsInstance: true });
 
-  // A robot is a zombie with other art and bigger numbers: a variant.
+  // A robot is a zombie with other art and bigger numbers: a variant. Its
+  // frames are the zombie's size, so the head, origin and body line up.
   store.createVariant("Zombie", "Robot");
   store.openPrefab("Robot");
   const robotRoot = store.prefabDoc!.rootId;
-  store.setObjectProp(robotRoot, "frame", "robot1_hold.png", "Set frame");
+  store.setObjectProp(robotRoot, "frame", "robot_0", "Set frame");
   store.setObjectProp(robotRoot, "playOnSpawn", "robot_walk", "Set animation");
-  store.setObjectProp(robotRoot, "scaleX", 1.2, "Set scale");
-  store.setObjectProp(robotRoot, "scaleY", 1.2, "Set scale");
   store.setClassProp(robotRoot, "speed", 52);
   store.setClassProp(robotRoot, "health", 8);
   store.setClassProp(robotRoot, "damage", 20);
@@ -445,41 +419,35 @@ export function buildHoldout(location: string, name = "Holdout") {
   // Per instance: this one is slower still.
   store.setClassProp(slowRobot, "speed", 36);
   log.push(
-    `Place zoimbie1_hold → circle body, plays zombie_walk → Prefab "Zombie" → variant "Robot" ` +
-      `(robot1_hold, robot_walk, scale 1.2, health 8) → place 3 more, one Robot slower`,
+    `Place zombie_0 → circle body, plays zombie_walk → Prefab "Zombie" → variant "Robot" ` +
+      `(robot_0, robot_walk, health 8) → place 3 more, one Robot slower`,
   );
 
   // ------------------------------------------------- 9. made by code, not placed
   // Promoted from something on the canvas, then deleted from it: what is left
   // is the prefab, for the game's code to make with `new`.
-  const seedBullet = sprite("tanks", "bulletYellowSilver_outline.png", at(20), at(10), {
+  const seedBullet = sprite("effects", "bullet", at(20), at(10), {
     name: "Bullet",
     group: "bullet",
-    scaleX: 0.5,
-    scaleY: 0.5,
-    body: body({ shape: "circle", radius: 8, offsetX: 2, offsetY: 9, collideWorldBounds: false }),
+    body: body({ shape: "circle", radius: 4, offsetX: 0, offsetY: 4, collideWorldBounds: false }),
   });
   store.createPrefab({ name: "Bullet", objectId: seedBullet, exposed: [], keepAsInstance: true });
-  const seedBlast = sprite("tanks", "smokeYellow0.png", at(20), at(10), {
+  const seedBlast = sprite("effects", "blast_0", at(20), at(10), {
     name: "Explosion",
-    scaleX: 1.6,
-    scaleY: 1.6,
     playOnSpawn: "explode",
     sounds: { spawn: "audio_explosion" },
   });
   store.createPrefab({ name: "Explosion", objectId: seedBlast, exposed: [], keepAsInstance: true });
   store.deleteObjects([seedBullet, seedBlast]);
   log.push(
-    `Place tanks › bulletYellowSilver_outline → Prefab "Bullet"; tanks › smokeYellow0, plays explode, ` +
+    `Place effects › bullet → Prefab "Bullet"; effects › blast_0, plays explode, ` +
       `on spawn audio_explosion → Prefab "Explosion"; delete both from the scene`,
   );
 
   // --------------------------------------------------------------- 10. barrels
-  const seedBarrel = sprite("tiles", "315", at(17), at(7), {
+  const seedBarrel = sprite("tiles", String(T.BARREL), at(17), at(7), {
     name: "Barrel",
     group: "barrel",
-    scaleX: 0.75,
-    scaleY: 0.75,
     body: body({ shape: "circle", radius: 24, offsetX: 8, offsetY: 8, immovable: true, collideWorldBounds: false }),
   });
   store.createPrefab({ name: "Barrel", objectId: seedBarrel, exposed: [], keepAsInstance: true });
@@ -487,39 +455,33 @@ export function buildHoldout(location: string, name = "Holdout") {
   for (const [c, r] of barrels) place("Barrel", at(c), at(r));
   // Per instance: the first one, by the north gate, has a shorter fuse.
   store.setClassProp(seedBarrel, "health", 1);
-  log.push(`Place tiles › 315 at 0.75 → immovable circle body → Prefab "Barrel" → place ${barrels.length + 1}`);
+  log.push(`Place tiles › ${T.BARREL} → immovable circle body → Prefab "Barrel" → place ${barrels.length + 1}`);
 
   // ----------------------------------------------------------------- 11. cover
   // Crates are plain sprites: no class, nothing to do but be in the way.
-  const crate = sprite("tiles", "128", 1408, 544, {
+  const crate = sprite("tiles", String(T.CRATE), 1408, 544, {
     name: "Crate",
     group: "cover",
-    scaleX: 0.75,
-    scaleY: 0.75,
-    body: body({ width: 52, height: 52, offsetX: 6, offsetY: 6, immovable: true, collideWorldBounds: false }),
+    body: body({ width: 48, height: 48, offsetX: 8, offsetY: 8, immovable: true, collideWorldBounds: false }),
   });
   store.setSelection([crate]);
   store.fillGrid([crate], { cols: 3, rows: 1, dx: 48, dy: 0 });
-  const crate2 = sprite("tiles", "128", 1568, 672, {
+  const crate2 = sprite("tiles", String(T.CRATE), 1568, 672, {
     name: "Crate",
     group: "cover",
-    scaleX: 0.75,
-    scaleY: 0.75,
-    body: body({ width: 52, height: 52, offsetX: 6, offsetY: 6, immovable: true, collideWorldBounds: false }),
+    body: body({ width: 48, height: 48, offsetX: 8, offsetY: 8, immovable: true, collideWorldBounds: false }),
   });
   store.fillGrid([crate2], { cols: 2, rows: 2, dx: 48, dy: 48 });
-  sprite("tiles", "128", at(14), at(18), {
+  sprite("tiles", String(T.CRATE), at(14), at(18), {
     name: "Crate",
     group: "cover",
-    scaleX: 0.75,
-    scaleY: 0.75,
     rotation: 20,
-    body: body({ width: 52, height: 52, offsetX: 6, offsetY: 6, immovable: true, collideWorldBounds: false }),
+    body: body({ width: 48, height: 48, offsetX: 8, offsetY: 8, immovable: true, collideWorldBounds: false }),
   });
-  log.push(`Place tiles › 128 → immovable box body, group cover → Fill grid 3 × 1 and 2 × 2 → one more, turned 20°`);
+  log.push(`Place tiles › ${T.CRATE} → immovable box body, group cover → Fill grid 3 × 1 and 2 × 2 → one more, turned 20°`);
 
   // -------------------------------------------------------------- 12. spawners
-  const seedSpawner = sprite("tiles", "368", 20 * TILE, at(1), { name: "Spawner" });
+  const seedSpawner = sprite("tiles", String(T.HATCH), 20 * TILE, at(1), { name: "Spawner" });
   store.createPrefab({ name: "Spawner", objectId: seedSpawner, exposed: [], keepAsInstance: true });
   store.setObjectProp(seedSpawner, "name", "SpawnerNorth", "Rename");
   const south = place("Spawner", 20 * TILE, at(28), "SpawnerSouth");
@@ -534,15 +496,13 @@ export function buildHoldout(location: string, name = "Holdout") {
   store.setClassProp(east, "kind", "Robot");
   store.setClassProp(east, "every", 6500);
   store.setClassProp(east, "delay", 3000);
-  log.push(`Place tiles › 368 → Prefab "Spawner" → place 4 at the gates' paths, each with its own kind, rate and delay`);
+  log.push(`Place tiles › ${T.HATCH} → Prefab "Spawner" → place 4 at the gates' paths, each with its own kind, rate and delay`);
 
   // --------------------------------------------------------------- 13. pickups
   const seedPickup = sprite("weapon_machine", undefined, at(14), at(10), {
     name: "Pickup",
     group: "pickup",
-    scaleX: 1.8,
-    scaleY: 1.8,
-    body: body({ width: 33, height: 10, collideWorldBounds: false }),
+    body: body({ width: 64, height: 20, offsetX: 4, offsetY: 4, collideWorldBounds: false }),
   });
   // The texture is published to instances, so each pickup shows its own gun.
   store.createPrefab({ name: "Pickup", objectId: seedPickup, exposed: ["texture"], keepAsInstance: true });
@@ -597,11 +557,12 @@ export function buildHoldout(location: string, name = "Holdout") {
   store.removeLayer(store.scene!.layers.find((l) => l.name === "Details")!.id);
   store.moveLayer(store.scene!.layers.find((l) => l.name === "Canopy")!.id, 1);
   store.setActiveLayer(store.scene!.layers.find((l) => l.kind === "object")!.id);
-  sprite("characters", "survivor1_machine.png", 300, 360, { name: "Survivor", originX: 17 / 51, rotation: -15 });
-  sprite("characters", "zoimbie1_hold.png", 700, 330, { name: "Walker", rotation: 190, playOnSpawn: "zombie_walk" });
-  sprite("characters", "zoimbie1_hold.png", 790, 400, { name: "Walker", rotation: 175, playOnSpawn: "zombie_walk" });
-  sprite("characters", "robot1_hold.png", 860, 290, { name: "Robot", rotation: 200, scaleX: 1.2, scaleY: 1.2, playOnSpawn: "robot_walk" });
-  sprite("tiles", "315", 220, 430, { name: "Barrel", scaleX: 0.75, scaleY: 0.75 });
+  const facing = (who: { width: number; headX: number }) => ({ originX: who.headX / who.width });
+  sprite("characters", "survivor_machinegun", 300, 360, { name: "Survivor", ...facing(SURVIVOR), rotation: -15 });
+  sprite("characters", "zombie_0", 700, 330, { name: "Walker", ...facing(WALKER), rotation: 190, playOnSpawn: "zombie_walk" });
+  sprite("characters", "zombie_2", 790, 400, { name: "Walker", ...facing(WALKER), rotation: 175, playOnSpawn: "zombie_walk" });
+  sprite("characters", "robot_0", 860, 290, { name: "Robot", ...facing(WALKER), rotation: 200, playOnSpawn: "robot_walk" });
+  sprite("tiles", String(T.BARREL), 220, 430, { name: "Barrel" });
   store.addLayer("Text");
   const words = (content: string, x: number, y: number, name: string, size: number, extra: Partial<SceneObject["text"]> = {}) => {
     const id = store.addText(content, { x, y })!;
@@ -615,7 +576,7 @@ export function buildHoldout(location: string, name = "Holdout") {
   words("Hold the compound. They come in waves.", 512, 200, "Tagline", 22);
   words("click to start", 512, 470, "Prompt", 26);
   words(
-    'Art and sound: Kenney (CC0) · Music: "Zombies March" by yd (CC0) · Gunshot: Kurt (CC0)',
+    'Sound: Kenney (CC0) · Music: "Zombies March" by yd (CC0) · Gunshot: Kurt (CC0)',
     512,
     556,
     "Credits",
@@ -665,8 +626,9 @@ function readme(log: string[]): string {
   return `# Holdout
 
 A top-down survival shooter, laid out in Mosaic and written in Phaser. It
-exists to test the editor with real art, so it is small but leans on most of
-what Mosaic does: two packed atlases, a tilesheet that is both a Tiled tileset
+exists to test the editor with real art — 16-bit style pixel art, drawn in
+code by the sample's builder — so it is small but leans on most of what Mosaic
+does: two packed atlases, a tilesheet that is both a Tiled tileset
 and a spritesheet, animation, sound, prefabs made only by code, a variant,
 per-instance values, groups, two scenes and a camera that follows.
 
@@ -699,17 +661,20 @@ ${log.map((line, i) => `${i + 1}. ${line}`).join("\n")}
 
 ## What to check when testing the editor
 
-- **Atlas import:** \`characters\` and \`tanks\` came in as Starling XML, which is
-  what Kenney ships. Frames keep their names (\`survivor1_gun.png\`), and the
-  layout loads the JSON Mosaic writes beside each sheet.
+- **Atlas import:** \`characters\` and \`effects\` came in as Starling XML, the
+  format sprite packers write. Frames keep their names (\`survivor_pistol\`), and
+  the layout loads the JSON Mosaic writes beside each sheet.
+- **Pixel art:** every art pixel is ${PX} × ${PX} on screen, and \`pixelArt\` is on,
+  so nothing blurs when the camera follows or a sprite turns. Nothing is placed
+  scaled, so no pixel is bigger than another.
 - **One sheet, two uses:** \`tiles.png\` is the Tiled map's tileset and a 64px
-  spritesheet. Barrels are frame 315, crates 128, hatches 368.
+  spritesheet. Barrels are frame ${T.BARREL}, crates ${T.CRATE}, hatches ${T.HATCH}.
 - **Draw order:** Canopy is a tile layer above the Objects layer, so the player
   walks under the trees. The HUD is its own object layer, on top of both.
 - **Made by code:** \`Bullet\` and \`Explosion\` are never placed. The explosion's
   animation and sound are set on its prefab and run from its constructor, so
   \`new Explosion()\` in the scene's code plays both.
-- **Variant:** \`Robot\` changes Zombie's frame, walk animation, scale and four
+- **Variant:** \`Robot\` changes Zombie's frame, walk animation and four
   numbers. \`new Robot()\` from a spawner gets all of them.
 - **Per-instance values:** each Spawner's kind, rate and delay; the slower
   Robot; the north-gate barrel's shorter fuse; the Silencer pickup's texture,

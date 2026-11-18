@@ -8,10 +8,9 @@ export class BulletBase extends Phaser.Physics.Arcade.Sprite {
   declare body: Phaser.Physics.Arcade.Body;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "tanks", "bulletYellowSilver_outline.png");
+    super(scene, x, y, "effects", "bullet");
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.setScale(0.5, 0.5);
     this.applyBody();
   }
 
@@ -22,7 +21,7 @@ export class BulletBase extends Phaser.Physics.Arcade.Sprite {
    */
   applyBody(): this {
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(8, 2, 9);
+    body.setCircle(4, 0, 4);
     body.setImmovable(false);
     body.setAllowGravity(false);
     body.setBounce(0, 0);

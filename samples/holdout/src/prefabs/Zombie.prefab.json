@@ -9,19 +9,19 @@
     "rotation": 0,
     "scaleX": 1,
     "scaleY": 1,
-    "originX": 0.4,
+    "originX": 0.3611111111111111,
     "originY": 0.5,
     "visible": true,
     "texture": "characters",
-    "frame": "zoimbie1_hold.png",
+    "frame": "zombie_0",
     "group": "enemy",
     "body": {
       "shape": "circle",
       "width": 32,
       "height": 32,
-      "radius": 14,
-      "offsetX": 0,
-      "offsetY": 7.5,
+      "radius": 16,
+      "offsetX": 10,
+      "offsetY": 12,
       "immovable": false,
       "allowGravity": false,
       "bounce": 0,
@@ -29,7 +29,7 @@
     },
     "playOnSpawn": "zombie_walk",
     "data": {},
-    "lid": "nmwjcrwopa",
+    "lid": "nmwkujbf3a",
     "children": []
   }
 }

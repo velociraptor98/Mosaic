@@ -1,5 +1,7 @@
+import type { SourceSite } from "../../../electron/contract";
 import { uid, uniqueKey, uniqueName } from "../store/ids";
 import { unbindableParams } from "../../shared/prefabBinding";
+import { walkNodes } from "../../shared/prefabs";
 import {
   DEFAULT_COLLIDE_WORLD_BOUNDS,
 } from "../../shared/size";
@@ -65,6 +67,8 @@ export interface RecordedObject {
   /** Animation playing when the snapshot was taken. */
   anim?: string;
   body?: RecordedBody;
+  /** Where it was made, innermost project line first. */
+  sites?: SourceSite[];
 }
 
 export interface RecordedLoad {
@@ -96,6 +100,11 @@ export interface RecordedTexture {
 
 export interface Recording {
   sceneKey: string;
+  /**
+   * The scene's class name. A layout is named after the class that imports
+   * it, and the key a scene registers under is often something else.
+   */
+  className?: string;
   settings: {
     backgroundColor?: string | null;
     /**
@@ -159,8 +168,32 @@ export interface ImportResult {
   prefabCandidates: PrefabCandidate[];
   /** Prefabs backed by the project's own classes, ready to add. */
   prefabs: PrefabDef[];
+  /** Asset keys that point at art already in the project, rather than a copy. */
+  reused: string[];
+  /** Where each object was made in the project's code, by object id. */
+  sites: Record<string, SourceSite[]>;
   issues: string[];
 }
+
+/**
+ * The project the import lands in, as far as its art is concerned.
+ *
+ * A game's loader asks for `assets/star.png`; in a Vite project that file is
+ * `public/assets/star.png`, and it is already there. Pointing at it beats
+ * writing a PNG copy of it, which is what every import used to do — the copy
+ * re-encoded the art, and the game and the layout then loaded the same
+ * picture under two paths.
+ */
+export interface LocalArt {
+  /** Where copies go, as `<assetsDir>/imported/`. */
+  assetsDir: string;
+  /** The folder the game's server serves as `/`; "" for the project root. */
+  publicDir: string;
+  /** Project-relative paths of every art file already in the project. */
+  files: Set<string>;
+}
+
+const DEFAULT_LOCAL: LocalArt = { assetsDir: "assets", publicDir: "", files: new Set() };
 
 /**
  * Phaser's own display types. Anything else is a subclass the project wrote,
@@ -190,7 +223,11 @@ const DEFAULT_TEXT: Omit<TextDef, "content"> = {
   wrapWidth: 0,
 };
 
-export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): ImportResult {
+export function sceneFromRecording(
+  rec: Recording,
+  known: KnownClass[] = [],
+  local: LocalArt = DEFAULT_LOCAL,
+): ImportResult {
   const issues: string[] = [];
 
   // ---- 1. what is actually in the scene ------------------------------------
@@ -236,6 +273,7 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
   const names: string[] = [];
   const idByRecord = new Map<RecordedObject, string>();
   const objects: SceneObject[] = [];
+  const sites: Record<string, SourceSite[]> = {};
   let unnamed = 0;
 
   for (const o of live) {
@@ -251,6 +289,7 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
 
     const id = uid("obj");
     idByRecord.set(o, id);
+    if (o.sites?.length) sites[id] = o.sites;
 
     objects.push({
       id,
@@ -314,7 +353,7 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
   const canvas = rec.settings.worldBounds ?? rec.settings.canvas ?? { w: 960, h: 540 };
 
   const scene: SceneData = {
-    key: uniqueKey(rec.sceneKey, []),
+    key: uniqueKey(rec.className || rec.sceneKey, []),
     name: rec.sceneKey,
     settings: {
       width: canvas.w,
@@ -340,15 +379,45 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
   // The loader calls say what was asked for; the captured textures say what was
   // actually resolved. Prefer the second: it is the only version that survives
   // a CDN base URL or a path relative to a web root this project does not have.
-  const { assets, remote } = assetsFrom(rec.loads);
+  const { assets, remote, fromBase } = assetsFrom(rec.loads);
   const files: { rel: string; base64: string }[] = [];
   const byKey = new Map(assets.map((a) => [a.key, a]));
+  const importedDir = `${local.assetsDir}/imported/`;
+
+  // First, everything the loader fetched from inside the project. Those files
+  // are already where the game keeps them, under the path the game loads
+  // them by, so they are referenced as they are. An atlas is the exception:
+  // the layout loads a frame document Mosaic writes, so its pixels come
+  // across as a copy beside that document.
+  const reused = new Set<string>();
+  for (const asset of assets) {
+    if (fromBase.has(asset.key) || asset.kind === "atlas") continue;
+    const url = asset.path.replace(/^\.?\/+/, "");
+    const rel = local.publicDir ? `${local.publicDir}/${url}` : url;
+    if (!local.files.has(rel)) continue;
+    asset.path = rel;
+    reused.add(asset.key);
+  }
 
   for (const tex of rec.textures ?? []) {
     const comma = tex.dataUrl.indexOf(",");
     if (comma < 0) continue;
-    const rel = `assets/imported/${safeFile(tex.key)}.png`;
+    if (reused.has(tex.key)) {
+      const existing = byKey.get(tex.key)!;
+      existing.width = tex.width;
+      existing.height = tex.height;
+      continue;
+    }
+    const rel = `${importedDir}${safeFile(tex.key)}.png`;
     files.push({ rel, base64: tex.dataUrl.slice(comma + 1) });
+    // Loaded from a CDN: the copy is what the editor draws, and the layout
+    // keeps loading what the game loads. An atlas is loaded from the copy,
+    // because its frame document is the one Mosaic writes beside it.
+    const base = fromBase.get(tex.key);
+    const loaded = byKey.get(tex.key);
+    if (base && loaded && loaded.kind !== "atlas" && !hasFrames(tex) && !/^[a-z]+:|^\/\//i.test(loaded.path)) {
+      loaded.source = `${base}${loaded.path.replace(/^\/+/, "")}`;
+    }
 
     const frames =
       tex.frames.length > 1
@@ -395,8 +464,9 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
   // the manifest looked tidier but was worse — every one became a permanent
   // "missing from disk" warning against a file the project never had, which is
   // noise the user cannot act on. Saying it once, here, is honest.
-  const unresolved = assets.filter((a) => !a.path.startsWith("assets/imported/"));
-  const resolved = assets.filter((a) => a.path.startsWith("assets/imported/"));
+  const isResolved = (a: Omit<AssetDef, "url">) => reused.has(a.key) || a.path.startsWith(importedDir);
+  const unresolved = assets.filter((a) => !isResolved(a));
+  const resolved = assets.filter(isResolved);
   if (unresolved.length) {
     issues.push(
       `${unresolved.length} asset(s) had no bytes to bring across (${unresolved
@@ -407,7 +477,7 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
   }
   if (remote.length && files.length) {
     issues.push(
-      `Art was fetched from ${remote[0]} and is being copied into assets/imported/ — the project itself has no copy of it`,
+      `Art comes from ${remote[0]}. Images are still loaded from there; the editor draws copies in ${importedDir}, and atlases load from those copies`,
     );
   }
 
@@ -503,7 +573,22 @@ export function sceneFromRecording(rec: Recording, known: KnownClass[] = []): Im
     );
   }
 
-  return { scene, anims, assets: resolved, files, prefabCandidates, prefabs, issues };
+  return {
+    scene,
+    anims,
+    assets: resolved,
+    files,
+    prefabCandidates,
+    prefabs,
+    reused: [...reused].sort(),
+    sites,
+    issues,
+  };
+}
+
+/** True for a texture with frames of its own: an atlas, whatever loaded it. */
+function hasFrames(tex: RecordedTexture): boolean {
+  return tex.frames.length > 1;
 }
 
 /** A loader key is free-form; a filename is not. */
@@ -554,14 +639,22 @@ function firstColour(value: string | null | undefined): string | null {
 function assetsFrom(loads: RecordedLoad[]): {
   assets: Omit<AssetDef, "url">[];
   remote: string[];
+  /**
+   * The base URL each key was loaded under. Those are not files in the
+   * project, whatever their path says: Phaser fetched `base + path`.
+   */
+  fromBase: Map<string, string>;
 } {
   const assets: Omit<AssetDef, "url">[] = [];
   const remote: string[] = [];
+  const fromBase = new Map<string, string>();
   const seen = new Set<string>();
+  let base: string | undefined;
 
   const push = (key: string, path: string, extra: Partial<AssetDef> = {}) => {
     if (!key || seen.has(key)) return;
     seen.add(key);
+    if (base) fromBase.set(key, base.endsWith("/") ? base : `${base}/`);
     assets.push({
       id: `asset-${key}`,
       key,
@@ -574,6 +667,7 @@ function assetsFrom(loads: RecordedLoad[]): {
   };
 
   for (const load of loads) {
+    base = load.baseURL || undefined;
     if (load.baseURL && !remote.includes(load.baseURL)) remote.push(load.baseURL);
     const dir = load.path ?? "";
     const [first, second, third] = load.args as [unknown, unknown, unknown];
@@ -617,7 +711,7 @@ function assetsFrom(loads: RecordedLoad[]): {
     }
   }
 
-  return { assets, remote };
+  return { assets, remote, fromBase };
 }
 
 /**
@@ -639,9 +733,25 @@ export function applyImport(project: ProjectData, imported: ImportResult): strin
   project.scenes.push({ ...imported.scene, key, name: imported.scene.name });
 
   let addedAssets = 0;
+  let renamed = 0;
   const assetKeys = new Set(project.assets.map((a) => a.key));
   for (const asset of imported.assets) {
     if (assetKeys.has(asset.key)) continue;
+    // The file is already an asset, named after its filename because nothing
+    // said otherwise. The game's loader key is the better name — it is the one
+    // the game's own code uses — so the asset takes it, as long as nothing in
+    // the project refers to the old one yet. One file, one asset.
+    const same = project.assets.find((a) => a.path === asset.path && !a.generated);
+    if (same && !assetReferenced(project, same.key)) {
+      assetKeys.delete(same.key);
+      assetKeys.add(asset.key);
+      same.key = asset.key;
+      same.kind = asset.kind;
+      if (asset.frameWidth) same.frameWidth = asset.frameWidth;
+      if (asset.frameHeight) same.frameHeight = asset.frameHeight;
+      renamed += 1;
+      continue;
+    }
     assetKeys.add(asset.key);
     // The bytes are not copied: these files live where the project already put
     // them, and an import that duplicated somebody's art folder into ours would
@@ -650,6 +760,7 @@ export function applyImport(project: ProjectData, imported: ImportResult): strin
     addedAssets += 1;
   }
   if (addedAssets) notes.push(`Added ${addedAssets} asset reference(s).`);
+  if (renamed) notes.push(`${renamed} asset(s) renamed to the key the game loads them by.`);
 
   let addedPrefabs = 0;
   const prefabNames = new Set(project.prefabs.map((p) => p.name));
@@ -672,4 +783,15 @@ export function applyImport(project: ProjectData, imported: ImportResult): strin
   if (addedAnims) notes.push(`Added ${addedAnims} animation(s).`);
 
   return [...notes, ...imported.issues];
+}
+
+/** Whether anything in the project already names this texture key. */
+function assetReferenced(project: ProjectData, key: string): boolean {
+  for (const scene of project.scenes) {
+    if (scene.objects.some((o) => o.texture === key)) return true;
+  }
+  for (const prefab of project.prefabs) {
+    if (prefab.root && walkNodes(prefab.root).some((n) => n.texture === key)) return true;
+  }
+  return project.anims.some((a) => a.frames.some((f) => f.textureKey === key));
 }

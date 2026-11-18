@@ -77,9 +77,7 @@ function ObjectTab() {
 
   if (!selection.length) {
     return (
-      <div className="empty">
-        Select an object on the canvas, in the Outliner, or marquee a set of them.
-      </div>
+      <div className="empty">Nothing selected.</div>
     );
   }
 
@@ -305,10 +303,6 @@ function TextFields({
         locked={locked("text.fixed")}
         onCommit={(v) => onCommit("text.fixed", v || undefined, "Pin to camera")}
       />
-      <div className="hint">
-        Pinned text ignores the camera, so a score or a timer stays where you put it however far
-        the level scrolls.
-      </div>
     </>
   );
 }
@@ -336,10 +330,7 @@ function SoundFields({
     return (
       <>
         <div className="section-title">Sound</div>
-        <div className="hint">
-          No audio in this project yet. Import a clip and it can be played when this object
-          spawns.
-        </div>
+        <div className="hint">No audio in this project.</div>
       </>
     );
   }
@@ -358,9 +349,6 @@ function SoundFields({
         options={options}
         onCommit={(v) => onCommit("sounds.spawn", v || undefined, "Set spawn sound")}
       />
-      <div className="hint">
-        A sound on contact, or under any other condition, is behaviour: play it from your code.
-      </div>
     </>
   );
 }
@@ -456,14 +444,12 @@ function TileTab() {
           </div>
           {!current?.tilemap && (
             <div className="banner error">
-              This layer's map is missing or is not a Tiled map any more. Put the file back, or
-              remove the layer.
+              This layer's map is missing.
             </div>
           )}
           {current?.tilemap && !current.tilemap.layers.includes(active.layer) && (
             <div className="banner error">
-              {current.path} has no tile layer called "{active.layer}". It was renamed or deleted
-              in Tiled.
+              {current.path} has no tile layer called "{active.layer}".
             </div>
           )}
         </>
@@ -476,11 +462,7 @@ function TileTab() {
         </button>
       </div>
       {!maps.length && (
-        <div className="empty">
-          No Tiled maps in this project. Export one from Tiled as JSON (<code>.tmj</code> or{" "}
-          <code>.json</code>, with its tilesets embedded) into <code>assets/</code>, or import it
-          here, and it can be placed in a scene.
-        </div>
+        <div className="empty">No Tiled maps in this project.</div>
       )}
       {maps.map((asset) => {
         const info = asset.tilemap;
@@ -504,11 +486,7 @@ function TileTab() {
                     </span>
                   ))}
                 </div>
-                <div className="hint">
-                  {info.collides
-                    ? "Tiles with the collides property are marked solid in the layout."
-                    : "No tile has the collides property, so nothing in this map is solid yet."}
-                </div>
+                {!info.collides && <div className="hint">No tile has the collides property.</div>}
                 {(info.issues ?? []).map((issue) => (
                   <div key={issue} className="banner warn">
                     {issue}
@@ -531,11 +509,6 @@ function TileTab() {
           </div>
         );
       })}
-
-      <div className="hint">
-        Terrain is drawn in Tiled and saved there; this canvas redraws when the file changes. In a
-        scene, each tile layer is a row in LAYERS, so objects can sit between two of them.
-      </div>
     </div>
   );
 }
@@ -606,7 +579,7 @@ function PhysicsTab() {
   if (!selection.length) {
     return (
       <div className="stack">
-        <div className="empty">Select an object to give it a body.</div>
+        <div className="empty">Nothing selected.</div>
         <GroupList />
       </div>
     );
@@ -629,13 +602,6 @@ function PhysicsTab() {
           set("body", on ? bodyForSize(objectSize(store.project, resolved)) : undefined)
         }
       />
-      {!body && (
-        <div className="hint">
-          Defaults come from the object's own art — the atlas frame, the spritesheet cell, or the
-          whole image. Box or circle covers the common cases; arbitrary polygons are a Matter-only
-          concern.
-        </div>
-      )}
       {body && (
         <>
           <SelectField
@@ -677,11 +643,6 @@ function PhysicsTab() {
       )}
 
       <GroupList />
-
-      <div className="hint">
-        The layout gives the body its shape and puts the object in its group. What it collides with
-        is a line of your scene's code: <code>this.physics.add.collider(player, groups.solid)</code>.
-      </div>
     </div>
   );
 }
@@ -693,10 +654,7 @@ function AnimTab() {
 
   if (!selection.length) {
     return (
-      <div className="empty">
-        Select an object to name the animation it plays on spawn. Build animations in the bottom
-        dock.
-      </div>
+      <div className="empty">Nothing selected.</div>
     );
   }
   const obj = selection[0];
@@ -780,10 +738,6 @@ function CameraFields() {
             <NumberField label="Deadzone W" value={cam.deadzoneWidth} onCommit={(v) => set({ deadzoneWidth: v })} />
             <NumberField label="Deadzone H" value={cam.deadzoneHeight} onCommit={(v) => set({ deadzoneHeight: v })} />
           </div>
-          <div className="hint">
-            Lerp 1 is rigid; lower values trail behind. A deadzone is a box in the middle the
-            target can move inside before the camera bothers to follow.
-          </div>
         </>
       )}
       <NumberField label="Zoom" value={cam.zoom} step={0.1} onCommit={(v) => set({ zoom: v })} />
@@ -813,10 +767,7 @@ function MusicFields() {
     <>
       <div className="section-title">Music</div>
       {clips.length === 0 ? (
-        <div className="hint">
-          No audio in this project yet. Imported clips can be played here as looping background
-          music for the scene.
-        </div>
+        <div className="hint">No audio in this project.</div>
       ) : (
         <>
           <SelectField
@@ -875,10 +826,6 @@ function SceneTab() {
       />
 
       <div className="section-title">World edges</div>
-      <div className="hint">
-        Which sides stop a body. Open one to let things leave the world — a ball past the floor, a
-        bullet off the top.
-      </div>
       <div className="grid2">
         {(["left", "right", "top", "bottom"] as const).map((side) => {
           const bounds = scene.settings.bounds ?? DEFAULT_WORLD_BOUNDS;

@@ -15,19 +15,29 @@ import { pathToFileURL } from "node:url";
 
 export const ASSET_SCHEME = "mosaic";
 
-/** Must run before app.whenReady() for the scheme to behave like https. */
+/**
+ * The scheme a scene recording is served over. It is handled per recording,
+ * on that recording's own session, and serves exactly two folders: the
+ * harness, and the folder the game's own server would serve. See
+ * recordScene.ts.
+ */
+export const RECORD_SCHEME = "mosaic-record";
+
+/**
+ * Must run before app.whenReady() for the schemes to behave like https.
+ * Electron allows this call once, so every scheme is registered here.
+ */
 export function registerAssetScheme(): void {
+  const privileges = {
+    standard: true,
+    secure: true,
+    supportFetchAPI: true,
+    corsEnabled: true,
+    stream: true,
+  };
   protocol.registerSchemesAsPrivileged([
-    {
-      scheme: ASSET_SCHEME,
-      privileges: {
-        standard: true,
-        secure: true,
-        supportFetchAPI: true,
-        corsEnabled: true,
-        stream: true,
-      },
-    },
+    { scheme: ASSET_SCHEME, privileges },
+    { scheme: RECORD_SCHEME, privileges },
   ]);
 }
 

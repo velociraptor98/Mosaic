@@ -79,7 +79,7 @@ export class Playtest {
     const root = this.workspace.location?.root;
     if (!root) return;
     this.set({ status: "starting", root, url: null, log: "", nonce: 0 });
-    this.store.setStatus("Starting the project's dev server…");
+    this.store.setStatus("Starting the game…");
 
     // The game reads what is on disk, so what is on disk has to be current.
     await this.workspace.saveNow();

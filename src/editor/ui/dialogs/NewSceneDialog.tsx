@@ -14,12 +14,10 @@ export function NewSceneDialog({ onClose }: { onClose: () => void }) {
   const [template, setTemplate] = useState<TemplateId>("platformer");
 
   const key = uniqueKey(name, store.project.scenes.map((s) => s.key));
-  const collision = store.project.scenes.some((s) => s.key === name.replace(/[^\w]+/g, "_"));
 
   return (
     <Dialog
       title="New scene"
-      subtitle="Writes src/scenes/<key>.scene.json and registers it in the manifest."
       onClose={onClose}
       footer={
         <>
@@ -43,8 +41,7 @@ export function NewSceneDialog({ onClose }: { onClose: () => void }) {
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </label>
       <p className="hint">
-        File: <code>src/scenes/{key}.scene.json</code>
-        {collision && " — key collision resolved before write"}
+        File: <code>{store.project.config.paths.scenes}/{key}.scene.json</code>
       </p>
 
       <div className="template-grid">

@@ -8,6 +8,8 @@
  * colliders, `new`.
  */
 
+import { MUZZLE, TILE_INDEX } from "./art";
+
 export const MAIN = `import Phaser from "phaser";
 import { Title } from "./scenes/Title";
 import { Level_01 } from "./scenes/Level_01";
@@ -24,7 +26,7 @@ new Phaser.Game({
   width: 1024,
   height: 576,
   backgroundColor: "#14171a",
-  roundPixels: true,
+  pixelArt: true,
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: { default: "arcade", arcade: { gravity: { x: 0, y: 0 }, debug: false } },
   scene: scenes,
@@ -207,7 +209,7 @@ export class Level_01 extends Phaser.Scene {
     const blast = new Explosion(this, x, y);
     blast.setDepth(this.layout.player.depth + 1);
     // A scorch mark from the same sheet as the tiles, between the ground and the walls.
-    this.add.image(x, y, "tiles", 319).setDepth(this.layout.details.depth + 0.5).setAlpha(0.8);
+    this.add.image(x, y, "tiles", ${TILE_INDEX.SCORCH}).setDepth(this.layout.details.depth + 0.5).setAlpha(0.8);
     this.cameras.main.shake(220, 0.01);
 
     const near = (o: Phaser.GameObjects.Components.Transform) =>
@@ -256,15 +258,15 @@ export type Weapon = "pistol" | "machinegun" | "silencer";
 
 /** Each gun: the frame that holds it, ms between shots, clip size, spread in radians, how loud. */
 const GUNS: Record<Weapon, { frame: string; rate: number; clip: number; spread: number; volume: number }> = {
-  pistol: { frame: "survivor1_gun.png", rate: 280, clip: 12, spread: 0.03, volume: 0.6 },
-  machinegun: { frame: "survivor1_machine.png", rate: 95, clip: 40, spread: 0.1, volume: 0.45 },
-  silencer: { frame: "survivor1_silencer.png", rate: 190, clip: 20, spread: 0.015, volume: 0.12 },
+  pistol: { frame: "survivor_pistol", rate: 280, clip: 12, spread: 0.03, volume: 0.6 },
+  machinegun: { frame: "survivor_machinegun", rate: 95, clip: 40, spread: 0.1, volume: 0.45 },
+  silencer: { frame: "survivor_silencer", rate: 190, clip: 20, spread: 0.015, volume: 0.12 },
 };
 
 type Keys = Record<"up" | "down" | "left" | "right", Phaser.Input.Keyboard.Key>;
 
 /** Where the barrel ends, from the sprite's origin, facing right: forward and to the side. */
-const MUZZLE = { forward: 36, side: 9 };
+const MUZZLE = { forward: ${MUZZLE.forward}, side: ${MUZZLE.side} };
 
 /**
  * Player — this file is yours.

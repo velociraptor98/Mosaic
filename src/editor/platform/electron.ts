@@ -65,12 +65,14 @@ export function createElectronPlatform(api: MosaicApi): Platform {
         prefabs: files.prefabs,
         assets: files.assets,
         occupied: files.occupied,
+        existing: files.existing ?? null,
       };
     },
 
     canImportPhaser: true,
     findGameEntries: (root) => api.findGameEntries(root),
     recordScene: (root, entry) => api.recordScene(root, entry),
+    analyzeClass: (root, rel, cls) => api.analyzeClass(root, rel, cls),
 
     canRunGame: true,
     startDevServer: (root) => api.devServerStart(root),

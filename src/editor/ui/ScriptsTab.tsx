@@ -23,29 +23,20 @@ export function ScriptsTab() {
   const selection = store.selection;
   if (!selection.length) {
     return (
-      <div className="empty">
-        Select an object to see its class. Mosaic reads the fields a class marks{" "}
-        <code>@editable</code> and stores the values you set here in the scene file.
-      </div>
+      <div className="empty">Nothing selected.</div>
     );
   }
 
   if (!platform.canOpenProjects) {
     return (
-      <div className="empty">
-        Class fields are read from a project folder. The browser build has no folder — open the
-        desktop app to see them.
-      </div>
+      <div className="empty">Only available in the desktop app.</div>
     );
   }
 
   const obj = selection[0];
   if (!obj.prefab && !store.prefabDoc) {
     return (
-      <div className="empty">
-        {obj.name} is a plain sprite, with no class of its own. Make it a prefab to give it one:
-        behaviour then goes in that class, the way it would on any Phaser sprite subclass.
-      </div>
+      <div className="empty">{obj.name} has no class.</div>
     );
   }
 
@@ -94,7 +85,7 @@ function ClassProps({ obj }: { obj: SceneObject }) {
         src: prefab.source.module,
         cls: prefab.source.export === "default" ? prefab.name : prefab.source.export,
       }
-    : { src: prefabClassPath(prefab.name, workspace.language), cls: className(prefab.name) };
+    : { src: prefabClassPath(prefab.name, workspace.language, store.project.config.paths), cls: className(prefab.name) };
   const cls =
     registry.index.byKey.get(`${where.src}::${where.cls}`) ??
     registry.index.classes.find((c) => c.name === where.cls && !isGeneratedPath(c.src));
@@ -116,21 +107,17 @@ function ClassProps({ obj }: { obj: SceneObject }) {
       </div>
       {!cls && (
         <div className="hint">
-          <code>{where.src}</code> is not on disk yet — it is written the next time the project
-          saves, and from then on it is yours.
+          <code>{where.src}</code> is written on the next save.
         </div>
       )}
       {cls && properties.length === 0 && (
         <div className="hint">
-          Add <code>@editable</code> to a field's doc comment in <code>{cls.src}</code> and it
-          appears here, for every {prefab.name} you place.
+          No <code>@editable</code> fields.
         </div>
       )}
       {codeOwnsDefaults && properties.length > 0 && (
         <div className="hint">
-          These defaults are the field values in <code>{cls?.src ?? where.src}</code>, which is
-          what <code>new {where.cls}(…)</code> gives. Change them there, set them on a placed
-          instance, or make a variant to tune them here.
+          Defaults from <code>{cls?.src ?? where.src}</code>.
         </div>
       )}
       {codeOwnsDefaults &&

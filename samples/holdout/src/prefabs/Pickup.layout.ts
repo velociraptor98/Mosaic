@@ -11,7 +11,6 @@ export class PickupBase extends Phaser.Physics.Arcade.Sprite {
     super(scene, x, y, "weapon_machine");
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.setScale(1.8, 1.8);
     this.applyBody();
   }
 
@@ -22,8 +21,8 @@ export class PickupBase extends Phaser.Physics.Arcade.Sprite {
    */
   applyBody(): this {
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setSize(33, 10, false);
-    body.setOffset(0, 0);
+    body.setSize(64, 20, false);
+    body.setOffset(4, 4);
     body.setImmovable(false);
     body.setAllowGravity(false);
     body.setBounce(0, 0);

@@ -65,7 +65,6 @@ export function GridDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Fill grid"
-      subtitle="Stamps the selection across a grid, in one undoable step."
       onClose={onClose}
       footer={
         <>
@@ -80,7 +79,7 @@ export function GridDialog({ onClose }: { onClose: () => void }) {
     >
       <div className="stack">
         {!perCell ? (
-          <p className="muted">Select something on the canvas first — that is what gets stamped.</p>
+          <p className="muted">Nothing selected.</p>
         ) : (
           <>
             <div className="kv">
@@ -110,12 +109,6 @@ export function GridDialog({ onClose }: { onClose: () => void }) {
               </label>
             </div>
 
-            <div className="hint">
-              Step defaults to the selection's own size ({bounds.width} × {bounds.height}), which
-              lays the cells edge to edge. The originals stay where they are and become the top-left
-              cell.
-            </div>
-
             <div className="section-title">Result</div>
             <div className="kv">
               <span>Objects</span>
@@ -129,12 +122,6 @@ export function GridDialog({ onClose }: { onClose: () => void }) {
                 {Math.abs(dx) * (cols - 1) + bounds.width} × {Math.abs(dy) * (rows - 1) + bounds.height} px
               </code>
             </div>
-            {selection[0].prefab && (
-              <div className="hint">
-                Every cell is another instance of {selection[0].prefab}, not a copy of it — editing
-                the prefab still reaches all of them.
-              </div>
-            )}
           </>
         )}
       </div>

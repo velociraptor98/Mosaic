@@ -6,7 +6,7 @@ import Phaser from "phaser";
 
 export class SpawnerBase extends Phaser.GameObjects.Sprite {
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "tiles", "368");
+    super(scene, x, y, "tiles", "15");
     scene.add.existing(this);
   }
 }

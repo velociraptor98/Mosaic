@@ -1,7 +1,8 @@
-import type { DevServerResult, PackageRequest, PackageResult } from "../../../electron/contract";
+import type { ClassShape, DevServerResult, PackageRequest, PackageResult } from "../../../electron/contract";
 import type {
   CreateResult,
   EditorOpen,
+  ExistingProject,
   InstallProgress,
   ScriptFileIpc,
   TargetCheck,
@@ -12,6 +13,7 @@ import type { AssetDef } from "../../shared/types";
 export type {
   CreateResult,
   EditorOpen,
+  ExistingProject,
   InstallProgress,
   TargetCheck,
   Toolchain,
@@ -78,6 +80,8 @@ export interface ProjectSource {
   assets: DiskAsset[];
   /** The folder already holds files that are not ours. */
   occupied: boolean;
+  /** A Phaser game Mosaic has never written to, as found on disk. */
+  existing?: ExistingProject | null;
 }
 
 export interface WriteOutcome {
@@ -135,6 +139,12 @@ export interface Platform {
    * for a folder the user has explicitly trusted.
    */
   recordScene(root: string, entry: string): Promise<SceneRecordingResult>;
+  /**
+   * Describes a scene class for wiring its layout in: its create() and
+   * preload(), and the lines in create() that make one object each. Null
+   * where the platform cannot read source.
+   */
+  analyzeClass(root: string, rel: string, cls: string): Promise<ClassShape | null>;
 
   // --- Running the game --------------------------------------------------
   /** True when this platform can start the project's own dev server. */

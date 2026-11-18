@@ -89,7 +89,7 @@ export interface Level_01Layout {
 /** Queues everything this scene's objects load. Call from preload(). */
 export function preloadLevel_01(scene: Phaser.Scene): void {
   scene.load.atlas("characters", "assets/characters.png", "assets/characters.atlas.json");
-  scene.load.atlas("tanks", "assets/tanks.png", "assets/tanks.atlas.json");
+  scene.load.atlas("effects", "assets/effects.png", "assets/effects.atlas.json");
   scene.load.spritesheet("tiles", "assets/tiles.png", { frameWidth: 64, frameHeight: 64, margin: 0, spacing: 0 });
   scene.load.image("weapon_machine", "assets/weapon_machine.png");
   scene.load.image("weapon_silencer", "assets/weapon_silencer.png");
@@ -105,14 +105,14 @@ export function preloadLevel_01(scene: Phaser.Scene): void {
 
 /** Builds the scene as authored and hands the objects back. Call from create(). */
 export function createLevel_01(scene: Phaser.Scene): Level_01Layout {
-  scene.cameras.main.setBackgroundColor("#3f8f4a");
+  scene.cameras.main.setBackgroundColor("#3f7a34");
   scene.physics.world.setBounds(0, 0, 2560, 1920);
 
   // animations — global in Phaser, so a second scene finds them already there
   if (!scene.anims.exists("survivor_reload")) {
     scene.anims.create({
       key: "survivor_reload",
-      frames: [{ key: "characters", frame: "survivor1_hold.png", duration: 90 }, { key: "characters", frame: "survivor1_reload.png", duration: 650 }, { key: "characters", frame: "survivor1_hold.png", duration: 90 }],
+      frames: [{ key: "characters", frame: "survivor_hold", duration: 90 }, { key: "characters", frame: "survivor_reload", duration: 650 }, { key: "characters", frame: "survivor_hold", duration: 90 }],
       frameRate: 10,
       repeat: 0,
     });
@@ -120,23 +120,23 @@ export function createLevel_01(scene: Phaser.Scene): Level_01Layout {
   if (!scene.anims.exists("zombie_walk")) {
     scene.anims.create({
       key: "zombie_walk",
-      frames: [{ key: "characters", frame: "zoimbie1_hold.png" }, { key: "characters", frame: "zoimbie1_stand.png" }],
-      frameRate: 3,
+      frames: [{ key: "characters", frame: "zombie_0" }, { key: "characters", frame: "zombie_1" }, { key: "characters", frame: "zombie_2" }, { key: "characters", frame: "zombie_3" }],
+      frameRate: 5,
       repeat: -1,
     });
   }
   if (!scene.anims.exists("robot_walk")) {
     scene.anims.create({
       key: "robot_walk",
-      frames: [{ key: "characters", frame: "robot1_hold.png" }, { key: "characters", frame: "robot1_stand.png" }],
-      frameRate: 2,
+      frames: [{ key: "characters", frame: "robot_0" }, { key: "characters", frame: "robot_1" }, { key: "characters", frame: "robot_2" }, { key: "characters", frame: "robot_3" }],
+      frameRate: 4,
       repeat: -1,
     });
   }
   if (!scene.anims.exists("explode")) {
     scene.anims.create({
       key: "explode",
-      frames: [{ key: "tanks", frame: "smokeYellow0.png" }, { key: "tanks", frame: "smokeYellow2.png" }, { key: "tanks", frame: "smokeOrange1.png" }, { key: "tanks", frame: "smokeOrange3.png" }, { key: "tanks", frame: "smokeGrey4.png" }, { key: "tanks", frame: "smokeGrey5.png" }],
+      frames: [{ key: "effects", frame: "blast_0" }, { key: "effects", frame: "blast_1" }, { key: "effects", frame: "blast_2" }, { key: "effects", frame: "blast_3" }, { key: "effects", frame: "blast_4" }, { key: "effects", frame: "blast_5" }],
       frameRate: 14,
       repeat: 0,
     });
@@ -192,31 +192,23 @@ export function createLevel_01(scene: Phaser.Scene): Level_01Layout {
   barrel_6.setName("Barrel 6").setDepth(3);
   const barrel_7 = new Barrel(scene, 1184, 480);
   barrel_7.setName("Barrel 7").setDepth(3);
-  const crate = scene.physics.add.sprite(1408, 544, "tiles", "128");
+  const crate = scene.physics.add.sprite(1408, 544, "tiles", "19");
   crate.setName("Crate").setDepth(3);
-  crate.setScale(0.75, 0.75);
-  const crate_2 = scene.physics.add.sprite(1456, 544, "tiles", "128");
+  const crate_2 = scene.physics.add.sprite(1456, 544, "tiles", "19");
   crate_2.setName("Crate 2").setDepth(3);
-  crate_2.setScale(0.75, 0.75);
-  const crate_3 = scene.physics.add.sprite(1504, 544, "tiles", "128");
+  const crate_3 = scene.physics.add.sprite(1504, 544, "tiles", "19");
   crate_3.setName("Crate 3").setDepth(3);
-  crate_3.setScale(0.75, 0.75);
-  const crate_4 = scene.physics.add.sprite(1568, 672, "tiles", "128");
+  const crate_4 = scene.physics.add.sprite(1568, 672, "tiles", "19");
   crate_4.setName("Crate 4").setDepth(3);
-  crate_4.setScale(0.75, 0.75);
-  const crate_4_2 = scene.physics.add.sprite(1616, 672, "tiles", "128");
+  const crate_4_2 = scene.physics.add.sprite(1616, 672, "tiles", "19");
   crate_4_2.setName("Crate 4 2").setDepth(3);
-  crate_4_2.setScale(0.75, 0.75);
-  const crate_4_3 = scene.physics.add.sprite(1568, 720, "tiles", "128");
+  const crate_4_3 = scene.physics.add.sprite(1568, 720, "tiles", "19");
   crate_4_3.setName("Crate 4 3").setDepth(3);
-  crate_4_3.setScale(0.75, 0.75);
-  const crate_4_4 = scene.physics.add.sprite(1616, 720, "tiles", "128");
+  const crate_4_4 = scene.physics.add.sprite(1616, 720, "tiles", "19");
   crate_4_4.setName("Crate 4 4").setDepth(3);
-  crate_4_4.setScale(0.75, 0.75);
-  const crate_5 = scene.physics.add.sprite(928, 1184, "tiles", "128");
+  const crate_5 = scene.physics.add.sprite(928, 1184, "tiles", "19");
   crate_5.setName("Crate 5").setDepth(3);
   crate_5.setAngle(20);
-  crate_5.setScale(0.75, 0.75);
   const spawnerNorth = new Spawner(scene, 1280, 96);
   spawnerNorth.setName("SpawnerNorth").setDepth(3);
   spawnerNorth.every = 2600;
@@ -282,36 +274,36 @@ export function createLevel_01(scene: Phaser.Scene): Level_01Layout {
 
   // bodies, after their groups: a group applies its own defaults
   // to every child it takes, and would overwrite these.
-  crate.body.setSize(52, 52, false);
-  crate.body.setOffset(6, 6);
+  crate.body.setSize(48, 48, false);
+  crate.body.setOffset(8, 8);
   crate.body.setImmovable(true);
   crate.body.setAllowGravity(false);
-  crate_2.body.setSize(52, 52, false);
-  crate_2.body.setOffset(6, 6);
+  crate_2.body.setSize(48, 48, false);
+  crate_2.body.setOffset(8, 8);
   crate_2.body.setImmovable(true);
   crate_2.body.setAllowGravity(false);
-  crate_3.body.setSize(52, 52, false);
-  crate_3.body.setOffset(6, 6);
+  crate_3.body.setSize(48, 48, false);
+  crate_3.body.setOffset(8, 8);
   crate_3.body.setImmovable(true);
   crate_3.body.setAllowGravity(false);
-  crate_4.body.setSize(52, 52, false);
-  crate_4.body.setOffset(6, 6);
+  crate_4.body.setSize(48, 48, false);
+  crate_4.body.setOffset(8, 8);
   crate_4.body.setImmovable(true);
   crate_4.body.setAllowGravity(false);
-  crate_4_2.body.setSize(52, 52, false);
-  crate_4_2.body.setOffset(6, 6);
+  crate_4_2.body.setSize(48, 48, false);
+  crate_4_2.body.setOffset(8, 8);
   crate_4_2.body.setImmovable(true);
   crate_4_2.body.setAllowGravity(false);
-  crate_4_3.body.setSize(52, 52, false);
-  crate_4_3.body.setOffset(6, 6);
+  crate_4_3.body.setSize(48, 48, false);
+  crate_4_3.body.setOffset(8, 8);
   crate_4_3.body.setImmovable(true);
   crate_4_3.body.setAllowGravity(false);
-  crate_4_4.body.setSize(52, 52, false);
-  crate_4_4.body.setOffset(6, 6);
+  crate_4_4.body.setSize(48, 48, false);
+  crate_4_4.body.setOffset(8, 8);
   crate_4_4.body.setImmovable(true);
   crate_4_4.body.setAllowGravity(false);
-  crate_5.body.setSize(52, 52, false);
-  crate_5.body.setOffset(6, 6);
+  crate_5.body.setSize(48, 48, false);
+  crate_5.body.setOffset(8, 8);
   crate_5.body.setImmovable(true);
   crate_5.body.setAllowGravity(false);
 

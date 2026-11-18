@@ -7,19 +7,19 @@
     "x": 0,
     "y": 0,
     "rotation": 0,
-    "scaleX": 1.6,
-    "scaleY": 1.6,
+    "scaleX": 1,
+    "scaleY": 1,
     "originX": 0.5,
     "originY": 0.5,
     "visible": true,
-    "texture": "tanks",
-    "frame": "smokeYellow0.png",
+    "texture": "effects",
+    "frame": "blast_0",
     "playOnSpawn": "explode",
     "sounds": {
       "spawn": "audio_explosion"
     },
     "data": {},
-    "lid": "nmwjcrwouc",
+    "lid": "nmwkujbf6c",
     "children": []
   }
 }

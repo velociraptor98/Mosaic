@@ -1,0 +1,6 @@
+{
+  "name": "phaser2-fixture",
+  "dependencies": {
+    "phaser": "^2.6.2"
+  }
+}

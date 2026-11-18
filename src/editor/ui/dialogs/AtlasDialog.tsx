@@ -81,7 +81,6 @@ export function AtlasDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog
       title="Atlas slicer"
-      subtitle="Frame boundaries are drawn over the real art before anything is written."
       onClose={onClose}
       wide
       footer={
@@ -203,11 +202,6 @@ export function AtlasDialog({ onClose }: { onClose: () => void }) {
               <input type="number" step={0.05} value={pivotY} onChange={(e) => setPivotY(Number(e.target.value))} />
             </label>
           </div>
-          <p className="hint">
-            The place tool and the body editor both read the pivot, so placement and collision
-            agree from the start.
-          </p>
-
           <div className="frame-names">
             {frames.slice(0, 60).map((f, i) => (
               <span key={i} className={`chip ${selected === i ? "on" : ""}`} onClick={() => setSelected(i)}>

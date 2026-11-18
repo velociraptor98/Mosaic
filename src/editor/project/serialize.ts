@@ -2,16 +2,18 @@ import { DEFAULT_GROUPS, LEGACY_OBJECT_TEXTURES } from "../../shared/definitions
 import {
   DEFAULT_CONFIG,
   DEFAULT_PATHS,
+  inDir,
   type AnimDef,
   type AssetDef,
   type PrefabDef,
   type ProjectConfig,
   type ProjectData,
+  type ProjectPaths,
   type SceneData,
 } from "../../shared/types";
 import { ensureLids, walkNodes } from "../../shared/prefabs";
 import { MAP_EXT, serializeTiledMap, tiledFromDataUrl, type TiledMap } from "../../shared/tiled";
-import type { DiskFile, ProjectSource } from "../platform/types";
+import type { DiskFile, ExistingProject, ProjectSource } from "../platform/types";
 import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset } from "../store/templates";
 
 /**
@@ -25,13 +27,15 @@ import { createStarterProject, placeholderObjectAssets, placeholderTilesetAsset 
 
 export const MANIFEST_PATH = "phaser.editor.json";
 export const CONFIG_PATH = "mosaic.config.json";
-export const scenePath = (key: string) => `src/scenes/${key}.scene.json`;
+export const scenePath = (key: string, paths: Pick<ProjectPaths, "scenes"> = DEFAULT_PATHS) =>
+  inDir(paths.scenes, `${key}.scene.json`);
 /**
  * A prefab is a file, not a row in the manifest. It has its own history, its
  * own diff and its own line in a review — which is the whole point of an
  * object being reusable across scenes several people are editing.
  */
-export const prefabPath = (name: string) => `src/prefabs/${name}.prefab.json`;
+export const prefabPath = (name: string, paths: Pick<ProjectPaths, "prefabs"> = DEFAULT_PATHS) =>
+  inDir(paths.prefabs, `${name}.prefab.json`);
 
 export interface ProjectManifest {
   name: string;
@@ -56,13 +60,17 @@ export interface ProjectManifest {
 export function toManifest(project: ProjectData): ProjectManifest {
   return {
     name: project.name,
-    scenes: project.scenes.map((s) => ({ key: s.key, name: s.name, file: scenePath(s.key) })),
+    scenes: project.scenes.map((s) => ({
+      key: s.key,
+      name: s.name,
+      file: scenePath(s.key, project.config.paths),
+    })),
     assets: project.assets.map(({ url: _url, ...rest }) => rest),
     // By name, the order they are read back in, so opening a project does
     // not rewrite this file just to reorder it.
     prefabs: [...project.prefabs]
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map((p) => ({ ...p, file: prefabPath(p.name) })),
+      .map((p) => ({ ...p, file: prefabPath(p.name, project.config.paths) })),
     anims: project.anims,
     groups: project.groups,
   };
@@ -75,11 +83,11 @@ export function projectToFiles(project: ProjectData): DiskFile[] {
     // them without wading through the editor's manifest.
     { rel: CONFIG_PATH, contents: serializeConfig(project.config) },
     ...project.scenes.map((scene) => ({
-      rel: scenePath(scene.key),
+      rel: scenePath(scene.key, project.config.paths),
       contents: JSON.stringify(scene, null, 2) + "\n",
     })),
     ...project.prefabs.map((prefab) => ({
-      rel: prefabPath(prefab.name),
+      rel: prefabPath(prefab.name, project.config.paths),
       contents: JSON.stringify(prefab, null, 2) + "\n",
     })),
     ...pendingTilemaps(project).map(({ asset, map }) => ({
@@ -117,6 +125,12 @@ export interface LoadResult {
    * worth putting on their disk unprompted.
    */
   deferWrite: boolean;
+  /**
+   * Set when the folder is a Phaser game Mosaic has never written to. The
+   * project comes back with no scenes: the game's own scene classes are what
+   * there is to lay out, and which one is the user's call.
+   */
+  adopt?: ExistingProject;
 }
 
 /**
@@ -127,8 +141,19 @@ export interface LoadResult {
  * nobody had made.
  */
 export function serializeConfig(config: ProjectConfig): string {
-  const { canvas, tile, scale, physics, pixelArt, language, paths, ...rest } = config;
-  const ordered = { canvas, tile, scale, physics, pixelArt, ...(language ? { language } : {}), paths, ...rest };
+  const { canvas, tile, scale, physics, pixelArt, placeholders, phaser, language, paths, ...rest } = config;
+  const ordered = {
+    canvas,
+    tile,
+    scale,
+    physics,
+    pixelArt,
+    ...(placeholders === false ? { placeholders } : {}),
+    ...(phaser === "global" ? { phaser } : {}),
+    ...(language ? { language } : {}),
+    paths,
+    ...rest,
+  };
   return JSON.stringify(ordered, null, 2) + "\n";
 }
 
@@ -146,12 +171,15 @@ function readConfig(contents: string | null | undefined, issues: string[]): Proj
     scale: parsed.scale ?? DEFAULT_CONFIG.scale,
     physics: parsed.physics ?? DEFAULT_CONFIG.physics,
     pixelArt: parsed.pixelArt ?? DEFAULT_CONFIG.pixelArt,
+    ...(parsed.placeholders === false ? { placeholders: false } : {}),
+    ...(parsed.phaser === "global" ? { phaser: "global" as const } : {}),
     ...(parsed.language === "ts" || parsed.language === "js" ? { language: parsed.language } : {}),
     paths: {
       src: parsed.paths?.src ?? DEFAULT_PATHS.src,
       scenes: parsed.paths?.scenes ?? DEFAULT_PATHS.scenes,
       prefabs: parsed.paths?.prefabs ?? DEFAULT_PATHS.prefabs,
       assets: parsed.paths?.assets ?? DEFAULT_PATHS.assets,
+      ...(parsed.paths?.publicDir ? { publicDir: parsed.paths.publicDir } : {}),
     },
   };
 }
@@ -196,6 +224,38 @@ export function projectFromSource(
     scenes.push(parsed);
   }
 
+  // Somebody's Phaser game. It is opened as itself: its art where it keeps
+  // it, its canvas size, and none of Mosaic's starter content — no sample
+  // scene, no Player and Pickup prefabs, no genre-named groups. Nothing is
+  // written until a scene is picked to lay out. (A Phaser 2 game never gets
+  // here: the workspace refuses it before reading.)
+  if (!manifest && !scenes.length && source.existing) {
+    const existing = source.existing;
+    const config = structuredClone(DEFAULT_CONFIG);
+    config.paths = { ...config.paths, ...existing.paths };
+    if (existing.canvas) config.canvas = { ...existing.canvas };
+    // Its own settings, not Mosaic's defaults: a layout that sets up Arcade in
+    // a game without it throws, and pixel-art rendering is a look the game
+    // either chose or did not.
+    config.physics = existing.physics;
+    config.pixelArt = existing.pixelArt;
+    config.language = existing.language;
+    if (existing.phaserAccess === "global") config.phaser = "global";
+    // Its art is its own. Mosaic's placeholder shapes exist as files only in
+    // projects Mosaic scaffolded, so they are not offered here at all.
+    config.placeholders = false;
+    const project: ProjectData = {
+      name: folderName,
+      config,
+      scenes: [],
+      prefabs: [],
+      anims: [],
+      groups: [],
+      assets: reconcileAssets([], source.assets, assetUrl, issues, config.paths.assets, false),
+    };
+    return { project, issues, scaffolded: false, deferWrite: true, adopt: existing };
+  }
+
   // Nothing recognisable: scaffold a starter so a brand-new folder is usable.
   if (!manifest && !scenes.length) {
     const starter = createStarterProject();
@@ -206,7 +266,7 @@ export function projectFromSource(
     // here rather than returning early also keeps the scaffold's own save
     // honest: the manifest it writes lists what is actually on disk, so the
     // first open and every later one agree.
-    starter.assets = reconcileAssets(starter.assets, source.assets, assetUrl, issues);
+    starter.assets = reconcileAssets(starter.assets, source.assets, assetUrl, issues, starter.config.paths.assets, true);
 
     // An EMPTY folder is an invitation: scaffold into it and write, so what is
     // on disk matches what the editor shows. A folder that already holds
@@ -226,15 +286,25 @@ export function projectFromSource(
     return { project: starter, issues, scaffolded: true, deferWrite: false };
   }
 
-  const assets = reconcileAssets(manifest?.assets ?? [], source.assets, assetUrl, issues);
+  const config = readConfig(source.config, issues);
+  const assets = reconcileAssets(
+    manifest?.assets ?? [],
+    source.assets,
+    assetUrl,
+    issues,
+    config.paths.assets,
+    config.placeholders !== false,
+  );
 
   const project: ProjectData = {
     name: manifest?.name ?? folderName,
-    config: readConfig(source.config, issues),
+    config,
     scenes: scenes.length ? scenes : createStarterProject().scenes,
-    prefabs: readPrefabs(source.prefabs, manifest, issues),
+    prefabs: readPrefabs(source.prefabs, manifest, issues, config.paths),
     anims: manifest?.anims ?? [],
-    groups: manifest?.groups?.length ? manifest.groups : [...DEFAULT_GROUPS],
+    // An empty list is a choice — an adopted game starts with none — so only
+    // a manifest that never had the field gets the defaults.
+    groups: manifest?.groups ? manifest.groups : [...DEFAULT_GROUPS],
     assets,
   };
 
@@ -369,6 +439,7 @@ function readPrefabs(
   files: DiskFile[],
   manifest: ProjectManifest | null,
   issues: string[],
+  paths: ProjectPaths,
 ): PrefabDef[] {
   const out: PrefabDef[] = [];
   const seen = new Set<string>();
@@ -391,7 +462,7 @@ function readPrefabs(
     if (entry.root) ensureLids(entry.root);
     entry.exposed = entry.exposed ?? [];
     issues.push(
-      `Prefab "${entry.name}" was read from the manifest rather than its own file — saving writes ${prefabPath(entry.name)}`,
+      `Prefab "${entry.name}" was read from the manifest rather than its own file — saving writes ${prefabPath(entry.name, paths)}`,
     );
     out.push(entry);
   }
@@ -409,6 +480,8 @@ function reconcileAssets(
   onDisk: { rel: string; bytes: number }[],
   assetUrl: (rel: string) => string,
   issues: string[],
+  assetDir: string,
+  placeholders: boolean,
 ): AssetDef[] {
   const diskByPath = new Map(onDisk.map((a) => [a.rel, a]));
   const out: AssetDef[] = [];
@@ -437,7 +510,11 @@ function reconcileAssets(
     // Tiled maps and atlas documents are read by content, not guessed at by
     // name — the workspace does that once it can open the files.
     if (MAP_EXT.test(file.rel)) continue;
-    const base = file.rel.replace(/^assets\//, "").replace(/\.\w+$/, "").replace(/[^\w]+/g, "_");
+    // Named from inside the art folder, so `public/assets/star.png` is `star`
+    // — the key a game's own code most likely loads it by — and not
+    // `public_assets_star`.
+    const inside = file.rel.startsWith(`${assetDir}/`) ? file.rel.slice(assetDir.length + 1) : file.rel;
+    const base = inside.replace(/\.\w+$/, "").replace(/[^\w]+/g, "_");
     let key = base || "asset";
     let n = 2;
     while (keys.has(key)) key = `${base}_${n++}`;
@@ -454,7 +531,7 @@ function reconcileAssets(
   }
 
   // A folder written by an older build may predate the placeholder assets.
-  if (!out.some((a) => a.generated)) {
+  if (placeholders && !out.some((a) => a.generated)) {
     out.unshift(placeholderTilesetAsset(), ...placeholderObjectAssets());
   }
   return out;

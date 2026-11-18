@@ -8,10 +8,10 @@ export class PlayerBase extends Phaser.Physics.Arcade.Sprite {
   declare body: Phaser.Physics.Arcade.Body;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, "characters", "survivor1_gun.png");
+    super(scene, x, y, "characters", "survivor_pistol");
     scene.add.existing(this);
     scene.physics.add.existing(this);
-    this.setOrigin(0.3333333333333333, 0.5);
+    this.setOrigin(0.325, 0.5);
     this.applyBody();
   }
 
@@ -22,7 +22,7 @@ export class PlayerBase extends Phaser.Physics.Arcade.Sprite {
    */
   applyBody(): this {
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(15, 2, 6.5);
+    body.setCircle(16, 10, 12);
     body.setImmovable(false);
     body.setAllowGravity(false);
     body.setBounce(0, 0);

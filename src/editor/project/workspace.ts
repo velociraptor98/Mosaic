@@ -1,7 +1,9 @@
-import type { ProjectData } from "../../shared/types";
+import { isUnder, type ProjectData, type SceneData } from "../../shared/types";
 import {
   generateProjectFiles,
+  generateSceneLayout,
   prefabLayoutPath,
+  sceneClassPath,
   sceneLayoutPath,
   type GeneratedFile,
   type Language,
@@ -14,8 +16,30 @@ import { ScriptRegistry } from "../scripts/registry";
 import { SCRIPT_EXT } from "../../shared/scripts";
 import type { ProjectStore } from "../store/project";
 import { MAP_EXT, describeTiledMap, parseTiledMap, type TiledMap } from "../../shared/tiled";
-import { uid, uniqueKey } from "../store/ids";
+import { uid, uniqueKey, uniqueName } from "../store/ids";
+import type { AddCall, ClassShape } from "../../../electron/contract";
+import { nameFromCode, planTakeover, rewriteClass, type Takeover } from "./wireClass";
 import { migratePaintedTileLayers } from "./tiledMigration";
+import {
+  adoptedDirs,
+  refusal,
+  sceneClasses,
+  unlaidScenes,
+  wiringFor,
+  type GameScene,
+  type Wiring,
+} from "./adopt";
+import type { ExistingProject } from "../platform/types";
+import {
+  applyImport,
+  localArt,
+  previewScene,
+  surveyProject,
+  writeImportedArt,
+  type ImportSurvey,
+} from "../import/importPhaser";
+import type { ImportResult } from "../import/fromRecording";
+import { createSceneFromTemplate } from "../store/templates";
 import {
   CONFIG_PATH,
   MANIFEST_PATH,
@@ -61,6 +85,17 @@ async function measureAssets(project: ProjectData): Promise<void> {
  * platform reports `canOpenProjects: false` and the store keeps persisting to
  * localStorage exactly as before.
  */
+/** One class on its way to being wired, between reading it and writing it. */
+interface PendingWire {
+  cls: GameScene;
+  preview: ImportResult | null;
+  shape: ClassShape | null;
+  taken: Map<string, AddCall>;
+  left: Takeover["left"];
+  /** Why the class will not be edited, when it will not. */
+  why?: string;
+}
+
 export class Workspace {
   location: ProjectLocation | null = null;
   git: Record<string, string> = {};
@@ -119,6 +154,31 @@ export class Workspace {
    * use.
    */
   deferredWrite = false;
+
+  /**
+   * Set while the folder is a Phaser game Mosaic has opened but not yet laid
+   * out a scene of: what was found on disk. The shell shows the game's scene
+   * classes instead of the editor until one is picked.
+   */
+  adoption: ExistingProject | null = null;
+
+  /**
+   * The lines a class needs to pick up the layout just made for it. Shown
+   * once, right after the layout is written, because that is the one moment
+   * the user is looking at it.
+   */
+  wiring: Wiring[] | null = null;
+  /** What an import of the whole game could not bring across, shown with the wiring. */
+  wiringNotes: string[] = [];
+  /**
+   * Set from the first scene added to an adopted game until it is saved.
+   *
+   * Laying out writes art into the folder before the project itself is
+   * saved, and the watcher reports that art like any outside edit. A reload
+   * then re-read a folder with no manifest in it yet — an adopted game with
+   * nothing laid out — and dropped every scene the import had just made.
+   */
+  private adopting = false;
 
   private store: ProjectStore;
   private stopWatch: (() => void) | null = null;
@@ -193,9 +253,15 @@ export class Workspace {
       this.store.setStatus(`Could not read ${location.root}`);
       return false;
     }
+    // Before anything is loaded, so a refused folder leaves whatever was open
+    // still open.
+    const refused = refusal(source.existing);
+    if (refused) throw new Error(refused);
 
-    const { project, issues, scaffolded, deferWrite } = projectFromSource(source, location.name, (rel) =>
-      platform.assetUrl(location.root, rel),
+    const { project, issues, scaffolded, deferWrite, adopt } = projectFromSource(
+      source,
+      location.name,
+      (rel) => platform.assetUrl(location.root, rel),
     );
     await measureAssets(project);
     const maps = await this.readTilemaps(location.root, project, source.assets);
@@ -216,6 +282,8 @@ export class Workspace {
     // scaffold's save is not enough on its own: the persister fires on the
     // very first edit, and the folder fills up anyway.
     this.deferredWrite = deferWrite;
+    this.adoption = adopt ?? null;
+    this.wiring = null;
     if (!deferWrite) {
       this.store.setPersister((next) => this.scheduleSave(next));
       // A folder with nothing in it gets its scaffold written immediately, so
@@ -227,7 +295,9 @@ export class Workspace {
 
     // The index is built in the background: the scene is on screen either
     // way, and a project with hundreds of source files should not hold it up.
-    void this.scripts.load(location.root);
+    // An adopted game has no scene on screen yet — its scene classes ARE the
+    // screen — so the shell is told when they arrive.
+    void this.scripts.load(location.root).then(() => this.emit());
     void this.detectGameEntries(location.root);
 
     this.startWatching();
@@ -235,9 +305,11 @@ export class Workspace {
     void platform.remember(location);
     platform.setWindowTitle(`${project.name} — Mosaic`);
     this.store.setStatus(
-      issues.length
-        ? `Opened ${location.name} with ${issues.length} issue(s)`
-        : `Opened ${location.name}`,
+      adopt
+        ? `Opened ${location.name}`
+        : issues.length
+          ? `Opened ${location.name} with ${issues.length} issue(s)`
+          : `Opened ${location.name}`,
     );
     this.emit();
     return true;
@@ -248,10 +320,13 @@ export class Workspace {
     this.stopWatch?.();
     this.stopWatch = null;
     this.location = null;
+    this.adopting = false;
     this.git = {};
     this.issues = [];
     this.scripts.clear();
     this.gameEntries = [];
+    this.adoption = null;
+    this.wiring = null;
     this.settled.clear();
     this.selfWrites.clear();
     this.owned.clear();
@@ -268,6 +343,345 @@ export class Workspace {
     const found = await platform.findGameEntries(root).catch(() => []);
     if (this.location?.root !== root) return;
     this.gameEntries = found;
+    this.emit();
+  }
+
+  // ------------------------------------------------------------ adopting
+
+  /** The game's own scene classes, from the script index. */
+  get gameScenes(): GameScene[] {
+    return sceneClasses(this.scripts.index, this.scripts.sources);
+  }
+
+  /** The game's scene classes that have no layout yet. */
+  get unlaidScenes(): GameScene[] {
+    return unlaidScenes(this.store.project, this.gameScenes);
+  }
+
+  /**
+   * Gives every scene class of the game a layout, in one go.
+   *
+   * The game is run once (the recorder visits every scene it registers) and
+   * each class's layout starts from what its create() built. A class the
+   * recording has nothing for — it never started, or built nothing — still
+   * gets a layout, empty, so the result is always one layout per scene. A game
+   * that cannot be run at all gets empty layouts and the reason.
+   *
+   * Running the game is the caller's to consent to; this refuses without it.
+   */
+  async importAll(opts: { wire?: boolean } = {}): Promise<{ imported: number; empty: number; notes: string[] } | null> {
+    if (!this.location) return null;
+    const root = this.location.root;
+    const project = this.store.project;
+    const scenes = this.unlaidScenes;
+    if (!scenes.length) return { imported: 0, empty: 0, notes: [] };
+
+    // Every file that starts a game, best first, until one of them runs.
+    const entries = this.adoption?.entries.length
+      ? this.adoption.entries
+      : await platform.findGameEntries(root).catch(() => [] as string[]);
+    const notes: string[] = [];
+    let survey: ImportSurvey | null = null;
+    for (const entry of entries) {
+      try {
+        const result = await surveyProject(root, entry, this.scripts, localArt(project));
+        if (result.candidates.length) {
+          survey = result;
+          break;
+        }
+        notes.push(`${entry} ran, but no scene built anything.`);
+      } catch (err) {
+        notes.push(`${entry}: ${(err as Error).message}`);
+      }
+    }
+    if (!entries.length) notes.push("Nothing in this folder constructs a Phaser.Game, so there was nothing to run.");
+
+    const first = this.beginAdopting();
+    try {
+      return await this.importScenes(root, project, scenes, survey, notes, first, !!opts.wire);
+    } finally {
+      this.adopting = false;
+    }
+  }
+
+  private async importScenes(
+    root: string,
+    project: ProjectData,
+    scenes: GameScene[],
+    survey: ImportSurvey | null,
+    notes: string[],
+    first: boolean,
+    wire: boolean,
+  ): Promise<{ imported: number; empty: number; notes: string[] }> {
+    const background = this.adoption?.backgroundColor ?? "#000000";
+    const previews: ImportResult[] = [];
+    const said = new Set<string>();
+    const duplicates = new Map<string, string[]>();
+    let empty = 0;
+
+    // Each class's import, and — when the user allowed edits — what its code
+    // looks like, so the layout keeps only what the class can stop making.
+    const pending: PendingWire[] = [];
+    for (const cls of scenes) {
+      const candidate =
+        survey?.candidates.find((c) => c.className === cls.name) ??
+        survey?.candidates.find((c) => c.key === (cls.key ?? cls.name));
+      const preview = survey && candidate ? previewScene(survey, candidate.key) : null;
+      // Named after the class, whatever key it registers under: the layout
+      // sits beside the class and is imported by it.
+      if (preview) preview.scene.key = cls.name;
+      const p: PendingWire = { cls, preview, shape: null, taken: new Map(), left: [] };
+      if (wire) await this.planClassEdit(root, p);
+      pending.push(p);
+    }
+
+    this.store.transact(`Import ${scenes.length} scene(s)`, () => {
+      for (const { cls, preview, shape } of pending) {
+        if (preview) {
+          // A note about the game's loads is the same for every scene, because
+          // the loader is the game's; it is said once, against the first scene.
+          for (const note of applyImport(project, preview)) {
+            if (said.has(note)) continue;
+            said.add(note);
+            notes.push(`${cls.name}: ${note}`);
+          }
+          previews.push(preview);
+          if (!shape) duplicates.set(cls.name, describeObjects(preview));
+        } else {
+          project.scenes.push(this.emptyScene(cls.name, background));
+          empty += 1;
+        }
+      }
+    });
+
+    // The art lands before the save, so the canvas has something to draw. One
+    // texture is captured once however many scenes use it.
+    const files = new Map<string, ImportResult["files"][number]>();
+    for (const preview of previews) for (const file of preview.files) files.set(file.rel, file);
+    if (files.size) {
+      const merged: ImportResult = { ...previews[0], files: [...files.values()] };
+      notes.push(...(await writeImportedArt(root, merged, project)));
+    }
+
+    // Open on the scene with the most in it: that is the game, not its Boot.
+    const biggest = [...project.scenes].sort((a, b) => b.objects.length - a.objects.length)[0];
+    if (biggest) this.store.activateScene(biggest.key);
+
+    this.wiringNotes = notes;
+    const edits = pending.filter((p) => p.shape || p.why);
+    const wirings = await this.finishAdopting(scenes, first, duplicates, wire ? edits : undefined);
+    const changed = wirings?.filter((w) => w.applied).length ?? 0;
+    this.store.setStatus(
+      `Imported ${scenes.length - empty} scene(s)` +
+        (empty ? `, ${empty} empty` : "") +
+        (wire ? ` · updated ${changed} of ${scenes.length} class(es)` : ""),
+    );
+    return { imported: scenes.length - empty, empty, notes };
+  }
+
+  /**
+   * Reads a class the user allowed Mosaic to edit, and trims its imported
+   * layout to the objects the class can stop making: the layout and the code
+   * must never both make the same thing.
+   */
+  private async planClassEdit(root: string, p: PendingWire): Promise<void> {
+    const shape = await platform.analyzeClass(root, p.cls.src, p.cls.name).catch(() => null);
+    if (!shape) {
+      p.why = "could not be read";
+      return;
+    }
+    if (!shape.ok) {
+      p.why = shape.reason ?? "could not be read";
+      return;
+    }
+    if (!shape.module) {
+      p.why = "is not an ES module, so it cannot import its layout";
+      return;
+    }
+    if (shape.source.includes(`${p.cls.name}.layout`)) {
+      p.why = "already imports its layout";
+      return;
+    }
+    p.shape = shape;
+    const preview = p.preview;
+    if (!preview) return;
+    const plan = planTakeover(shape, preview.scene, preview.sites);
+    p.taken = plan.taken;
+    p.left = plan.left;
+    preview.scene.objects = preview.scene.objects.filter((o) => plan.taken.has(o.id));
+    // Named as the code knew them, so the class reads `layout.sign`, not `layout.image2`.
+    const names: string[] = [];
+    for (const o of preview.scene.objects) {
+      const better = nameFromCode(o, plan.taken.get(o.id)!);
+      o.name = uniqueName(better ?? o.name, names);
+      names.push(o.name);
+    }
+    preview.prefabs = preview.prefabs.filter((pf) => preview.scene.objects.some((o) => o.prefab === pf.name));
+    // Animations are the code's too: the recording saw them because the game
+    // registers them. A layout registering them again, in whichever scene
+    // runs first, gets in before the atlas they point at has loaded, and the
+    // game's own registration is then skipped as a duplicate.
+    preview.anims = [];
+    // A `.play()` the code chains on stays in the code, which still runs it.
+    for (const o of preview.scene.objects) delete o.playOnSpawn;
+  }
+
+  /**
+   * Writes the lines each class needs into it — only ever after the user
+   * agreed, and only for an adopted game. Runs after the layouts are saved,
+   * because the field names a class reads are the ones the layout was
+   * generated with.
+   */
+  private async wireClasses(edits: PendingWire[]): Promise<Map<string, Pick<Wiring, "applied" | "failed">>> {
+    const out = new Map<string, Pick<Wiring, "applied" | "failed">>();
+    if (!this.location) return out;
+    const project = this.store.project;
+    const writes: DiskFile[] = [];
+    for (const p of edits) {
+      const scene = project.scenes.find((s) => s.key === p.cls.name);
+      if (!p.shape || !scene) {
+        out.set(p.cls.name, { failed: p.why ?? "could not be read" });
+        continue;
+      }
+      const fields = new Map<string, string>();
+      generateSceneLayout(project, scene, { language: this.language, fieldNames: fields });
+      const base = wiringFor(project, p.cls, this.language, undefined);
+      const uses = [...p.taken]
+        .map(([id, call]) => ({ id, call, field: fields.get(id) }))
+        .filter((u): u is { id: string; call: AddCall; field: string } => !!u.field);
+      const result = rewriteClass(p.shape, {
+        cls: p.cls.name,
+        importLine: base.importLine,
+        preloadCall: `preload${p.cls.name}(this)`,
+        createCall: `create${p.cls.name}(this)`,
+        uses,
+      });
+      if ("reason" in result) {
+        out.set(p.cls.name, { failed: result.reason });
+        continue;
+      }
+      writes.push({ rel: p.cls.src, contents: result.source });
+      out.set(p.cls.name, {
+        applied: {
+          taken: uses.map((u) => `${u.field} — line ${u.call.line}`),
+          left: p.left.map(({ name, why }) => ({ name, why })),
+        },
+      });
+    }
+    if (writes.length) {
+      for (const file of writes) {
+        const seen = this.selfWrites.get(file.rel) ?? [];
+        this.selfWrites.set(file.rel, [file.contents, ...seen].slice(0, 4));
+      }
+      const result = await platform.writeFiles(this.location.root, writes);
+      for (const failure of result.failed) out.set(
+        edits.find((p) => p.cls.src === failure.rel)?.cls.name ?? failure.rel,
+        { failed: `could not be written: ${failure.error}` },
+      );
+      await this.scripts.refresh(writes.map((w) => w.rel));
+    }
+    return out;
+  }
+
+  /**
+   * Gives one of the game's scene classes an empty layout.
+   *
+   * Writes the scene's data and its layout beside the class — never the class
+   * itself — and hands back the two lines the class needs. The first one is
+   * also the moment an adopted folder becomes a Mosaic project, so it is
+   * saved as any explicit save is.
+   */
+  async layOut(scene: GameScene): Promise<Wiring[] | null> {
+    if (!this.location) return null;
+    const project = this.store.project;
+    if (project.scenes.some((s) => s.key === scene.name)) {
+      this.store.setStatus(`${scene.name} already has a layout`);
+      return null;
+    }
+    const background = this.adoption?.backgroundColor ?? this.backgroundOf(project);
+    const first = this.beginAdopting();
+    this.store.transact(`Lay out ${scene.name}`, () => {
+      project.scenes.push(this.emptyScene(scene.name, background));
+    });
+    this.store.activateScene(scene.name);
+    return this.finishAdopting([scene], first);
+  }
+
+  /**
+   * An empty scene for one of the game's classes, in the game's own colours:
+   * the layout sets the camera background, and Mosaic's editor grey would
+   * repaint a scene the moment it is wired.
+   */
+  private emptyScene(name: string, background: string): SceneData {
+    const { scene } = createSceneFromTemplate(name, name, "empty", this.store.project.config);
+    scene.settings.backgroundColor = background;
+    return scene;
+  }
+
+  /** The background the project's scenes already agree on, else black — Phaser's own. */
+  private backgroundOf(project: ProjectData): string {
+    return project.scenes[0]?.settings.backgroundColor ?? "#000000";
+  }
+
+  /**
+   * Called before the first scene is added to an adopted game. Decides where
+   * the scene data and layouts go — the folder the scene classes are already
+   * in — now rather than on open, because the index has had time to arrive
+   * and this is the save that writes the config saying so. True when this is
+   * that first scene.
+   */
+  beginAdopting(): boolean {
+    this.adopting = true;
+    const project = this.store.project;
+    if (project.scenes.length) return false;
+    const dirs = adoptedDirs(this.gameScenes);
+    if (dirs) project.config.paths = { ...project.config.paths, ...dirs };
+    return true;
+  }
+
+  /**
+   * After scenes have been added for classes — empty, or imported from what
+   * the classes build — save, and say how to wire each.
+   */
+  async finishAdopting(
+    scenes: GameScene[],
+    first: boolean,
+    duplicates?: Map<string, string[]>,
+    edits?: PendingWire[],
+  ): Promise<Wiring[] | null> {
+    if (!this.location) return null;
+    let wired = new Map<string, Pick<Wiring, "applied" | "failed">>();
+    try {
+      await this.saveNow();
+      // Still inside the adoption, so the watcher does not read the class
+      // edits as somebody else's.
+      if (edits?.length) wired = await this.wireClasses(edits);
+    } finally {
+      this.adopting = false;
+    }
+    if (first) {
+      this.adoption = null;
+      // The watcher was started against Mosaic's default folders, because
+      // the folder had no config then. It has one now.
+      this.stopWatch?.();
+      this.startWatching();
+    }
+    this.wiring = scenes.map((scene) => {
+      const dupes = duplicates?.get(scene.name);
+      const done = wired.get(scene.name);
+      return {
+        ...wiringFor(this.store.project, scene, this.language, this.scripts.sources.get(scene.src)),
+        ...(dupes?.length && !done?.applied ? { duplicates: dupes } : {}),
+        ...done,
+      };
+    });
+    this.emit();
+    return this.wiring;
+  }
+
+  dismissWiring(): void {
+    this.wiring = null;
+    this.wiringNotes = [];
     this.emit();
   }
 
@@ -388,14 +802,17 @@ export class Workspace {
     if (created.length) {
       // A scene class is only half-made until the game knows about it, and
       // the game's scene list is a file Mosaic does not write to.
-      const scene = created.find((rel) => rel.startsWith("src/scenes/"));
+      const classes = new Set(
+        project.scenes.map((s) => sceneClassPath(s.key, this.language, project.config.paths)),
+      );
+      const scene = created.find((rel) => classes.has(rel));
       const cls = scene?.split("/").pop()!.replace(/\.(ts|js)$/, "");
       this.store.setStatus(
         scene && this.lastSavedAt
-          ? `Wrote ${scene} — yours from here on. Add ${cls} to your game's scene list to run it.`
+          ? `Wrote ${scene}. Add ${cls} to your game's scene list to run it.`
           : created.length === 1
-            ? `Wrote ${created[0]} — yours from here on`
-            : `Wrote ${created.length} starter files — yours from here on`,
+            ? `Wrote ${created[0]}`
+            : `Wrote ${created.length} starter files`,
       );
     }
     return out;
@@ -490,13 +907,14 @@ export class Workspace {
   /** Scene and prefab data, plus the layout generated from each. */
   private ownedPaths(project: ProjectData): Set<string> {
     const out = new Set<string>();
+    const paths = project.config.paths;
     for (const scene of project.scenes) {
-      out.add(scenePath(scene.key));
-      out.add(sceneLayoutPath(scene.key, this.language));
+      out.add(scenePath(scene.key, paths));
+      out.add(sceneLayoutPath(scene.key, this.language, paths));
     }
     for (const prefab of project.prefabs) {
-      out.add(prefabPath(prefab.name));
-      out.add(prefabLayoutPath(prefab.name, this.language));
+      out.add(prefabPath(prefab.name, paths));
+      out.add(prefabLayoutPath(prefab.name, this.language, paths));
     }
     return out;
   }
@@ -540,7 +958,7 @@ export class Workspace {
     // Only scenes, and only a class that IS a scene: a prefab called Brick
     // and a script component called Brick are two different things that
     // happen to share the obvious name.
-    if (!file.path.startsWith("src/scenes/")) return false;
+    if (!isUnder(this.store.project.config.paths.scenes, file.path)) return false;
     return this.scripts.index.classes.some(
       (c) =>
         c.name === stem &&
@@ -572,7 +990,8 @@ export class Workspace {
    * first: a save fires the same watcher events an external edit does.
    */
   private async onExternalChange(changes: ProjectChange[]): Promise<void> {
-    if (!this.location) return;
+    // Everything that lands while a game is being adopted is the adoption's own.
+    if (!this.location || this.adopting) return;
     const root = this.location.root;
 
     const external: ProjectChange[] = [];
@@ -590,7 +1009,7 @@ export class Workspace {
       this.selfWrites.delete(change.rel);
       external.push(change);
     }
-    if (!external.length) return;
+    if (!external.length || this.adopting) return;
 
     const touchedProject = external.some(
       (c) =>
@@ -599,7 +1018,8 @@ export class Workspace {
         c.rel.endsWith(".scene.json") ||
         c.rel.endsWith(".prefab.json"),
     );
-    const touchedAssets = external.some((c) => c.rel.startsWith("assets/"));
+    const assetDir = this.store.project.config.paths.assets;
+    const touchedAssets = external.some((c) => isUnder(assetDir, c.rel) && !SCRIPT_EXT.test(c.rel));
 
     // Source edits re-index and refresh the inspector's field list in place.
     // They never reload the scene: the class says what a script exposes, the
@@ -619,13 +1039,13 @@ export class Workspace {
         if (change.rel.endsWith(".scene.json")) this.conflicts.add(change.rel);
       }
       this.store.setStatus(
-        `${external[0].rel} changed on disk — save or undo your edits, then reopen the project to pick it up`,
+        `${external[0].rel} changed on disk — save or undo your edits, then reopen`,
       );
       this.emit();
       return;
     }
 
-    const assetChanges = external.filter((c) => c.rel.startsWith("assets/"));
+    const assetChanges = external.filter((c) => isUnder(assetDir, c.rel) && !SCRIPT_EXT.test(c.rel));
     const onlyMaps = assetChanges.length > 0 && assetChanges.every((c) => MAP_EXT.test(c.rel));
 
     if (touchedProject) {
@@ -649,7 +1069,9 @@ export class Workspace {
    * propagation panel asks this before it plans a push.
    */
   writeBlockedReason = (sceneKey: string): string | null => {
-    return this.conflicts.has(scenePath(sceneKey)) ? "changed on disk since load" : null;
+    return this.conflicts.has(scenePath(sceneKey, this.store.project.config.paths))
+      ? "changed on disk since load"
+      : null;
   };
 
   /** Re-read the folder without touching the watcher or window title. */
@@ -659,12 +1081,14 @@ export class Workspace {
     void this.scripts.load(this.location.root);
     const source = await platform.readProject(this.location.root);
     if (!source) return;
-    const { project, issues, deferWrite } = projectFromSource(source, this.location.name, (rel) =>
+    const { project, issues, deferWrite, adopt } = projectFromSource(source, this.location.name, (rel) =>
       platform.assetUrl(this.location!.root, rel),
     );
     await measureAssets(project);
     const maps = await this.readTilemaps(this.location.root, project, source.assets);
     const converted = migratePaintedTileLayers(project);
+    // A reload that started before an adoption began would land on top of it.
+    if (this.adopting) return;
     this.issues = [...issues, ...converted];
     const activeKey = this.store.activeSceneKey;
     // An open prefab is a document like a scene is, and reopening the folder
@@ -682,6 +1106,7 @@ export class Workspace {
     // somebody else's repo means autosave stays off, and re-installing it here
     // would undo the whole guard on the first external edit.
     this.deferredWrite = deferWrite;
+    this.adoption = adopt ?? null;
     if (!deferWrite) this.store.setPersister((next) => this.scheduleSave(next));
     this.emit();
   }
@@ -728,4 +1153,11 @@ function isUntouchedLegacy(source: string): boolean {
     if (body.length) return false;
   }
   return true;
+}
+
+/** One line per object an import placed, for the "create() still builds these" list. */
+function describeObjects(preview: ImportResult): string[] {
+  return preview.scene.objects.map(
+    (o) => `${o.name}${o.texture ? ` · ${o.texture}${o.frame ? `/${o.frame}` : ""}` : o.text ? ` · "${o.text.content}"` : ""}`,
+  );
 }
